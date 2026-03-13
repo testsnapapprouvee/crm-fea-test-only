@@ -11,7 +11,7 @@ from datetime import date, datetime, timedelta
 from typing import Optional
 import os
 
-DB_PATH = os.path.join(os.path.dirname(__file__), "crm_asset_management.db")
+DB_PATH = os.path.join(os.path.dirname(__file__), "crm_v3.db")
 
 _AUM_COLS           = ["target_aum_initial", "revised_aum", "funded_aum"]
 _TEXT_NULLABLE_COLS = ["raison_perte", "concurrent_choisi"]
