@@ -1,12 +1,11 @@
 # =============================================================================
-# app.py — CRM & Reporting Tool — Asset Management — Edition Enterprise
-# Charte Amundi : Marine #002D54 | Ciel #00A8E1
-# Staff Engineer refactoring :
-#   - Zero emoji
-#   - Master-Detail avec audit trail
-#   - Onglet Sales Tracking
-#   - Module Performance NAV securise
-#   - Export PDF avec perf_data
+# app.py — CRM & Reporting Tool — FEA/Amundi Edition Strategique
+# Charte Amundi : Marine #002D54 | Ciel #00A8E1 | Zero emoji
+# Missions :
+#   - Filtrage fund-by-fund via Sidebar Perimetre
+#   - Dashboard avec graphique AUM par Region
+#   - Module Performance robuste (matplotlib interactif via st.pyplot)
+#   - Export PDF filtre sur perimetre, avec page Performance optionnelle
 # Lancement : streamlit run app.py
 # =============================================================================
 
@@ -24,7 +23,7 @@ import database as db
 import pdf_generator as pdf_gen
 
 # ---------------------------------------------------------------------------
-# CONSTANTES CHARTE
+# CONSTANTES
 # ---------------------------------------------------------------------------
 C_MARINE    = "#002D54"
 C_CIEL      = "#00A8E1"
@@ -35,157 +34,131 @@ C_BLEU_PALE = "#7BC8E8"
 C_BLEU_DEEP = "#003F7A"
 
 TYPES_CLIENT      = ["IFA", "Wholesale", "Instit", "Family Office"]
-REGIONS           = ["GCC", "EMEA", "APAC", "Nordics",
-                     "Asia ex-Japan", "North America", "LatAm"]
-FONDS             = ["Global Value", "International Fund", "Income Builder",
-                     "Resilient Equity", "Private Debt", "Active ETFs"]
+REGIONS           = db.REGIONS_REFERENTIEL
+FONDS             = db.FONDS_REFERENTIEL
 STATUTS           = ["Prospect", "Initial Pitch", "Due Diligence",
                      "Soft Commit", "Funded", "Paused", "Lost", "Redeemed"]
 STATUTS_ACTIFS    = ["Prospect", "Initial Pitch", "Due Diligence", "Soft Commit"]
 RAISONS_PERTE     = ["Pricing", "Track Record", "Macro", "Competitor", "Autre"]
 TYPES_INTERACTION = ["Call", "Meeting", "Email", "Roadshow", "Conference", "Autre"]
-NAV_PALETTE       = [C_CIEL, C_MARINE, C_BLEU_MID, C_BLEU_PALE, C_BLEU_DEEP,
-                     "#5BA3C9", "#2C8FBF", "#004F8C", "#A8D8EE", "#003060"]
+
+NAV_PALETTE = [
+    C_CIEL, C_MARINE, C_BLEU_MID, C_BLEU_PALE, C_BLEU_DEEP,
+    "#5BA3C9", "#2C8FBF", "#004F8C", "#A8D8EE", "#003060",
+]
 
 
 # ---------------------------------------------------------------------------
 # CONFIG
 # ---------------------------------------------------------------------------
 st.set_page_config(
-    page_title="CRM Asset Management",
+    page_title="CRM — Asset Management",
     layout="wide",
     initial_sidebar_state="expanded",
 )
 
 
 # ---------------------------------------------------------------------------
-# CSS — CHARTE AMUNDI STRICTE, ZERO EMOJI
+# CSS — CHARTE STRICTE, ZERO EMOJI
 # ---------------------------------------------------------------------------
 st.markdown(f"""
 <style>
-    .stApp, .main .block-container {{
-        background-color: {C_BLANC};
-        color: {C_MARINE};
-        font-family: 'Segoe UI', Arial, sans-serif;
-    }}
-    [data-testid="stSidebar"] {{ background-color: {C_MARINE}; }}
-    [data-testid="stSidebar"] * {{ color: {C_BLANC} !important; }}
-    [data-testid="stSidebar"] h1, [data-testid="stSidebar"] h2,
-    [data-testid="stSidebar"] h3 {{ color: {C_CIEL} !important; }}
+  .stApp, .main .block-container {{
+      background-color:{C_BLANC}; color:{C_MARINE};
+      font-family:'Segoe UI', Arial, sans-serif;
+  }}
+  [data-testid="stSidebar"] {{ background-color:{C_MARINE}; }}
+  [data-testid="stSidebar"] * {{ color:{C_BLANC} !important; }}
+  [data-testid="stSidebar"] h1,[data-testid="stSidebar"] h2,
+  [data-testid="stSidebar"] h3 {{ color:{C_CIEL} !important; }}
+  [data-testid="stSidebar"] .stMultiSelect label {{ color:{C_BLANC} !important; }}
 
-    .crm-header {{
-        background: linear-gradient(135deg, {C_MARINE} 0%, #003D6B 100%);
-        color: {C_BLANC};
-        padding: 20px 26px;
-        border-radius: 8px;
-        margin-bottom: 18px;
-        border-left: 5px solid {C_CIEL};
-    }}
-    .crm-header h1 {{
-        color: {C_BLANC} !important; margin: 0;
-        font-size: 1.6rem; font-weight: 700; letter-spacing: -0.2px;
-    }}
-    .crm-header p {{
-        color: {C_CIEL}; margin: 3px 0 0 0; font-size: 0.84rem;
-    }}
+  .crm-header {{
+      background:linear-gradient(135deg,{C_MARINE} 0%,#003D6B 100%);
+      padding:18px 24px; border-radius:8px; margin-bottom:16px;
+      border-left:5px solid {C_CIEL};
+  }}
+  .crm-header h1 {{
+      color:{C_BLANC} !important; margin:0;
+      font-size:1.55rem; font-weight:700; letter-spacing:-0.2px;
+  }}
+  .crm-header p {{ color:{C_CIEL}; margin:3px 0 0 0; font-size:0.82rem; }}
 
-    .kpi-card {{
-        background: linear-gradient(135deg, {C_MARINE} 0%, #004070 100%);
-        padding: 16px 12px; border-radius: 8px; text-align: center;
-        border: 1px solid {C_CIEL}33;
-    }}
-    .kpi-label {{
-        font-size: 0.7rem; color: {C_CIEL}; text-transform: uppercase;
-        letter-spacing: 0.8px; margin-bottom: 7px; font-weight: 600;
-    }}
-    .kpi-value {{ font-size: 1.55rem; font-weight: 800; color: {C_BLANC}; }}
-    .kpi-sub   {{ font-size: 0.68rem; color: {C_GRIS}; margin-top: 3px; }}
+  .kpi-card {{
+      background:linear-gradient(135deg,{C_MARINE} 0%,#004070 100%);
+      padding:15px 11px; border-radius:8px; text-align:center;
+      border:1px solid {C_CIEL}33;
+  }}
+  .kpi-label {{
+      font-size:0.68rem; color:{C_CIEL}; text-transform:uppercase;
+      letter-spacing:0.8px; margin-bottom:6px; font-weight:600;
+  }}
+  .kpi-value {{ font-size:1.5rem; font-weight:800; color:{C_BLANC}; }}
+  .kpi-sub   {{ font-size:0.66rem; color:{C_GRIS}; margin-top:3px; }}
 
-    .section-title {{
-        font-size: 1.0rem; font-weight: 700; color: {C_MARINE};
-        border-bottom: 3px solid {C_CIEL}; padding-bottom: 5px;
-        margin: 16px 0 11px 0;
-    }}
-
-    /* Master-Detail */
-    .detail-panel {{
-        background: linear-gradient(135deg, #F0F6FC 0%, #E8F2FA 100%);
-        border: 1.5px solid {C_CIEL}55; border-radius: 10px;
-        padding: 20px 22px 16px 22px; margin-top: 16px;
-        box-shadow: 0 3px 16px {C_MARINE}0E;
-    }}
-
-    /* Pipeline hint */
-    .pipeline-hint {{
-        background: {C_CIEL}0F; border-left: 3px solid {C_CIEL};
-        border-radius: 0 5px 5px 0; padding: 7px 13px;
-        font-size: 0.81rem; color: {C_MARINE}; margin-bottom: 10px;
-    }}
-
-    /* Alertes overdue */
-    .alert-overdue {{
-        background: #FFF8E1; border-left: 4px solid {C_CIEL};
-        border-radius: 0 5px 5px 0; padding: 8px 13px; margin: 4px 0;
-        font-size: 0.81rem; color: {C_MARINE};
-    }}
-
-    /* Onglets */
-    .stTabs [data-baseweb="tab-list"] {{
-        background: {C_BLANC}; border-bottom: 2px solid {C_MARINE}18; gap: 3px;
-    }}
-    .stTabs [data-baseweb="tab"] {{
-        color: {C_MARINE}; font-weight: 600; font-size: 0.84rem;
-        padding: 9px 18px; border-radius: 5px 5px 0 0;
-        background: {C_MARINE}08;
-    }}
-    .stTabs [aria-selected="true"] {{
-        background: {C_MARINE} !important; color: {C_BLANC} !important;
-    }}
-
-    /* Boutons */
-    .stButton > button {{
-        background: {C_MARINE}; color: {C_BLANC}; border: none;
-        border-radius: 5px; font-weight: 600; padding: 7px 18px;
-        font-size: 0.85rem; transition: all 0.18s;
-    }}
-    .stButton > button:hover {{
-        background: {C_CIEL}; color: {C_BLANC};
-        box-shadow: 0 3px 10px {C_CIEL}44;
-    }}
-
-    /* Labels */
-    .stSelectbox label, .stTextInput label, .stNumberInput label,
-    .stDateInput label, .stTextArea label, .stRadio label {{
-        color: {C_MARINE} !important; font-weight: 600; font-size: 0.8rem;
-    }}
-
-    /* Sales tracking */
-    .sales-card {{
-        background: {C_BLANC}; border: 1px solid {C_MARINE}18;
-        border-radius: 8px; padding: 16px; border-top: 3px solid {C_CIEL};
-    }}
-    .sales-card-name {{
-        font-size: 0.95rem; font-weight: 700; color: {C_MARINE};
-        margin-bottom: 10px; padding-bottom: 6px;
-        border-bottom: 1px solid {C_GRIS};
-    }}
-    .sales-metric {{
-        font-size: 0.75rem; color: #666; margin-bottom: 2px;
-    }}
-    .sales-metric-val {{
-        font-size: 1.05rem; font-weight: 700; color: {C_MARINE};
-    }}
-    .sales-metric-ciel {{
-        font-size: 1.05rem; font-weight: 700; color: {C_CIEL};
-    }}
-
-    /* Perf table */
-    .perf-positive {{ color: {C_CIEL}; font-weight: 700; }}
-    .perf-negative {{ color: #8B2020; font-weight: 700; }}
-
-    h1, h2, h3, h4 {{ color: {C_MARINE} !important; }}
-    hr {{ border-color: {C_MARINE}15; }}
-    code {{ background: {C_MARINE}0A; color: {C_MARINE}; border-radius: 3px; }}
+  .section-title {{
+      font-size:0.98rem; font-weight:700; color:{C_MARINE};
+      border-bottom:3px solid {C_CIEL}; padding-bottom:5px;
+      margin:15px 0 10px 0;
+  }}
+  .perimetre-badge {{
+      display:inline-block; background:{C_CIEL}18; border:1px solid {C_CIEL}44;
+      border-radius:4px; padding:3px 9px; font-size:0.74rem;
+      color:{C_MARINE}; font-weight:600; margin:2px;
+  }}
+  .detail-panel {{
+      background:linear-gradient(135deg,#F0F6FC 0%,#E8F2FA 100%);
+      border:1.5px solid {C_CIEL}55; border-radius:10px;
+      padding:18px 20px 14px 20px; margin-top:14px;
+      box-shadow:0 3px 14px {C_MARINE}0C;
+  }}
+  .pipeline-hint {{
+      background:{C_CIEL}0E; border-left:3px solid {C_CIEL};
+      border-radius:0 5px 5px 0; padding:7px 12px;
+      font-size:0.79rem; color:{C_MARINE}; margin-bottom:9px;
+  }}
+  .alert-overdue {{
+      background:#FFF8E1; border-left:4px solid {C_CIEL};
+      border-radius:0 5px 5px 0; padding:7px 12px; margin:4px 0;
+      font-size:0.79rem; color:{C_MARINE};
+  }}
+  .sales-card {{
+      background:{C_BLANC}; border:1px solid {C_MARINE}15;
+      border-radius:8px; padding:15px; border-top:3px solid {C_CIEL};
+  }}
+  .sales-card-name {{
+      font-size:0.92rem; font-weight:700; color:{C_MARINE};
+      margin-bottom:9px; padding-bottom:6px; border-bottom:1px solid {C_GRIS};
+  }}
+  .sales-metric     {{ font-size:0.72rem; color:#666; margin-bottom:2px; }}
+  .sales-metric-val {{ font-size:1.0rem; font-weight:700; color:{C_MARINE}; }}
+  .sales-metric-ciel{{ font-size:1.0rem; font-weight:700; color:{C_CIEL}; }}
+  .stTabs [data-baseweb="tab-list"] {{
+      background:{C_BLANC}; border-bottom:2px solid {C_MARINE}15; gap:2px;
+  }}
+  .stTabs [data-baseweb="tab"] {{
+      color:{C_MARINE}; font-weight:600; font-size:0.82rem;
+      padding:8px 16px; border-radius:5px 5px 0 0;
+      background:{C_MARINE}07;
+  }}
+  .stTabs [aria-selected="true"] {{
+      background:{C_MARINE} !important; color:{C_BLANC} !important;
+  }}
+  .stButton > button {{
+      background:{C_MARINE}; color:{C_BLANC}; border:none;
+      border-radius:5px; font-weight:600; padding:7px 16px;
+      font-size:0.83rem; transition:all 0.16s;
+  }}
+  .stButton > button:hover {{
+      background:{C_CIEL}; color:{C_BLANC};
+  }}
+  .stSelectbox label,.stTextInput label,.stNumberInput label,
+  .stDateInput label,.stTextArea label,.stRadio label {{
+      color:{C_MARINE} !important; font-weight:600; font-size:0.79rem;
+  }}
+  h1,h2,h3,h4 {{ color:{C_MARINE} !important; }}
+  hr {{ border-color:{C_MARINE}12; }}
+  code {{ background:{C_MARINE}09; color:{C_MARINE}; border-radius:3px; }}
 </style>
 """, unsafe_allow_html=True)
 
@@ -219,7 +192,7 @@ def kpi_card(label: str, value: str, sub: str = "") -> str:
             + "</div>")
 
 
-def statut_badge_html(statut: str) -> str:
+def statut_badge(statut: str) -> str:
     colors = {
         "Funded":        (C_CIEL,    C_BLANC),
         "Soft Commit":   (C_BLEU_MID, C_BLANC),
@@ -231,75 +204,134 @@ def statut_badge_html(statut: str) -> str:
         "Redeemed":      ("#D0E4F0",  C_MARINE),
     }
     bg, fg = colors.get(statut, (C_GRIS, "#555"))
-    return (f'<span style="padding:2px 10px;border-radius:10px;'
-            f'font-size:0.76rem;font-weight:600;'
+    return (f'<span style="padding:2px 9px;border-radius:9px;'
+            f'font-size:0.74rem;font-weight:600;'
             f'background:{bg};color:{fg};">{statut}</span>')
 
 
 # ---------------------------------------------------------------------------
-# SIDEBAR
+# SIDEBAR — PERIMETRE D'EXPORT (MISSION 1)
 # ---------------------------------------------------------------------------
 with st.sidebar:
     st.markdown(f"""
-    <div style="text-align:center;padding:8px 0 18px 0;">
-        <div style="font-size:1.0rem;font-weight:800;color:{C_CIEL};letter-spacing:0.5px;">
+    <div style="text-align:center;padding:6px 0 16px 0;">
+        <div style="font-size:0.95rem;font-weight:800;color:{C_CIEL};
+                    letter-spacing:0.4px;">
             CRM Asset Management
         </div>
-        <div style="font-size:0.7rem;color:{C_GRIS};margin-top:3px;">
+        <div style="font-size:0.68rem;color:{C_GRIS};margin-top:3px;">
             {date.today().strftime("%d %B %Y")}
         </div>
     </div>
     """, unsafe_allow_html=True)
     st.divider()
 
-    kpis_side = db.get_kpis()
-    st.markdown(f'<div style="color:{C_CIEL};font-size:0.72rem;font-weight:700;'
-                f'text-transform:uppercase;letter-spacing:1px;margin-bottom:7px;">'
-                f'Apercu</div>', unsafe_allow_html=True)
-
-    for label, val in [
-        ("AUM Finance Total", fmt_m(kpis_side["total_funded"])),
-        ("Pipeline Actif",    fmt_m(kpis_side["pipeline_actif"])),
+    # Snapshot global (sans filtre)
+    kpis_global = db.get_kpis()
+    st.markdown(
+        f'<div style="color:{C_CIEL};font-size:0.7rem;font-weight:700;'
+        f'text-transform:uppercase;letter-spacing:1px;margin-bottom:6px;">'
+        f'Apercu Global</div>',
+        unsafe_allow_html=True
+    )
+    for lbl, val in [
+        ("AUM Finance Total", fmt_m(kpis_global["total_funded"])),
+        ("Pipeline Actif",    fmt_m(kpis_global["pipeline_actif"])),
     ]:
         st.markdown(f"""
-        <div style="background:{C_BLANC}15;padding:10px;border-radius:7px;margin-bottom:6px;">
-            <div style="font-size:0.68rem;color:{C_GRIS};">{label}</div>
-            <div style="font-size:1.2rem;font-weight:800;color:{C_CIEL};">{val}</div>
+        <div style="background:{C_BLANC}15;padding:9px;border-radius:6px;
+                    margin-bottom:5px;">
+            <div style="font-size:0.66rem;color:{C_GRIS};">{lbl}</div>
+            <div style="font-size:1.15rem;font-weight:800;color:{C_CIEL};">{val}</div>
         </div>""", unsafe_allow_html=True)
 
     st.divider()
-    st.markdown(f'<div style="color:{C_CIEL};font-size:0.72rem;font-weight:700;'
-                f'text-transform:uppercase;letter-spacing:1px;margin-bottom:7px;">'
-                f'Export PDF</div>', unsafe_allow_html=True)
+
+    # --- PERIMETRE D'EXPORT ---
+    st.markdown(
+        f'<div style="color:{C_CIEL};font-size:0.7rem;font-weight:700;'
+        f'text-transform:uppercase;letter-spacing:1px;margin-bottom:6px;">'
+        f'Export PDF</div>',
+        unsafe_allow_html=True
+    )
+
+    fonds_perimetre = st.multiselect(
+        "Perimetre de l'export",
+        options=FONDS,
+        default=FONDS,
+        help=(
+            "Selectionnez les fonds a inclure dans le rapport PDF. "
+            "Tous les KPIs, graphiques et tableaux seront recalcules "
+            "sur ce perimetre uniquement."
+        ),
+        key="fonds_perimetre_select"
+    )
+
+    # Perimetre effectif : None si tout selectionne (pas de filtrage SQL)
+    _filtre_effectif = fonds_perimetre if (
+        fonds_perimetre and len(fonds_perimetre) < len(FONDS)
+    ) else None
 
     mode_comex = st.toggle(
         "Mode Comex — Anonymisation",
         value=False,
         help="Remplace les noms clients par Type-Region dans le PDF."
     )
-    if mode_comex:
-        st.caption("Anonymisation activee : aucun nom client dans l'export.")
 
-    # Recuperation des donnees perf depuis session_state (si disponibles)
-    perf_data_pdf    = st.session_state.get("perf_data", None)
-    nav_base100_pdf  = st.session_state.get("nav_base100", None)
+    if fonds_perimetre and len(fonds_perimetre) < len(FONDS):
+        badges = " ".join(
+            f'<span class="perimetre-badge">{f}</span>'
+            for f in fonds_perimetre
+        )
+        st.markdown(f"<div>{badges}</div>", unsafe_allow_html=True)
+    elif not fonds_perimetre:
+        st.warning("Selectionnez au moins un fonds.")
 
+    # Indicateur donnees NAV disponibles
+    perf_data_pdf   = st.session_state.get("perf_data",   None)
+    nav_base100_pdf = st.session_state.get("nav_base100", None)
     if perf_data_pdf is not None:
-        st.caption(f"Donnees NAV disponibles — {len(perf_data_pdf)} fonds.")
+        nb_fonds_nav = len(perf_data_pdf)
+        st.caption(f"Donnees NAV disponibles : {nb_fonds_nav} fonds.")
 
-    if st.button("Generer le rapport PDF", use_container_width=True):
-        with st.spinner("Generation en cours..."):
+    if not fonds_perimetre:
+        st.button("Generer le rapport PDF", disabled=True,
+                  use_container_width=True)
+    elif st.button("Generer le rapport PDF", use_container_width=True):
+        with st.spinner("Calcul du perimetre et generation en cours..."):
             try:
+                # Recalcul sur le perimetre exact (MISSION 1)
+                pipeline_pdf    = db.get_pipeline_with_clients(
+                                      fonds_filter=_filtre_effectif)
+                kpis_pdf        = db.get_kpis(fonds_filter=_filtre_effectif)
+                aum_region_pdf  = db.get_aum_by_region(
+                                      fonds_filter=_filtre_effectif)
+
+                # Filtrage NAV sur le perimetre (MISSION 4)
+                pf_pdf = perf_data_pdf
+                nb_pdf = nav_base100_pdf
+                if pf_pdf is not None and _filtre_effectif:
+                    pf_pdf = pf_pdf[pf_pdf["Fonds"].isin(_filtre_effectif)] \
+                             if "Fonds" in pf_pdf.columns else pf_pdf
+                if nb_pdf is not None and _filtre_effectif:
+                    cols_k = [c for c in nb_pdf.columns
+                              if c in _filtre_effectif]
+                    nb_pdf = nb_pdf[cols_k] if cols_k else None
+
                 pdf_bytes = pdf_gen.generate_pdf(
-                    pipeline_df   = db.get_pipeline_with_clients(),
-                    kpis          = db.get_kpis(),
-                    mode_comex    = mode_comex,
-                    perf_data     = perf_data_pdf,
-                    nav_base100_df= nav_base100_pdf,
+                    pipeline_df    = pipeline_pdf,
+                    kpis           = kpis_pdf,
+                    aum_by_region  = aum_region_pdf,
+                    mode_comex     = mode_comex,
+                    perf_data      = pf_pdf,
+                    nav_base100_df = nb_pdf,
+                    fonds_perimetre= fonds_perimetre,
                 )
-                fname = (f"report_comex_{date.today().isoformat()}.pdf"
-                         if mode_comex
-                         else f"report_{date.today().isoformat()}.pdf")
+                fname = (
+                    f"report_comex_{date.today().isoformat()}.pdf"
+                    if mode_comex
+                    else f"report_{date.today().isoformat()}.pdf"
+                )
                 st.download_button(
                     "Telecharger le rapport",
                     data=pdf_bytes, file_name=fname,
@@ -308,19 +340,23 @@ with st.sidebar:
                 )
                 st.success("Rapport genere.")
             except Exception as e:
-                st.error(f"Erreur de generation : {e}")
+                st.error(f"Erreur : {e}")
 
     st.divider()
-    st.caption("Version 3.0 — Enterprise Edition")
+    st.caption("Version 4.0 — FEA/Amundi Edition Strategique")
 
 
 # ---------------------------------------------------------------------------
 # EN-TETE
 # ---------------------------------------------------------------------------
+import matplotlib
+matplotlib.use("Agg")
+import matplotlib.pyplot as plt
+
 st.markdown(f"""
 <div class="crm-header">
     <h1>CRM &amp; Reporting — Asset Management</h1>
-    <p>Gestion du pipeline commercial &middot; Suivi des mandats &middot;
+    <p>Pipeline commercial &middot; Suivi des mandats &middot;
        Reporting executif &middot; Performance NAV</p>
 </div>
 """, unsafe_allow_html=True)
@@ -349,13 +385,13 @@ with tab_ingest:
 
     with col_form:
         with st.expander("Ajouter un Client", expanded=True):
-            with st.form("form_add_client", clear_on_submit=True):
+            with st.form("form_client", clear_on_submit=True):
                 c1, c2 = st.columns(2)
                 with c1:
-                    nom_client  = st.text_input("Nom du Client *")
-                    type_client = st.selectbox("Type Client *", TYPES_CLIENT)
+                    nom_client  = st.text_input("Nom du Client")
+                    type_client = st.selectbox("Type Client", TYPES_CLIENT)
                 with c2:
-                    region = st.selectbox("Region *", REGIONS)
+                    region = st.selectbox("Region", REGIONS)
                 sub_c = st.form_submit_button("Enregistrer", use_container_width=True)
             if sub_c:
                 if not nom_client.strip():
@@ -371,19 +407,18 @@ with tab_ingest:
         with st.expander("Ajouter un Deal Pipeline", expanded=True):
             clients_dict = db.get_client_options()
             sales_owners = db.get_sales_owners() or ["Non assigne"]
-
             if not clients_dict:
                 st.info("Ajoutez d'abord un client.")
             else:
-                with st.form("form_add_deal", clear_on_submit=True):
+                with st.form("form_deal", clear_on_submit=True):
                     ca, cb = st.columns(2)
                     with ca:
-                        client_sel  = st.selectbox("Client *", list(clients_dict.keys()))
-                        fonds_sel   = st.selectbox("Fonds *", FONDS)
-                        statut_sel  = st.selectbox("Statut *", STATUTS)
-                        owner_input = st.text_input("Commercial (Sales Owner)",
-                                                    value=sales_owners[0]
-                                                    if sales_owners else "")
+                        client_sel  = st.selectbox("Client", list(clients_dict.keys()))
+                        fonds_sel   = st.selectbox("Fonds", FONDS)
+                        statut_sel  = st.selectbox("Statut", STATUTS)
+                        owner_input = st.text_input(
+                            "Commercial",
+                            value=sales_owners[0] if sales_owners else "")
                     with cb:
                         target_aum  = st.number_input("AUM Cible (EUR)",
                                                       min_value=0, step=1_000_000)
@@ -396,20 +431,17 @@ with tab_ingest:
                     if statut_sel in ("Lost", "Paused"):
                         cc, cd = st.columns(2)
                         with cc:
-                            raison_perte = st.selectbox("Raison *", RAISONS_PERTE)
+                            raison_perte = st.selectbox("Raison", RAISONS_PERTE)
                         with cd:
                             concurrent = st.text_input("Concurrent")
-
                     next_action = st.date_input(
                         "Prochaine Action",
-                        value=date.today() + timedelta(days=14)
-                    )
+                        value=date.today() + timedelta(days=14))
                     sub_d = st.form_submit_button("Enregistrer le Deal",
                                                   use_container_width=True)
-
                 if sub_d:
                     if statut_sel in ("Lost", "Paused") and not raison_perte:
-                        st.error("Raison de perte/pause obligatoire.")
+                        st.error("Raison obligatoire pour ce statut.")
                     else:
                         db.add_pipeline_entry(
                             clients_dict[client_sel], fonds_sel, statut_sel,
@@ -425,12 +457,11 @@ with tab_ingest:
                 with st.form("form_act", clear_on_submit=True):
                     ce, cf = st.columns(2)
                     with ce:
-                        act_client = st.selectbox("Client *",
-                                                  list(clients_dict2.keys()))
+                        act_client = st.selectbox("Client", list(clients_dict2.keys()))
                         act_type   = st.selectbox("Type", TYPES_INTERACTION)
                     with cf:
                         act_date   = st.date_input("Date", value=date.today())
-                        act_notes  = st.text_area("Notes", height=70)
+                        act_notes  = st.text_area("Notes", height=68)
                     sub_a = st.form_submit_button("Enregistrer", use_container_width=True)
                 if sub_a:
                     db.add_activity(clients_dict2[act_client],
@@ -441,7 +472,6 @@ with tab_ingest:
         st.markdown("#### Import CSV / Excel — Upsert")
         import_type = st.radio("Table cible", ["Clients", "Pipeline"],
                                horizontal=True)
-
         if import_type == "Clients":
             st.info("Colonnes : nom_client, type_client, region")
         else:
@@ -450,25 +480,22 @@ with tab_ingest:
                     "next_action_date, sales_owner")
 
         uploaded_file = st.file_uploader(
-            "Fichier CSV ou Excel (.xlsx)",
-            type=["csv","xlsx","xls"]
-        )
+            "Fichier CSV ou Excel", type=["csv","xlsx","xls"])
         if uploaded_file:
             try:
                 df_imp = (pd.read_csv(uploaded_file)
                           if uploaded_file.name.endswith(".csv")
                           else pd.read_excel(uploaded_file))
-                st.dataframe(df_imp.head(5), use_container_width=True, height=150)
-                st.caption(f"{len(df_imp)} ligne(s) detectee(s)")
-                if st.button("Lancer l'import (Upsert)", use_container_width=True):
-                    with st.spinner("Import en cours..."):
-                        fn = (db.upsert_clients_from_df
-                              if import_type == "Clients"
-                              else db.upsert_pipeline_from_df)
-                        ins, upd = fn(df_imp)
-                    st.success(f"Import termine : {ins} cree(s), {upd} mis a jour.")
+                st.dataframe(df_imp.head(5), use_container_width=True, height=145)
+                st.caption(f"{len(df_imp)} ligne(s)")
+                if st.button("Lancer l'import", use_container_width=True):
+                    fn = (db.upsert_clients_from_df
+                          if import_type == "Clients"
+                          else db.upsert_pipeline_from_df)
+                    ins, upd = fn(df_imp)
+                    st.success(f"Import : {ins} cree(s), {upd} mis a jour.")
             except Exception as e:
-                st.error(f"Erreur de lecture : {e}")
+                st.error(f"Erreur : {e}")
 
         st.divider()
         st.markdown("#### Dernieres Activites")
@@ -476,14 +503,13 @@ with tab_ingest:
         if not df_act.empty:
             st.dataframe(
                 df_act[["nom_client","date","type_interaction","notes"]].head(10),
-                use_container_width=True, height=260, hide_index=True,
+                use_container_width=True, height=250, hide_index=True,
                 column_config={
                     "nom_client":       st.column_config.TextColumn("Client"),
                     "date":             st.column_config.TextColumn("Date"),
                     "type_interaction": st.column_config.TextColumn("Type"),
                     "notes":            st.column_config.TextColumn("Notes"),
-                }
-            )
+                })
 
 
 # ============================================================================
@@ -493,7 +519,6 @@ with tab_pipeline:
     st.markdown('<div class="section-title">Pipeline Management</div>',
                 unsafe_allow_html=True)
 
-    # Filtres
     with st.expander("Filtres", expanded=False):
         fc1, fc2, fc3 = st.columns(3)
         with fc1:
@@ -510,28 +535,23 @@ with tab_pipeline:
     if filt_regions:  df_view = df_view[df_view["region"].isin(filt_regions)]
 
     st.markdown(
-        f'<div class="pipeline-hint">Selectionnez une ligne pour ouvrir le panneau '
-        f'de modification — <b>{len(df_view)} deal(s)</b> affiches</div>',
+        f'<div class="pipeline-hint">Selectionnez une ligne pour modifier '
+        f'— <b>{len(df_view)} deal(s)</b> affiches</div>',
         unsafe_allow_html=True
     )
 
-    # Vue lecture seule avec dates converties en str
     df_display = df_view.copy()
     df_display["next_action_date"] = df_display["next_action_date"].apply(
         lambda d: d.isoformat() if isinstance(d, date) else ""
     )
-    cols_show = ["id", "nom_client", "type_client", "region", "fonds", "statut",
-                 "target_aum_initial", "revised_aum", "funded_aum",
-                 "raison_perte", "concurrent_choisi", "next_action_date",
-                 "sales_owner"]
+    cols_show = ["id","nom_client","type_client","region","fonds","statut",
+                 "target_aum_initial","revised_aum","funded_aum",
+                 "raison_perte","concurrent_choisi","next_action_date","sales_owner"]
 
     event = st.dataframe(
         df_display[cols_show],
-        use_container_width=True,
-        height=380,
-        hide_index=True,
-        on_select="rerun",
-        selection_mode="single-row",
+        use_container_width=True, height=370, hide_index=True,
+        on_select="rerun", selection_mode="single-row",
         column_config={
             "id":                 st.column_config.NumberColumn("ID", width="small"),
             "nom_client":         st.column_config.TextColumn("Client"),
@@ -550,14 +570,13 @@ with tab_pipeline:
             "next_action_date":   st.column_config.TextColumn("Next Action"),
             "sales_owner":        st.column_config.TextColumn("Commercial"),
         },
-        key="pipeline_readonly"
+        key="pipeline_ro"
     )
 
     selected_rows = event.selection.rows if event.selection else []
 
     if len(selected_rows) > 0:
-        sel_idx     = selected_rows[0]
-        sel_row     = df_view.iloc[sel_idx]
+        sel_row     = df_view.iloc[selected_rows[0]]
         pipeline_id = int(sel_row["id"])
         row_data    = db.get_pipeline_row_by_id(pipeline_id)
 
@@ -567,84 +586,72 @@ with tab_pipeline:
 
             st.markdown(f"""
             <div class="detail-panel">
-                <div style="font-size:0.95rem;font-weight:700;color:{C_MARINE};
-                            margin-bottom:14px;">
-                    Modification du Deal — 
-                    <span style="color:{C_CIEL};">{client_name}</span>
-                    &nbsp; {statut_badge_html(current_statut)}
-                    &nbsp;
-                    <span style="font-size:0.75rem;color:#888;font-weight:400;">
-                        Deal ID #{pipeline_id}
-                    </span>
+                <div style="font-size:0.93rem;font-weight:700;color:{C_MARINE};
+                            margin-bottom:13px;">
+                    Modification — <span style="color:{C_CIEL};">{client_name}</span>
+                    &nbsp; {statut_badge(current_statut)}
+                    &nbsp;<span style="font-size:0.72rem;color:#888;font-weight:400;">
+                        ID #{pipeline_id}</span>
                 </div>
             </div>
             """, unsafe_allow_html=True)
 
             with st.container():
-                with st.form(key=f"edit_deal_{pipeline_id}"):
+                with st.form(key=f"edit_{pipeline_id}"):
                     r1c1, r1c2 = st.columns(2)
                     with r1c1:
-                        fonds_idx  = (FONDS.index(row_data["fonds"])
-                                      if row_data["fonds"] in FONDS else 0)
-                        new_fonds  = st.selectbox("Fonds", FONDS, index=fonds_idx)
+                        fi = FONDS.index(row_data["fonds"]) \
+                             if row_data["fonds"] in FONDS else 0
+                        new_fonds  = st.selectbox("Fonds", FONDS, index=fi)
                     with r1c2:
-                        stat_idx   = (STATUTS.index(current_statut)
-                                      if current_statut in STATUTS else 0)
-                        new_statut = st.selectbox("Statut", STATUTS, index=stat_idx)
+                        si = STATUTS.index(current_statut) \
+                             if current_statut in STATUTS else 0
+                        new_statut = st.selectbox("Statut", STATUTS, index=si)
 
                     r2c1, r2c2, r2c3 = st.columns(3)
                     with r2c1:
                         new_target = st.number_input(
                             "AUM Cible (EUR)",
                             value=float(row_data.get("target_aum_initial", 0.0)),
-                            min_value=0.0, step=1_000_000.0, format="%.0f"
-                        )
+                            min_value=0.0, step=1_000_000.0, format="%.0f")
                     with r2c2:
                         new_revised = st.number_input(
                             "AUM Revise (EUR)",
                             value=float(row_data.get("revised_aum", 0.0)),
-                            min_value=0.0, step=1_000_000.0, format="%.0f"
-                        )
+                            min_value=0.0, step=1_000_000.0, format="%.0f")
                     with r2c3:
                         new_funded = st.number_input(
                             "AUM Finance (EUR)",
                             value=float(row_data.get("funded_aum", 0.0)),
-                            min_value=0.0, step=1_000_000.0, format="%.0f"
-                        )
+                            min_value=0.0, step=1_000_000.0, format="%.0f")
 
                     r3c1, r3c2, r3c3, r3c4 = st.columns(4)
                     with r3c1:
-                        raison_opts  = [""] + RAISONS_PERTE
-                        cur_raison   = str(row_data.get("raison_perte") or "")
-                        raison_idx   = (raison_opts.index(cur_raison)
-                                        if cur_raison in raison_opts else 0)
-                        lbl_raison   = ("Raison (obligatoire)"
-                                        if new_statut in ("Lost","Paused")
-                                        else "Raison Perte/Pause")
-                        new_raison   = st.selectbox(lbl_raison, raison_opts,
-                                                    index=raison_idx)
+                        ropts   = [""] + RAISONS_PERTE
+                        cur_r   = str(row_data.get("raison_perte") or "")
+                        ri      = ropts.index(cur_r) if cur_r in ropts else 0
+                        lbl_r   = ("Raison (obligatoire)"
+                                   if new_statut in ("Lost","Paused")
+                                   else "Raison Perte/Pause")
+                        new_raison = st.selectbox(lbl_r, ropts, index=ri)
                     with r3c2:
                         new_concurrent = st.text_input(
-                            "Concurrent Choisi",
-                            value=str(row_data.get("concurrent_choisi") or "")
-                        )
+                            "Concurrent",
+                            value=str(row_data.get("concurrent_choisi") or ""))
                     with r3c3:
-                        nad_val = row_data.get("next_action_date")
-                        if not isinstance(nad_val, date):
-                            nad_val = date.today() + timedelta(days=14)
-                        new_nad = st.date_input("Prochaine Action", value=nad_val)
+                        nad = row_data.get("next_action_date")
+                        if not isinstance(nad, date):
+                            nad = date.today() + timedelta(days=14)
+                        new_nad = st.date_input("Prochaine Action", value=nad)
                     with r3c4:
                         new_sales = st.text_input(
                             "Commercial",
-                            value=str(row_data.get("sales_owner") or "Non assigne")
-                        )
+                            value=str(row_data.get("sales_owner") or "Non assigne"))
 
-                    submitted = st.form_submit_button(
-                        "Sauvegarder les modifications",
-                        use_container_width=False
-                    )
+                    sub = st.form_submit_button(
+                        "Sauvegarder les modifications")
 
-                if submitted:
+                if sub:
                     ok, msg = db.update_pipeline_row({
                         "id":                 pipeline_id,
                         "fonds":              new_fonds,
@@ -660,100 +667,71 @@ with tab_pipeline:
                     if ok:
                         st.success(
                             f"Deal {new_fonds} / {client_name} mis a jour. "
-                            f"Statut : {new_statut}. "
-                            f"AUM Finance : {fmt_m(new_funded)}."
-                        )
+                            f"Statut : {new_statut}. AUM Finance : {fmt_m(new_funded)}.")
                         st.rerun()
                     else:
                         st.error(msg)
 
-            # --- Historique des modifications (Audit Trail) ---
             with st.expander(
                 f"Historique des modifications — Deal #{pipeline_id}",
                 expanded=False
             ):
                 df_audit = db.get_audit_log(pipeline_id)
                 if df_audit.empty:
-                    st.info("Aucune modification enregistree pour ce deal.")
+                    st.info("Aucune modification enregistree.")
                 else:
                     st.dataframe(
-                        df_audit,
-                        use_container_width=True,
-                        hide_index=True,
-                        height=min(250, 45 + len(df_audit) * 38),
-                        column_config={
-                            "Champ":          st.column_config.TextColumn("Champ"),
-                            "Ancienne valeur":st.column_config.TextColumn("Avant"),
-                            "Nouvelle valeur":st.column_config.TextColumn("Apres"),
-                            "Modifie par":    st.column_config.TextColumn("Operateur"),
-                            "Date":           st.column_config.TextColumn("Date/Heure"),
-                        }
-                    )
-
+                        df_audit, use_container_width=True, hide_index=True,
+                        height=min(240, 45 + len(df_audit) * 36))
     else:
         st.markdown(f"""
-        <div style="background:{C_MARINE}05;border:1px dashed {C_MARINE}25;
-                    border-radius:8px;padding:24px;text-align:center;margin-top:12px;">
-            <div style="color:{C_MARINE};font-weight:600;font-size:0.9rem;">
-                Selectionnez un deal dans le tableau pour ouvrir le formulaire
-                de modification
-            </div>
-            <div style="color:#888;font-size:0.8rem;margin-top:4px;">
-                Le formulaire et l'historique des modifications apparaitront ici
-            </div>
-        </div>
-        """, unsafe_allow_html=True)
+        <div style="background:{C_MARINE}04;border:1px dashed {C_MARINE}22;
+                    border-radius:8px;padding:22px;text-align:center;margin-top:11px;">
+            <div style="color:{C_MARINE};font-weight:600;font-size:0.88rem;">
+                Selectionnez un deal dans le tableau pour ouvrir le formulaire</div>
+            <div style="color:#888;font-size:0.78rem;margin-top:3px;">
+                Le formulaire et l'historique des modifications s'afficheront ici</div>
+        </div>""", unsafe_allow_html=True)
 
     st.divider()
-
-    # Graphique AUM groupes
     st.markdown("#### Comparaison AUM par Deal")
-    import matplotlib
-    matplotlib.use("Agg")
-    import matplotlib.pyplot as plt
-
     df_viz = df_pipe[
         (df_pipe["target_aum_initial"] > 0) &
         (df_pipe["statut"].isin(["Funded","Soft Commit","Due Diligence","Initial Pitch"]))
     ].copy().head(10)
 
     if not df_viz.empty:
-        fig, ax = plt.subplots(figsize=(12, 4.0))
-        fig.patch.set_facecolor("white")
-        ax.set_facecolor("white")
-        x = np.arange(len(df_viz))
-        w = 0.28
-        ax.bar(x - w,   df_viz["target_aum_initial"], w,
+        fig, ax = plt.subplots(figsize=(12, 3.9))
+        fig.patch.set_facecolor("white"); ax.set_facecolor("white")
+        x = np.arange(len(df_viz)); w = 0.28
+        ax.bar(x-w,   df_viz["target_aum_initial"], w,
                label="AUM Cible",   color=C_GRIS,     edgecolor="white")
-        ax.bar(x,       df_viz["revised_aum"],  w,
+        ax.bar(x,     df_viz["revised_aum"],  w,
                label="AUM Revise",  color=C_BLEU_MID, edgecolor="white")
-        ax.bar(x + w,   df_viz["funded_aum"],   w,
+        ax.bar(x+w,   df_viz["funded_aum"],   w,
                label="AUM Finance", color=C_CIEL,     edgecolor="white")
         ax.set_xticks(x)
         ax.set_xticklabels(df_viz["nom_client"].str[:18],
-                           rotation=26, ha="right", fontsize=8.5, color=C_MARINE)
+                           rotation=24, ha="right", fontsize=8.5, color=C_MARINE)
         ax.yaxis.set_major_formatter(plt.FuncFormatter(lambda y,_: f"${y/1e6:.0f}M"))
         ax.tick_params(axis="y", colors=C_MARINE, labelsize=8)
         ax.set_title("AUM Cible / Revise / Finance — Deals Actifs",
                      fontsize=10, fontweight="bold", color=C_MARINE, pad=7)
         ax.legend(fontsize=8.5, frameon=False, labelcolor=C_MARINE)
-        ax.spines["top"].set_visible(False)
-        ax.spines["right"].set_visible(False)
-        ax.grid(axis="y", alpha=0.22, color=C_GRIS)
+        ax.spines["top"].set_visible(False); ax.spines["right"].set_visible(False)
+        ax.grid(axis="y", alpha=0.20, color=C_GRIS)
         fig.tight_layout()
         st.pyplot(fig, use_container_width=True)
         plt.close(fig)
-    else:
-        st.info("Donnees insuffisantes pour le graphique.")
 
-    # Tableau Lost/Paused
     df_lp = df_pipe[df_pipe["statut"].isin(["Lost","Paused"])].copy()
     if not df_lp.empty:
         st.divider()
         st.markdown("#### Deals Perdus / En Pause")
-        df_lp_d = df_lp[["nom_client","fonds","statut","target_aum_initial",
-                          "raison_perte","concurrent_choisi","sales_owner"]].copy()
-        st.dataframe(df_lp_d, use_container_width=True, hide_index=True,
+        st.dataframe(
+            df_lp[["nom_client","fonds","statut","target_aum_initial",
+                   "raison_perte","concurrent_choisi","sales_owner"]],
+            use_container_width=True, hide_index=True,
             column_config={
                 "nom_client":         st.column_config.TextColumn("Client"),
                 "fonds":              st.column_config.TextColumn("Fonds"),
@@ -767,14 +745,14 @@ with tab_pipeline:
 
 
 # ============================================================================
-# ONGLET 3 : EXECUTIVE DASHBOARD
+# ONGLET 3 : EXECUTIVE DASHBOARD (avec AUM par Region — MISSION 3)
 # ============================================================================
 with tab_dash:
     st.markdown('<div class="section-title">Executive Dashboard</div>',
                 unsafe_allow_html=True)
+
     kpis = db.get_kpis()
 
-    # KPIs
     kpi_cols = st.columns(4, gap="medium")
     for col, (lbl, val, sub) in zip(kpi_cols, [
         ("AUM Finance Total",  fmt_m(kpis["total_funded"]),
@@ -795,21 +773,20 @@ with tab_dash:
         "Initial Pitch": "#3A7EBA", "Prospect": "#8FBEDB",
         "Lost": "#AAAAAA", "Paused": "#C0D8E8", "Redeemed": "#B0CEE8",
     }
-    statut_order = [s for s in ["Prospect","Initial Pitch","Due Diligence",
-                                 "Soft Commit","Funded","Lost","Paused","Redeemed"]
+    statut_order = [s for s in STATUTS
                     if kpis["statut_repartition"].get(s, 0) > 0]
     if statut_order:
         bcols = st.columns(len(statut_order), gap="small")
-        for col, statut in zip(bcols, statut_order):
-            c_hex = STATUT_COLORS.get(statut, C_CIEL)
-            count = kpis["statut_repartition"][statut]
+        for col, s in zip(bcols, statut_order):
+            c_hex = STATUT_COLORS.get(s, C_CIEL)
             with col:
                 st.markdown(f"""
-                <div style="background:{c_hex}1A;border:1px solid {c_hex}44;
-                            border-radius:7px;padding:9px;text-align:center;">
-                    <div style="font-size:0.66rem;color:{C_MARINE};font-weight:700;
-                                text-transform:uppercase;">{statut}</div>
-                    <div style="font-size:1.5rem;font-weight:800;color:{c_hex};">{count}</div>
+                <div style="background:{c_hex}18;border:1px solid {c_hex}44;
+                            border-radius:6px;padding:8px;text-align:center;">
+                    <div style="font-size:0.64rem;color:{C_MARINE};font-weight:700;
+                                text-transform:uppercase;">{s}</div>
+                    <div style="font-size:1.45rem;font-weight:800;color:{c_hex};">
+                        {kpis['statut_repartition'][s]}</div>
                 </div>""", unsafe_allow_html=True)
 
     st.divider()
@@ -819,92 +796,114 @@ with tab_dash:
     if not df_overdue.empty:
         st.markdown(f"""
         <div style="background:#FFF8E1;border-left:4px solid {C_CIEL};
-                    border-radius:0 7px 7px 0;padding:11px 15px;margin-bottom:14px;">
-            <div style="font-size:0.84rem;font-weight:700;color:{C_MARINE};
-                        margin-bottom:7px;">
-                {len(df_overdue)} action(s) en retard — intervention requise
-            </div>
-        """, unsafe_allow_html=True)
+                    border-radius:0 6px 6px 0;padding:10px 14px;margin-bottom:12px;">
+            <div style="font-size:0.82rem;font-weight:700;color:{C_MARINE};
+                        margin-bottom:6px;">
+                {len(df_overdue)} action(s) en retard
+            </div>""", unsafe_allow_html=True)
         for _, row in df_overdue.iterrows():
             nad = row.get("next_action_date")
             if isinstance(nad, date):
                 days_late = (date.today() - nad).days
                 nad_str   = nad.isoformat()
             else:
-                days_late = 0
-                nad_str   = str(nad or "—")
-            owner_str = str(row.get("sales_owner", "")) or ""
+                days_late = 0; nad_str = str(nad or "—")
+            owner = str(row.get("sales_owner","")) or ""
             st.markdown(f"""
             <div class="alert-overdue">
                 <b>{row['nom_client']}</b> — {row['fonds']}
-                <span style="color:{C_CIEL};font-weight:600;"> ({row['statut']})</span>
+                <span style="color:{C_CIEL};font-weight:600;">
+                    ({row['statut']})</span>
                 — Prevue le <b>{nad_str}</b>
                 <span style="color:#B04000;"> ({days_late} j. de retard)</span>
-                {f' — Commercial : <b>{owner_str}</b>' if owner_str else ''}
+                {f' — <b>{owner}</b>' if owner else ''}
             </div>""", unsafe_allow_html=True)
         st.markdown("</div>", unsafe_allow_html=True)
 
-    # Graphiques
-    gcol1, gcol2 = st.columns([1, 1.3], gap="large")
+    # Graphiques : Type Client | Region | AUM par Fonds
+    gcol1, gcol2, gcol3 = st.columns([1, 1, 1.2], gap="medium")
+
+    def _donut_ui(ax, lbls, vals, title):
+        pal   = [C_CIEL, C_MARINE, C_BLEU_MID, C_BLEU_PALE, C_BLEU_DEEP,
+                 "#5BA3C9", "#2C8FBF"]
+        cols  = [pal[i % len(pal)] for i in range(len(lbls))]
+        _, _, autotexts = ax.pie(
+            vals, colors=cols, autopct="%1.1f%%", startangle=90,
+            pctdistance=0.74,
+            wedgeprops={"width":0.54,"edgecolor":"white","linewidth":1.5}
+        )
+        for at in autotexts:
+            at.set_fontsize(8); at.set_color("white"); at.set_fontweight("bold")
+        ax.text(0, 0.07, fmt_m(sum(vals)), ha="center", va="center",
+                fontsize=9.5, fontweight="bold", color=C_MARINE)
+        ax.text(0,-0.18, "Finance", ha="center", va="center",
+                fontsize=7, color="#666")
+        patches = [
+            matplotlib.patches.Patch(color=cols[i],
+                label=f"{lbls[i][:16]}: {fmt_m(vals[i])}")
+            for i in range(len(lbls))
+        ]
+        ax.legend(handles=patches, loc="lower center",
+                  bbox_to_anchor=(0.5,-0.26), ncol=2,
+                  fontsize=6.5, frameon=False, labelcolor=C_MARINE)
+        ax.set_title(title, fontsize=8.5, fontweight="bold",
+                     color=C_MARINE, pad=7)
 
     with gcol1:
-        st.markdown("#### AUM Funded par Type Client")
+        st.markdown("#### Par Type Client")
         if kpis["aum_by_type"]:
-            fig_p, ax_p = plt.subplots(figsize=(5, 4.0))
-            fig_p.patch.set_facecolor("white")
-            lbls = list(kpis["aum_by_type"].keys())
-            vals = list(kpis["aum_by_type"].values())
-            pal  = [C_CIEL, C_MARINE, C_BLEU_MID, C_BLEU_PALE, C_BLEU_DEEP]
-            cols = [pal[i % len(pal)] for i in range(len(lbls))]
-            _, _, autotexts = ax_p.pie(
-                vals, colors=cols, autopct="%1.1f%%", startangle=90,
-                pctdistance=0.74,
-                wedgeprops={"width":0.54,"edgecolor":"white","linewidth":1.5}
-            )
-            for at in autotexts:
-                at.set_fontsize(8.5); at.set_color("white"); at.set_fontweight("bold")
-            ax_p.text(0, 0.07, fmt_m(sum(vals)), ha="center", va="center",
-                      fontsize=10, fontweight="bold", color=C_MARINE)
-            ax_p.text(0, -0.18, "Total Funded", ha="center", va="center",
-                      fontsize=7, color="#666")
-            patches = [matplotlib.patches.Patch(
-                color=cols[i], label=f"{lbls[i]}: {fmt_m(vals[i])}")
-                for i in range(len(lbls))]
-            ax_p.legend(handles=patches, loc="lower center",
-                        bbox_to_anchor=(0.5,-0.22), ncol=2,
-                        fontsize=7, frameon=False, labelcolor=C_MARINE)
-            fig_p.tight_layout()
-            st.pyplot(fig_p, use_container_width=True)
-            plt.close(fig_p)
+            fig1, ax1 = plt.subplots(figsize=(4.2, 4.0))
+            fig1.patch.set_facecolor("white")
+            _donut_ui(ax1, list(kpis["aum_by_type"].keys()),
+                      list(kpis["aum_by_type"].values()), "AUM Finance par Type")
+            fig1.tight_layout()
+            st.pyplot(fig1, use_container_width=True)
+            plt.close(fig1)
 
     with gcol2:
-        st.markdown("#### AUM Funded par Fonds")
+        st.markdown("#### Par Region")
+        aum_reg = db.get_aum_by_region()
+        if aum_reg:
+            fig2, ax2 = plt.subplots(figsize=(4.2, 4.0))
+            fig2.patch.set_facecolor("white")
+            _donut_ui(ax2, list(aum_reg.keys()),
+                      list(aum_reg.values()), "AUM Finance par Region")
+            fig2.tight_layout()
+            st.pyplot(fig2, use_container_width=True)
+            plt.close(fig2)
+        else:
+            st.info("Aucun AUM Finance par region.")
+
+    with gcol3:
+        st.markdown("#### Par Fonds")
         if kpis["aum_by_fonds"]:
-            fig_b, ax_b = plt.subplots(figsize=(7, 4.0))
-            fig_b.patch.set_facecolor("white"); ax_b.set_facecolor("white")
+            fig3, ax3 = plt.subplots(figsize=(5.8, 4.0))
+            fig3.patch.set_facecolor("white"); ax3.set_facecolor("white")
             flbls = list(kpis["aum_by_fonds"].keys())
             fvals = list(kpis["aum_by_fonds"].values())
             yp    = range(len(flbls))
-            bars  = ax_b.barh(yp, fvals, color=C_CIEL, edgecolor="white", height=0.52)
+            bars  = ax3.barh(yp, fvals, color=C_CIEL, edgecolor="white", height=0.50)
             for bar, val in zip(bars, fvals):
-                ax_b.text(bar.get_width() + max(fvals)*0.01,
-                          bar.get_y() + bar.get_height()/2,
-                          fmt_m(val), va="center", ha="left",
-                          fontsize=8.5, color=C_MARINE, fontweight="bold")
-            ax_b.set_yticks(yp)
-            ax_b.set_yticklabels(flbls, fontsize=8.5, color=C_MARINE)
-            ax_b.invert_yaxis()
-            ax_b.xaxis.set_major_formatter(
-                plt.FuncFormatter(lambda x,_: fmt_m(x))
-            )
-            ax_b.tick_params(axis="x", colors=C_MARINE, labelsize=7.5)
-            ax_b.set_xlim(0, max(fvals)*1.18)
-            ax_b.spines["top"].set_visible(False)
-            ax_b.spines["right"].set_visible(False)
-            ax_b.grid(axis="x", alpha=0.22, color=C_GRIS)
-            fig_b.tight_layout()
-            st.pyplot(fig_b, use_container_width=True)
-            plt.close(fig_b)
+                ax3.text(bar.get_width() + max(fvals)*0.01,
+                         bar.get_y() + bar.get_height()/2,
+                         fmt_m(val), va="center", ha="left",
+                         fontsize=8, color=C_MARINE, fontweight="bold")
+            ax3.set_yticks(yp)
+            ax3.set_yticklabels(flbls, fontsize=8.5, color=C_MARINE)
+            ax3.invert_yaxis()
+            ax3.xaxis.set_major_formatter(
+                plt.FuncFormatter(lambda x,_: fmt_m(x)))
+            ax3.tick_params(axis="x", colors=C_MARINE, labelsize=7.5)
+            ax3.set_xlim(0, max(fvals)*1.2)
+            ax3.spines["top"].set_visible(False)
+            ax3.spines["right"].set_visible(False)
+            ax3.grid(axis="x", alpha=0.20, color=C_GRIS)
+            ax3.set_title("AUM Finance par Fonds",
+                          fontsize=8.5, fontweight="bold",
+                          color=C_MARINE, pad=7)
+            fig3.tight_layout()
+            st.pyplot(fig3, use_container_width=True)
+            plt.close(fig3)
 
     st.divider()
     st.markdown("#### Top Deals — AUM Finance")
@@ -912,39 +911,36 @@ with tab_dash:
                  .query("statut == 'Funded'")
                  .sort_values("funded_aum", ascending=False)
                  .head(10))
-
     if not df_funded.empty:
         max_f = float(df_funded["funded_aum"].max())
         for i, (_, row) in enumerate(df_funded.iterrows()):
             val  = float(row["funded_aum"])
             pct  = val / max_f * 100 if max_f > 0 else 0
-            rank = ["No.1", "No.2", "No.3"][i] if i < 3 else f"No.{i+1}"
+            rank = ["No.1","No.2","No.3"][i] if i < 3 else f"No.{i+1}"
             st.markdown(f"""
-            <div style="display:flex;align-items:center;gap:11px;margin:6px 0;
-                        padding:9px 13px;background:#F8FAFD;border-radius:7px;
-                        border:1px solid {C_MARINE}0D;">
-                <div style="font-size:0.78rem;font-weight:700;color:{C_BLEU_MID};
-                            min-width:32px;">{rank}</div>
+            <div style="display:flex;align-items:center;gap:10px;margin:5px 0;
+                        padding:8px 12px;background:#F8FAFD;border-radius:6px;
+                        border:1px solid {C_MARINE}0C;">
+                <div style="font-size:0.76rem;font-weight:700;color:{C_BLEU_MID};
+                            min-width:30px;">{rank}</div>
                 <div style="flex:1;">
-                    <div style="font-size:0.85rem;font-weight:700;color:{C_MARINE};">
-                        {row['nom_client']}</div>
-                    <div style="font-size:0.72rem;color:#777;">
+                    <div style="font-size:0.83rem;font-weight:700;
+                                color:{C_MARINE};">{row['nom_client']}</div>
+                    <div style="font-size:0.7rem;color:#777;">
                         {row['fonds']} &middot; {row['type_client']}
                         &middot; {row['region']}</div>
-                    <div style="background:{C_GRIS};border-radius:3px;height:5px;
-                                margin-top:4px;overflow:hidden;">
+                    <div style="background:{C_GRIS};border-radius:3px;
+                                height:4px;margin-top:4px;overflow:hidden;">
                         <div style="background:{C_CIEL};width:{pct:.0f}%;
                                     height:100%;border-radius:3px;"></div>
                     </div>
                 </div>
-                <div style="text-align:right;min-width:72px;">
-                    <div style="font-size:0.92rem;font-weight:800;color:{C_CIEL};">
+                <div style="text-align:right;min-width:70px;">
+                    <div style="font-size:0.9rem;font-weight:800;color:{C_CIEL};">
                         {fmt_m(val)}</div>
-                    <div style="font-size:0.66rem;color:#999;">finance</div>
+                    <div style="font-size:0.64rem;color:#999;">finance</div>
                 </div>
             </div>""", unsafe_allow_html=True)
-    else:
-        st.info("Aucun deal en statut Funded.")
 
 
 # ============================================================================
@@ -954,31 +950,29 @@ with tab_sales:
     st.markdown('<div class="section-title">Sales Tracking — Suivi par Commercial</div>',
                 unsafe_allow_html=True)
 
-    df_sales_metrics = db.get_sales_metrics()
-    df_next_actions  = db.get_next_actions_by_sales(days_ahead=30)
+    df_sm = db.get_sales_metrics()
+    df_na = db.get_next_actions_by_sales(days_ahead=30)
 
-    if df_sales_metrics.empty:
-        st.info("Aucune donnee de pipeline disponible.")
+    if df_sm.empty:
+        st.info("Aucune donnee de pipeline.")
     else:
-        # Cartes par commercial
-        n_owners = len(df_sales_metrics)
-        s_cols   = st.columns(min(n_owners, 3), gap="medium")
+        n_own  = len(df_sm)
+        s_cols = st.columns(min(n_own, 3), gap="medium")
 
-        for i, (_, row) in enumerate(df_sales_metrics.iterrows()):
-            col_idx = i % min(n_owners, 3)
-            with s_cols[col_idx]:
-                retard_badge = (
+        for i, (_, row) in enumerate(df_sm.iterrows()):
+            with s_cols[i % min(n_own, 3)]:
+                retard = (
                     f'<span style="color:#B04000;font-weight:700;">'
-                    f'{int(row["Actions en retard"])} action(s) en retard</span>'
+                    f'{int(row["Actions en retard"])} en retard</span>'
                     if int(row["Actions en retard"]) > 0
-                    else '<span style="color:#2E7D32;">A jour</span>'
+                    else f'<span style="color:{C_CIEL};">A jour</span>'
                 )
                 st.markdown(f"""
                 <div class="sales-card">
                     <div class="sales-card-name">{row['Commercial']}</div>
-                    <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;">
+                    <div style="display:grid;grid-template-columns:1fr 1fr;gap:9px;">
                         <div>
-                            <div class="sales-metric">Deals Total</div>
+                            <div class="sales-metric">Total Deals</div>
                             <div class="sales-metric-val">{int(row['Nb Deals'])}</div>
                         </div>
                         <div>
@@ -1002,137 +996,100 @@ with tab_sales:
                         </div>
                         <div>
                             <div class="sales-metric">Alertes</div>
-                            <div style="font-size:0.78rem;">{retard_badge}</div>
+                            <div style="font-size:0.75rem;">{retard}</div>
                         </div>
                     </div>
-                </div>
-                """, unsafe_allow_html=True)
-                st.markdown("<br>", unsafe_allow_html=True)
+                </div><br>""", unsafe_allow_html=True)
 
         st.divider()
-
-        # Tableau recapitulatif
         st.markdown("#### Tableau de bord commercial")
-        df_sales_display = df_sales_metrics.copy()
-        for col in ["AUM Finance", "Pipeline Actif"]:
-            df_sales_display[col] = df_sales_display[col].apply(fmt_m)
-
-        st.dataframe(
-            df_sales_display,
-            use_container_width=True,
-            hide_index=True,
-            height=min(350, 50 + len(df_sales_display) * 40),
-            column_config={
-                "Commercial":        st.column_config.TextColumn("Commercial"),
-                "Nb Deals":          st.column_config.NumberColumn("Total Deals"),
-                "Funded":            st.column_config.NumberColumn("Funded"),
-                "Actifs":            st.column_config.NumberColumn("Actifs"),
-                "Perdus":            st.column_config.NumberColumn("Perdus"),
-                "AUM Finance":       st.column_config.TextColumn("AUM Finance"),
-                "Pipeline Actif":    st.column_config.TextColumn("Pipeline Actif"),
-                "Actions en retard": st.column_config.NumberColumn("Retards"),
-            }
-        )
+        df_sd = df_sm.copy()
+        for col in ["AUM Finance","Pipeline Actif"]:
+            df_sd[col] = df_sd[col].apply(fmt_m)
+        st.dataframe(df_sd, use_container_width=True, hide_index=True,
+            height=min(340, 50+len(df_sd)*40))
 
         st.divider()
-
-        # Graphique AUM finance par commercial
         st.markdown("#### AUM Finance par Commercial")
-        if not df_sales_metrics.empty and df_sales_metrics["AUM Finance"].sum() > 0:
-            fig_s, ax_s = plt.subplots(figsize=(10, 3.5))
-            fig_s.patch.set_facecolor("white")
-            ax_s.set_facecolor("white")
-
-            owners_list = df_sales_metrics["Commercial"].tolist()
-            aum_vals    = df_sales_metrics["AUM Finance"].tolist()
-            pipe_vals   = df_sales_metrics["Pipeline Actif"].tolist()
-
-            x = np.arange(len(owners_list))
-            w = 0.36
-            ax_s.bar(x - w/2, aum_vals,  w, label="AUM Finance",
+        if df_sm["AUM Finance"].sum() > 0:
+            fig_s, ax_s = plt.subplots(figsize=(10, 3.4))
+            fig_s.patch.set_facecolor("white"); ax_s.set_facecolor("white")
+            owners_l = df_sm["Commercial"].tolist()
+            aum_v    = df_sm["AUM Finance"].tolist()
+            pipe_v   = df_sm["Pipeline Actif"].tolist()
+            x = np.arange(len(owners_l)); w = 0.36
+            ax_s.bar(x-w/2, aum_v,  w, label="AUM Finance",
                      color=C_CIEL,    edgecolor="white")
-            ax_s.bar(x + w/2, pipe_vals, w, label="Pipeline Actif",
+            ax_s.bar(x+w/2, pipe_v, w, label="Pipeline Actif",
                      color=C_BLEU_MID, edgecolor="white")
-
             ax_s.set_xticks(x)
-            ax_s.set_xticklabels(owners_list, fontsize=9, color=C_MARINE)
+            ax_s.set_xticklabels(owners_l, fontsize=9, color=C_MARINE)
             ax_s.yaxis.set_major_formatter(
-                plt.FuncFormatter(lambda y,_: fmt_m(y))
-            )
+                plt.FuncFormatter(lambda y,_: fmt_m(y)))
             ax_s.tick_params(colors=C_MARINE, labelsize=8)
-            ax_s.set_title("AUM par Commercial — Finance vs Pipeline Actif",
+            ax_s.set_title("AUM par Commercial",
                            fontsize=10, fontweight="bold", color=C_MARINE, pad=7)
             ax_s.legend(fontsize=8.5, frameon=False, labelcolor=C_MARINE)
             ax_s.spines["top"].set_visible(False)
             ax_s.spines["right"].set_visible(False)
-            ax_s.grid(axis="y", alpha=0.22, color=C_GRIS)
+            ax_s.grid(axis="y", alpha=0.20, color=C_GRIS)
             fig_s.tight_layout()
             st.pyplot(fig_s, use_container_width=True)
             plt.close(fig_s)
 
         st.divider()
-
-        # Prochaines actions par commercial
-        st.markdown("#### Prochaines Actions — 30 jours (par commercial)")
-        if df_next_actions.empty:
-            st.info("Aucune action planifiee dans les 30 prochains jours.")
+        st.markdown("#### Prochaines Actions — 30 jours")
+        if df_na.empty:
+            st.info("Aucune action dans les 30 prochains jours.")
         else:
-            owners_na = sorted(df_next_actions["sales_owner"].unique().tolist())
-            filter_owner = st.selectbox(
-                "Filtrer par commercial", ["Tous"] + owners_na
+            owners_na = ["Tous"] + sorted(
+                df_na["sales_owner"].unique().tolist()
             )
-
-            df_na_view = (df_next_actions
-                          if filter_owner == "Tous"
-                          else df_next_actions[
-                              df_next_actions["sales_owner"] == filter_owner
-                          ])
+            filter_o = st.selectbox("Filtrer par commercial", owners_na)
+            df_nav = (df_na if filter_o == "Tous"
+                      else df_na[df_na["sales_owner"] == filter_o])
 
             today = date.today()
-            for _, row in df_na_view.iterrows():
+            for _, row in df_nav.iterrows():
                 nad = row.get("next_action_date")
                 if isinstance(nad, date):
                     delta = (nad - today).days
                     if delta < 0:
-                        timing = f"RETARD ({abs(delta)} j.)"
-                        dot_color = "#B04000"
+                        timing = f"RETARD ({abs(delta)} j.)"; dot = "#B04000"
                     elif delta == 0:
-                        timing = "Aujourd'hui"
-                        dot_color = C_BLEU_MID
+                        timing = "Aujourd'hui"; dot = C_BLEU_MID
                     elif delta <= 7:
-                        timing = f"Dans {delta} j."
-                        dot_color = C_CIEL
+                        timing = f"Dans {delta} j."; dot = C_CIEL
                     else:
-                        timing = f"Dans {delta} j."
-                        dot_color = C_MARINE
-                    nad_str = nad.isoformat()
+                        timing = f"Dans {delta} j."; dot = C_MARINE
+                    nad_s = nad.isoformat()
                 else:
-                    timing    = "—"
-                    dot_color = C_GRIS
-                    nad_str   = "—"
+                    timing = "—"; dot = C_GRIS; nad_s = "—"
 
                 revised = float(row.get("revised_aum", 0) or 0)
                 st.markdown(f"""
-                <div style="display:flex;align-items:center;gap:12px;padding:8px 12px;
-                            margin:4px 0;background:#F8FAFD;border-radius:6px;
-                            border-left:3px solid {dot_color};">
-                    <div style="min-width:110px;font-size:0.76rem;
-                                color:{dot_color};font-weight:700;">{timing}</div>
+                <div style="display:flex;align-items:center;gap:11px;
+                            padding:7px 11px;margin:3px 0;
+                            background:#F8FAFD;border-radius:5px;
+                            border-left:3px solid {dot};">
+                    <div style="min-width:105px;font-size:0.74rem;
+                                color:{dot};font-weight:700;">{timing}</div>
                     <div style="flex:1;">
-                        <span style="font-weight:600;color:{C_MARINE};font-size:0.84rem;">
-                            {row['nom_client']}</span>
-                        <span style="color:#888;font-size:0.76rem;">
-                            &nbsp; {row['fonds']} &middot; {row['statut']}</span>
+                        <span style="font-weight:600;color:{C_MARINE};
+                                     font-size:0.82rem;">{row['nom_client']}</span>
+                        <span style="color:#888;font-size:0.74rem;">
+                            &nbsp;{row['fonds']} &middot; {row['statut']}</span>
                     </div>
-                    <div style="font-size:0.8rem;color:{C_BLEU_MID};font-weight:600;
-                                min-width:70px;text-align:right;">{fmt_m(revised)}</div>
-                    <div style="font-size:0.76rem;color:#888;min-width:90px;
+                    <div style="font-size:0.78rem;color:{C_BLEU_MID};
+                                font-weight:600;min-width:68px;text-align:right;">
+                        {fmt_m(revised)}</div>
+                    <div style="font-size:0.74rem;color:#888;min-width:88px;
                                 text-align:right;">{row['sales_owner']}</div>
                 </div>""", unsafe_allow_html=True)
 
 
 # ============================================================================
-# ONGLET 5 : PERFORMANCE ET NAV
+# ONGLET 5 : PERFORMANCE ET NAV (MISSION 4)
 # ============================================================================
 with tab_perf:
     st.markdown('<div class="section-title">Performance et NAV</div>',
@@ -1142,39 +1099,36 @@ with tab_perf:
 
     with col_info:
         st.markdown(f"""
-        <div style="background:{C_MARINE}07;border:1px solid {C_MARINE}15;
-                    border-radius:9px;padding:16px 18px;">
-            <div style="font-weight:700;color:{C_MARINE};font-size:0.92rem;
-                        margin-bottom:10px;">Format attendu</div>
-            <div style="font-size:0.81rem;color:#444;line-height:1.75;">
+        <div style="background:{C_MARINE}06;border:1px solid {C_MARINE}12;
+                    border-radius:8px;padding:15px 17px;">
+            <div style="font-weight:700;color:{C_MARINE};font-size:0.9rem;
+                        margin-bottom:9px;">Format attendu</div>
+            <div style="font-size:0.79rem;color:#444;line-height:1.75;">
                 <b>Colonnes obligatoires</b><br>
                 &bull; <code>Date</code> — YYYY-MM-DD ou DD/MM/YYYY<br>
                 &bull; <code>Fonds</code> — Nom du fonds<br>
                 &bull; <code>NAV</code> — Valeur liquidative numerique<br><br>
                 <b>Calculs produits</b><br>
-                &bull; Courbe Base 100 normalisee au premier point<br>
+                &bull; Base 100 normalisee (protection division par zero)<br>
                 &bull; Performance 1 Mois glissant<br>
-                &bull; Performance YTD depuis le 1er janvier<br>
-                &bull; Performance sur la periode selectionnee<br><br>
-                <b>Export PDF</b><br>
-                Une fois les donnees chargees, cliquez sur<br>
-                <i>Generer le rapport PDF</i> dans la barre laterale
-                pour inclure cette page dans l'export.
+                &bull; Performance YTD<br>
+                &bull; Performance periode complete<br><br>
+                <b>Integration PDF</b><br>
+                Les donnees NAV chargees sont automatiquement
+                integrees dans l'export PDF, filtrées sur le
+                perimetre selectionne dans la barre laterale.
             </div>
         </div>
         """, unsafe_allow_html=True)
 
-        st.markdown("#### Donnees de demonstration")
+        st.markdown("#### Demonstration")
         if st.button("Generer un fichier NAV de demonstration",
                      use_container_width=True):
             demo_dates = pd.date_range(
-                start=f"{date.today().year - 1}-01-01",
-                end=date.today(), freq="B"
+                f"{date.today().year-1}-01-01", date.today(), freq="B"
             )
             rng  = np.random.default_rng(42)
-            navs = {"Global Value": 100.0, "Resilient Equity": 100.0,
-                    "Income Builder": 100.0, "Private Debt": 100.0,
-                    "International Fund": 100.0}
+            navs = {f: 100.0 for f in FONDS}
             rows = []
             for d in demo_dates:
                 for fonds, nav in navs.items():
@@ -1182,9 +1136,8 @@ with tab_perf:
                     navs[fonds] = nav
                     rows.append({"Date": d.date().isoformat(),
                                  "Fonds": fonds, "NAV": round(nav, 4)})
-            df_demo = pd.DataFrame(rows)
             buf_demo = io.BytesIO()
-            df_demo.to_excel(buf_demo, index=False)
+            pd.DataFrame(rows).to_excel(buf_demo, index=False)
             buf_demo.seek(0)
             st.download_button(
                 "Telecharger nav_demo.xlsx",
@@ -1204,96 +1157,85 @@ with tab_perf:
             df_nav = (pd.read_csv(nav_file)
                       if nav_file.name.endswith(".csv")
                       else pd.read_excel(nav_file))
-
             df_nav.columns = [c.strip() for c in df_nav.columns]
 
             missing = [c for c in ["Date","Fonds","NAV"] if c not in df_nav.columns]
             if missing:
                 st.error(f"Colonnes manquantes : {missing}. "
-                         f"Colonnes trouvees : {list(df_nav.columns)}")
+                         f"Trouvees : {list(df_nav.columns)}")
                 st.stop()
 
-            # --- Nettoyage securise des types (Mission 4) ---
+            # Nettoyage securise — format mixed, dayfirst, drop NaT immediatement
             df_nav["Date"] = pd.to_datetime(
                 df_nav["Date"], format="mixed", dayfirst=True, errors="coerce"
             )
-            # Supprimer les NaT immediatement
             df_nav = df_nav.dropna(subset=["Date"])
-
             df_nav["NAV"]   = pd.to_numeric(df_nav["NAV"], errors="coerce")
-            df_nav          = df_nav.dropna(subset=["NAV"])
+            df_nav = df_nav.dropna(subset=["NAV"])
             df_nav["Fonds"] = df_nav["Fonds"].astype(str).str.strip()
-            df_nav          = df_nav.sort_values("Date").reset_index(drop=True)
+            df_nav = df_nav.sort_values("Date").reset_index(drop=True)
 
             if df_nav.empty:
-                st.error("Aucune donnee valide apres nettoyage. "
-                         "Verifiez le format de vos colonnes Date et NAV.")
+                st.error("Aucune donnee valide apres nettoyage.")
                 st.stop()
 
             fonds_list = sorted(df_nav["Fonds"].unique().tolist())
-            date_min   = df_nav["Date"].min()
-            date_max   = df_nav["Date"].max()
+            d_min = df_nav["Date"].min(); d_max = df_nav["Date"].max()
 
             st.markdown(f"""
-            <div style="background:{C_CIEL}16;border-left:3px solid {C_CIEL};
-                        border-radius:0 7px 7px 0;padding:9px 15px;margin:10px 0;">
-                {len(df_nav):,} points charges &mdash; {len(fonds_list)} fonds &mdash;
-                Periode : {date_min.strftime('%d/%m/%Y')} au {date_max.strftime('%d/%m/%Y')}
-            </div>
-            """, unsafe_allow_html=True)
+            <div style="background:{C_CIEL}14;border-left:3px solid {C_CIEL};
+                        border-radius:0 6px 6px 0;padding:8px 14px;margin:9px 0;">
+                {len(df_nav):,} points &mdash; {len(fonds_list)} fonds &mdash;
+                {d_min.strftime('%d/%m/%Y')} au {d_max.strftime('%d/%m/%Y')}
+            </div>""", unsafe_allow_html=True)
 
-            # Filtres
+            # Filtres periode & fonds
             st.markdown("---")
             ff1, ff2, ff3 = st.columns([2, 1, 1])
             with ff1:
-                fonds_sel_nav = st.multiselect(
+                fonds_sel = st.multiselect(
                     "Fonds a afficher", fonds_list,
                     default=fonds_list[:min(5, len(fonds_list))]
                 )
             with ff2:
-                d_debut = st.date_input("Depuis", value=date_min.date())
+                d_debut = st.date_input("Depuis", value=d_min.date())
             with ff3:
-                d_fin   = st.date_input("Jusqu'au", value=date_max.date())
+                d_fin   = st.date_input("Jusqu'au", value=d_max.date())
 
-            if not fonds_sel_nav:
+            if not fonds_sel:
                 st.warning("Selectionnez au moins un fonds.")
                 st.stop()
 
             mask = (
-                df_nav["Fonds"].isin(fonds_sel_nav) &
+                df_nav["Fonds"].isin(fonds_sel) &
                 (df_nav["Date"].dt.date >= d_debut) &
                 (df_nav["Date"].dt.date <= d_fin)
             )
-            df_filtered_nav = df_nav[mask].copy()
-
-            if df_filtered_nav.empty:
+            df_fn = df_nav[mask].copy()
+            if df_fn.empty:
                 st.warning("Aucune donnee pour la periode selectionnee.")
                 st.stop()
 
-            # Pivot et Base 100
-            pivot = (df_filtered_nav
+            pivot = (df_fn
                      .pivot_table(index="Date", columns="Fonds",
                                   values="NAV", aggfunc="last")
-                     .sort_index()
-                     .ffill())
-            pivot = pivot[[f for f in fonds_sel_nav if f in pivot.columns]]
+                     .sort_index().ffill())
+            pivot = pivot[[f for f in fonds_sel if f in pivot.columns]]
 
+            # Base 100 securisee (protection division par zero)
             base100 = pivot.copy() * np.nan
             for fonds in pivot.columns:
-                series = pivot[fonds].dropna()
-                if series.empty:
-                    continue
-                first_val = float(series.iloc[0])
-                # Protection division par zero (Mission 4)
+                s = pivot[fonds].dropna()
+                if s.empty: continue
+                first_val = float(s.iloc[0])
                 if first_val != 0 and not np.isnan(first_val):
                     base100[fonds] = pivot[fonds] / first_val * 100
-                # Si first_val == 0, la colonne reste NaN (non affichee)
 
-            # Stocker en session_state pour le PDF
+            # Stockage session_state pour le PDF
             st.session_state["nav_base100"] = base100
-            st.session_state["nav_fonds"]   = fonds_sel_nav
+            st.session_state["perf_fonds"]  = fonds_sel
 
-            # --- Graphique Base 100 ---
+            # --- Graphique Base 100 (matplotlib, fond blanc, minimaliste) ---
             st.markdown("#### Evolution NAV — Base 100")
 
             fig_nav, ax_nav = plt.subplots(figsize=(12, 5))
@@ -1303,52 +1245,49 @@ with tab_perf:
             plotted = 0
             for i, fonds in enumerate(pivot.columns):
                 series = base100[fonds].dropna()
-                if series.empty:
-                    continue
+                if series.empty: continue
                 color    = NAV_PALETTE[i % len(NAV_PALETTE)]
                 line_sty = "-" if i % 2 == 0 else "--"
 
-                # Protection single-point (Mission 4)
+                # Protection single-point
                 if len(series) >= 2:
                     ax_nav.plot(series.index, series.values,
                                 label=fonds, color=color,
-                                linewidth=1.8, linestyle=line_sty, alpha=0.92)
+                                linewidth=1.8, linestyle=line_sty, alpha=0.9)
                 else:
-                    # Un seul point : affichage en scatter uniquement
                     ax_nav.scatter(series.index, series.values,
                                    color=color, s=60, label=fonds, zorder=5)
-
                 if not series.empty:
                     ax_nav.scatter([series.index[-1]], [series.values[-1]],
-                                   color=color, s=35, zorder=6)
+                                   color=color, s=32, zorder=6)
                 plotted += 1
 
             if plotted == 0:
-                st.warning("Aucune donnee Base 100 calculable.")
+                st.warning("Aucune Base 100 calculable.")
                 st.stop()
 
-            ax_nav.axhline(100, color=C_GRIS, linewidth=0.9, linestyle=":")
+            ax_nav.axhline(100, color=C_GRIS, linewidth=0.8, linestyle=":")
             ax_nav.set_ylabel("NAV (Base 100)", fontsize=8.5, color=C_MARINE)
             ax_nav.tick_params(colors=C_MARINE, labelsize=8)
+            # Minimalisme — pas de grilles verticales
             ax_nav.spines["top"].set_visible(False)
             ax_nav.spines["right"].set_visible(False)
             ax_nav.spines["left"].set_color(C_GRIS)
             ax_nav.spines["bottom"].set_color(C_GRIS)
-            ax_nav.grid(axis="y", alpha=0.22, color=C_GRIS, linewidth=0.6)
-            ax_nav.grid(axis="x", alpha=0.08, color=C_GRIS, linewidth=0.4)
-            ax_nav.legend(fontsize=8.5, frameon=True, framealpha=0.92,
+            ax_nav.grid(axis="y", alpha=0.18, color=C_GRIS, linewidth=0.6)
+            ax_nav.legend(fontsize=8.5, frameon=True, framealpha=0.93,
                           edgecolor=C_GRIS, labelcolor=C_MARINE, loc="upper left")
             ax_nav.set_title(
                 f"Performance NAV — Base 100 — "
                 f"{d_debut.strftime('%d/%m/%Y')} au {d_fin.strftime('%d/%m/%Y')}",
                 fontsize=10.5, fontweight="bold", color=C_MARINE, pad=9
             )
-            plt.xticks(rotation=18, ha="right", fontsize=7.5)
+            plt.xticks(rotation=16, ha="right", fontsize=7.5)
             fig_nav.tight_layout()
             st.pyplot(fig_nav, use_container_width=True)
             plt.close(fig_nav)
 
-            # --- Calcul des performances ---
+            # --- Calcul performances ---
             today_ts  = pd.Timestamp(date.today())
             one_m_ago = today_ts - pd.DateOffset(months=1)
             jan_1     = pd.Timestamp(f"{date.today().year}-01-01")
@@ -1356,134 +1295,116 @@ with tab_perf:
             perf_rows = []
             for fonds in pivot.columns:
                 series = pivot[fonds].dropna()
-                if series.empty:
-                    continue
-
+                if series.empty: continue
                 nav_last  = float(series.iloc[-1])
                 nav_first = float(series.iloc[0])
 
                 s_1m  = series[series.index >= one_m_ago]
-                perf_1m = (
-                    (nav_last / float(s_1m.iloc[0]) - 1) * 100
-                    if len(s_1m) > 0 and float(s_1m.iloc[0]) != 0
-                    else float("nan")
-                )
+                p1m   = ((nav_last / float(s_1m.iloc[0]) - 1) * 100
+                         if len(s_1m) > 0 and float(s_1m.iloc[0]) != 0
+                         else float("nan"))
 
                 s_ytd  = series[series.index >= jan_1]
-                perf_ytd = (
-                    (nav_last / float(s_ytd.iloc[0]) - 1) * 100
-                    if len(s_ytd) > 0 and float(s_ytd.iloc[0]) != 0
-                    else float("nan")
-                )
+                pytd   = ((nav_last / float(s_ytd.iloc[0]) - 1) * 100
+                          if len(s_ytd) > 0 and float(s_ytd.iloc[0]) != 0
+                          else float("nan"))
 
-                perf_period = (
-                    (nav_last / nav_first - 1) * 100
-                    if nav_first != 0 else float("nan")
-                )
+                pp = ((nav_last / nav_first - 1) * 100
+                      if nav_first != 0 else float("nan"))
 
-                b100_series = base100[fonds].dropna()
-                nav_b100    = (float(b100_series.iloc[-1])
-                               if not b100_series.empty else float("nan"))
+                b100s  = base100[fonds].dropna()
+                nb100  = (float(b100s.iloc[-1]) if not b100s.empty
+                          else float("nan"))
 
                 perf_rows.append({
-                    "Fonds":             fonds,
-                    "NAV Derniere":      round(nav_last, 4),
-                    "Base 100 Actuel":   round(nav_b100, 2)
-                                         if not np.isnan(nav_b100) else None,
-                    "Perf 1M (%)":       round(perf_1m, 2)
-                                         if not np.isnan(perf_1m) else None,
-                    "Perf YTD (%)":      round(perf_ytd, 2)
-                                         if not np.isnan(perf_ytd) else None,
-                    "Perf Periode (%)":  round(perf_period, 2)
-                                         if not np.isnan(perf_period) else None,
+                    "Fonds":            fonds,
+                    "NAV Derniere":     round(nav_last, 4),
+                    "Base 100 Actuel":  (round(nb100, 2)
+                                         if not np.isnan(nb100) else None),
+                    "Perf 1M (%)":      (round(p1m, 2)
+                                         if not np.isnan(p1m) else None),
+                    "Perf YTD (%)":     (round(pytd, 2)
+                                         if not np.isnan(pytd) else None),
+                    "Perf Periode (%)": (round(pp, 2)
+                                         if not np.isnan(pp) else None),
                 })
 
             if perf_rows:
-                df_perf_table = pd.DataFrame(perf_rows)
-                # Stocker pour le PDF
-                st.session_state["perf_data"] = df_perf_table
+                df_pt = pd.DataFrame(perf_rows)
+                # Stockage pour PDF
+                st.session_state["perf_data"] = df_pt
 
-                # --- Tableau HTML des performances ---
+                # Tableau HTML des performances
                 st.markdown("#### Tableau des Performances")
 
-                def _fmt_perf(val):
+                def _fp(val):
                     if val is None or (isinstance(val, float) and np.isnan(val)):
-                        return '<span style="color:#999;">n.d.</span>'
-                    color = C_CIEL if val >= 0 else "#8B2020"
-                    sign  = "+" if val > 0 else ""
-                    return (f'<span style="color:{color};font-weight:700;">'
-                            f'{sign}{val:.2f}%</span>')
+                        return f'<span style="color:#999;">n.d.</span>'
+                    c = C_CIEL if val >= 0 else "#8B2020"
+                    s = "+" if val > 0 else ""
+                    return (f'<span style="color:{c};font-weight:700;">'
+                            f'{s}{val:.2f}%</span>')
 
-                tbl_html = f"""
-                <table style="width:100%;border-collapse:collapse;font-size:0.84rem;">
-                    <thead>
-                        <tr style="background:{C_MARINE};color:{C_BLANC};">
-                            <th style="padding:9px 13px;text-align:left;">Fonds</th>
-                            <th style="padding:9px 13px;text-align:right;">
-                                NAV Derniere</th>
-                            <th style="padding:9px 13px;text-align:right;">
-                                Base 100</th>
-                            <th style="padding:9px 13px;text-align:right;">
-                                Perf 1M</th>
-                            <th style="padding:9px 13px;text-align:right;">
-                                Perf YTD</th>
-                            <th style="padding:9px 13px;text-align:right;">
-                                Perf Periode</th>
-                        </tr>
-                    </thead>
-                    <tbody>
-                """
+                tbl_h = f"""
+                <table style="width:100%;border-collapse:collapse;font-size:0.82rem;">
+                    <thead><tr style="background:{C_MARINE};color:white;">
+                        <th style="padding:8px 12px;text-align:left;">Fonds</th>
+                        <th style="padding:8px 12px;text-align:right;">NAV</th>
+                        <th style="padding:8px 12px;text-align:right;">Base 100</th>
+                        <th style="padding:8px 12px;text-align:right;">Perf 1M</th>
+                        <th style="padding:8px 12px;text-align:right;">Perf YTD</th>
+                        <th style="padding:8px 12px;text-align:right;">Perf Periode</th>
+                    </tr></thead><tbody>"""
                 for i, r in enumerate(perf_rows):
                     bg = "#F8FAFD" if i % 2 == 0 else C_BLANC
-                    tbl_html += f"""
-                        <tr style="background:{bg};border-bottom:1px solid {C_GRIS};">
-                            <td style="padding:8px 13px;font-weight:600;
-                                       color:{C_MARINE};">{r['Fonds']}</td>
-                            <td style="padding:8px 13px;text-align:right;
-                                       color:{C_MARINE};">
-                                {r['NAV Derniere']:.4f}</td>
-                            <td style="padding:8px 13px;text-align:right;
-                                       color:{C_MARINE};">
-                                {f"{r['Base 100 Actuel']:.2f}" if r['Base 100 Actuel'] else 'n.d.'}</td>
-                            <td style="padding:8px 13px;text-align:right;">
-                                {_fmt_perf(r['Perf 1M (%)'])}</td>
-                            <td style="padding:8px 13px;text-align:right;">
-                                {_fmt_perf(r['Perf YTD (%)'])}</td>
-                            <td style="padding:8px 13px;text-align:right;">
-                                {_fmt_perf(r['Perf Periode (%)'])}</td>
-                        </tr>"""
-                tbl_html += "</tbody></table>"
-                st.markdown(tbl_html, unsafe_allow_html=True)
+                    tbl_h += f"""
+                    <tr style="background:{bg};border-bottom:1px solid {C_GRIS};">
+                        <td style="padding:7px 12px;font-weight:600;
+                                   color:{C_MARINE};">{r['Fonds']}</td>
+                        <td style="padding:7px 12px;text-align:right;
+                                   color:{C_MARINE};">{r['NAV Derniere']:.4f}</td>
+                        <td style="padding:7px 12px;text-align:right;
+                                   color:{C_MARINE};">
+                            {f"{r['Base 100 Actuel']:.2f}" if r['Base 100 Actuel'] else 'n.d.'}</td>
+                        <td style="padding:7px 12px;text-align:right;">
+                            {_fp(r['Perf 1M (%)'])}</td>
+                        <td style="padding:7px 12px;text-align:right;">
+                            {_fp(r['Perf YTD (%)'])}</td>
+                        <td style="padding:7px 12px;text-align:right;">
+                            {_fp(r['Perf Periode (%)'])}</td>
+                    </tr>"""
+                tbl_h += "</tbody></table>"
+                st.markdown(tbl_h, unsafe_allow_html=True)
                 st.markdown("<br>", unsafe_allow_html=True)
 
-                csv_perf = df_perf_table.to_csv(index=False).encode("utf-8")
                 st.download_button(
                     "Exporter le tableau en CSV",
-                    data=csv_perf,
+                    data=df_pt.to_csv(index=False).encode("utf-8"),
                     file_name=f"performances_{date.today().isoformat()}.csv",
                     mime="text/csv"
                 )
 
-                # --- Graphique YTD ---
+                # Graphique YTD — fond blanc, minimaliste (MISSION 4)
                 ytd_data = [r for r in perf_rows if r["Perf YTD (%)"] is not None]
                 if ytd_data:
                     ytd_data.sort(key=lambda r: r["Perf YTD (%)"], reverse=True)
                     st.markdown("#### Comparaison Performances YTD")
 
-                    fig_ytd, ax_ytd = plt.subplots(figsize=(10, 3.4))
+                    fig_ytd, ax_ytd = plt.subplots(figsize=(10, 3.3))
                     fig_ytd.patch.set_facecolor("white")
                     ax_ytd.set_facecolor("white")
 
-                    fonds_ytd = [r["Fonds"] for r in ytd_data]
-                    vals_ytd  = [r["Perf YTD (%)"] for r in ytd_data]
-                    bar_cols  = [C_CIEL if v >= 0 else C_GRIS for v in vals_ytd]
+                    fonds_y = [r["Fonds"] for r in ytd_data]
+                    vals_y  = [r["Perf YTD (%)"] for r in ytd_data]
+                    bar_c   = [C_CIEL if v >= 0 else C_GRIS for v in vals_y]
 
-                    bars_ytd = ax_ytd.bar(
-                        range(len(fonds_ytd)), vals_ytd,
-                        color=bar_cols, edgecolor="white", linewidth=0.5, width=0.6
+                    bars_y = ax_ytd.bar(
+                        range(len(fonds_y)), vals_y,
+                        color=bar_c, edgecolor="white",
+                        linewidth=0.4, width=0.6
                     )
-                    ax_ytd.axhline(0, color=C_MARINE, linewidth=0.7)
-                    for bar, val in zip(bars_ytd, vals_ytd):
+                    ax_ytd.axhline(0, color=C_MARINE, linewidth=0.6)
+                    for bar, val in zip(bars_y, vals_y):
                         sign = "+" if val > 0 else ""
                         ypos = val + 0.04 if val >= 0 else val - 0.22
                         ax_ytd.text(
@@ -1493,14 +1414,17 @@ with tab_perf:
                             va="bottom" if val >= 0 else "top",
                             fontsize=8, color=C_MARINE, fontweight="bold"
                         )
-                    ax_ytd.set_xticks(range(len(fonds_ytd)))
-                    ax_ytd.set_xticklabels(fonds_ytd, rotation=16, ha="right",
+                    ax_ytd.set_xticks(range(len(fonds_y)))
+                    ax_ytd.set_xticklabels(fonds_y, rotation=14, ha="right",
                                            fontsize=8.5, color=C_MARINE)
                     ax_ytd.set_ylabel("YTD (%)", fontsize=8.5, color=C_MARINE)
                     ax_ytd.tick_params(colors=C_MARINE, labelsize=8)
+                    # Minimalisme : pas de grille verticale
                     ax_ytd.spines["top"].set_visible(False)
                     ax_ytd.spines["right"].set_visible(False)
-                    ax_ytd.grid(axis="y", alpha=0.2, color=C_GRIS)
+                    ax_ytd.spines["left"].set_color(C_GRIS)
+                    ax_ytd.spines["bottom"].set_color(C_GRIS)
+                    ax_ytd.grid(axis="y", alpha=0.18, color=C_GRIS)
                     ax_ytd.set_title("Performance YTD par Fonds (%)",
                                      fontsize=10, fontweight="bold",
                                      color=C_MARINE, pad=7)
@@ -1509,24 +1433,24 @@ with tab_perf:
                     plt.close(fig_ytd)
 
         except Exception as e:
-            st.error(f"Erreur lors du traitement du fichier NAV : {e}")
+            st.error(f"Erreur traitement fichier NAV : {e}")
             import traceback
-            with st.expander("Details de l'erreur"):
+            with st.expander("Details"):
                 st.code(traceback.format_exc())
 
     else:
         st.markdown(f"""
-        <div style="background:{C_MARINE}05;border:2px dashed {C_MARINE}22;
-                    border-radius:12px;padding:46px;text-align:center;margin-top:14px;">
-            <div style="font-size:0.98rem;font-weight:700;color:{C_MARINE};
+        <div style="background:{C_MARINE}04;border:2px dashed {C_MARINE}1E;
+                    border-radius:10px;padding:44px;text-align:center;margin-top:12px;">
+            <div style="font-size:0.96rem;font-weight:700;color:{C_MARINE};
                         margin-bottom:5px;">Module Performance et NAV</div>
-            <div style="color:#777;font-size:0.83rem;max-width:400px;
+            <div style="color:#777;font-size:0.81rem;max-width:380px;
                         margin:0 auto;line-height:1.65;">
                 Chargez un fichier Excel ou CSV avec les colonnes
                 <code>Date</code>, <code>Fonds</code>, <code>NAV</code>
-                pour generer les courbes Base 100 et le tableau de performances.<br><br>
+                pour generer les courbes Base 100 et le tableau de
+                performances.<br><br>
                 Utilisez le bouton <b>Generer un fichier NAV de demonstration</b>
-                pour un exemple immediatement testable.
+                pour un exemple testable immediatement.
             </div>
-        </div>
-        """, unsafe_allow_html=True)
+        </div>""", unsafe_allow_html=True)
