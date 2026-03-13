@@ -1,11 +1,12 @@
 # =============================================================================
 # database.py — Couche d'acces aux donnees SQLite
-# CRM Asset Management — FEA/Amundi Edition Strategique
-# Senior Software Engineer refactoring :
-#   - Filtrage fund-by-fund via _fonds_clause() (zero injection SQL, zero crash vide)
-#   - Audit trail transactionnel
-#   - Metriques geographiques (AUM par region)
-#   - Sales tracking
+# CRM Asset Management — Amundi Research Grade Edition
+# Standards :
+#   - Filtrage fund-by-fund via _fonds_clause() (clause IN dynamique, zero injection)
+#   - Audit trail transactionnel atomique
+#   - Metriques geographiques et sales tracking
+#   - _clean_pipeline_df() : contrat de types strict (float64, date, str)
+#   - get_lost_deals_detail() et get_overdue_detail() pour modales drill-down
 # =============================================================================
 
 import sqlite3
@@ -23,13 +24,22 @@ _AUDIT_CHAMPS       = ["statut", "fonds", "target_aum_initial",
                        "revised_aum", "funded_aum", "raison_perte"]
 
 FONDS_REFERENTIEL = [
-    "Global Value", "International Fund", "Income Builder",
-    "Resilient Equity", "Private Debt", "Active ETFs",
+    "Global Value",
+    "International Fund",
+    "Income Builder",
+    "Resilient Equity",
+    "Private Debt",
+    "Active ETFs",
 ]
 
 REGIONS_REFERENTIEL = [
-    "GCC", "EMEA", "APAC", "Nordics",
-    "Asia ex-Japan", "North America", "LatAm",
+    "GCC",
+    "EMEA",
+    "APAC",
+    "Nordics",
+    "Asia ex-Japan",
+    "North America",
+    "LatAm",
 ]
 
 
@@ -46,7 +56,7 @@ def get_connection() -> sqlite3.Connection:
 
 # ---------------------------------------------------------------------------
 # HELPER FILTRAGE FUND-BY-FUND
-# Gestion de la clause IN() sans erreur syntaxique si la liste est vide.
+# Clause IN() dynamique — zero erreur syntaxique si liste vide.
 # ---------------------------------------------------------------------------
 
 def _fonds_clause(
@@ -57,12 +67,10 @@ def _fonds_clause(
     Construit la clause SQL pour le filtrage fonds-by-fonds.
 
     Regles de securite :
-    - Si fonds_filter est None ou vide  → ("", [])   pas de filtrage
-    - Sinon                             → ("AND {alias}.fonds IN (?,?,...)", [fonds...])
+    - Si fonds_filter est None ou vide  -> ("", [])   pas de filtrage
+    - Sinon                             -> ("AND {alias}.fonds IN (?,?,...)", [fonds...])
 
-    La clause commence par AND pour s'inserer apres un WHERE existant ou
-    apres une condition dans un SELECT.
-
+    La clause commence par AND pour s'inserer apres un WHERE existant.
     Retourne (clause_str, params_list).
     """
     if not fonds_filter:
@@ -317,7 +325,7 @@ def get_client_options() -> dict:
 
 
 # ---------------------------------------------------------------------------
-# LECTURES — PIPELINE (avec fonds_filter)
+# LECTURES — PIPELINE (avec fonds_filter IN dynamique)
 # ---------------------------------------------------------------------------
 
 def get_pipeline_with_clients(
@@ -325,8 +333,8 @@ def get_pipeline_with_clients(
 ) -> pd.DataFrame:
     """
     Pipeline complet avec JOIN clients.
-    Si fonds_filter est fourni (liste non vide), filtre sur ces fonds uniquement.
-    Tous les types sont normalises via _clean_pipeline_df().
+    Si fonds_filter est fourni (liste non vide), filtre sur ces fonds via IN().
+    Tous les types normalises via _clean_pipeline_df().
     """
     fonds_sql, fonds_params = _fonds_clause(fonds_filter, alias="p")
     conn = get_connection()
@@ -409,6 +417,102 @@ def get_overdue_actions(
 
 
 # ---------------------------------------------------------------------------
+# DRILL-DOWN : Deals Lost / Paused (pour modales)
+# ---------------------------------------------------------------------------
+
+def get_lost_deals_detail(
+    fonds_filter: Optional[list] = None
+) -> pd.DataFrame:
+    """
+    Retourne le detail complet des deals Lost/Paused pour affichage en modale.
+    Inclut : nom_client, fonds, statut, montant cible, raison, concurrent, commercial.
+    Filtrage fonds optionnel via clause IN dynamique.
+    """
+    fonds_sql, fonds_params = _fonds_clause(fonds_filter, alias="p")
+    conn = get_connection()
+    query = f"""
+        SELECT
+            c.nom_client       AS "Client",
+            p.fonds            AS "Fonds",
+            p.statut           AS "Statut",
+            p.target_aum_initial AS "AUM Cible",
+            p.raison_perte     AS "Raison",
+            p.concurrent_choisi AS "Concurrent",
+            p.sales_owner      AS "Commercial"
+        FROM pipeline p
+        JOIN clients c ON c.id = p.client_id
+        WHERE p.statut IN ('Lost', 'Paused')
+          {fonds_sql}
+        ORDER BY p.target_aum_initial DESC
+    """
+    df = pd.read_sql_query(query, conn, params=fonds_params if fonds_params else None)
+    conn.close()
+    # Nettoyage types AUM
+    if "AUM Cible" in df.columns:
+        df["AUM Cible"] = pd.to_numeric(df["AUM Cible"], errors="coerce").fillna(0.0)
+    for col in ["Raison", "Concurrent"]:
+        if col in df.columns:
+            df[col] = df[col].fillna("—").apply(
+                lambda v: "—" if (not str(v).strip() or str(v) == "nan") else str(v)
+            )
+    return df
+
+
+def get_funded_deals_detail(
+    fonds_filter: Optional[list] = None
+) -> pd.DataFrame:
+    """Detail des deals Funded pour modale drill-down KPI AUM Finance."""
+    fonds_sql, fonds_params = _fonds_clause(fonds_filter, alias="p")
+    conn = get_connection()
+    query = f"""
+        SELECT
+            c.nom_client   AS "Client",
+            p.fonds        AS "Fonds",
+            c.type_client  AS "Type",
+            c.region       AS "Region",
+            p.funded_aum   AS "AUM Finance",
+            p.sales_owner  AS "Commercial"
+        FROM pipeline p
+        JOIN clients c ON c.id = p.client_id
+        WHERE p.statut = 'Funded' AND p.funded_aum > 0
+          {fonds_sql}
+        ORDER BY p.funded_aum DESC
+    """
+    df = pd.read_sql_query(query, conn, params=fonds_params if fonds_params else None)
+    conn.close()
+    if "AUM Finance" in df.columns:
+        df["AUM Finance"] = pd.to_numeric(df["AUM Finance"], errors="coerce").fillna(0.0)
+    return df
+
+
+def get_active_deals_detail(
+    fonds_filter: Optional[list] = None
+) -> pd.DataFrame:
+    """Detail des deals actifs pour modale drill-down KPI Pipeline Actif."""
+    fonds_sql, fonds_params = _fonds_clause(fonds_filter, alias="p")
+    conn = get_connection()
+    query = f"""
+        SELECT
+            c.nom_client   AS "Client",
+            p.fonds        AS "Fonds",
+            p.statut       AS "Statut",
+            p.revised_aum  AS "AUM Revise",
+            p.sales_owner  AS "Commercial",
+            p.next_action_date AS "Prochaine Action"
+        FROM pipeline p
+        JOIN clients c ON c.id = p.client_id
+        WHERE p.statut IN ('Prospect','Initial Pitch','Due Diligence','Soft Commit')
+          {fonds_sql}
+        ORDER BY p.revised_aum DESC
+    """
+    df = pd.read_sql_query(query, conn, params=fonds_params if fonds_params else None)
+    conn.close()
+    if "AUM Revise" in df.columns:
+        df["AUM Revise"] = pd.to_numeric(df["AUM Revise"], errors="coerce").fillna(0.0)
+    return df
+
+
+# ---------------------------------------------------------------------------
 # LECTURES — AUDIT LOG
 # ---------------------------------------------------------------------------
 
@@ -436,39 +540,42 @@ def get_audit_log(pipeline_id: int) -> pd.DataFrame:
 def get_sales_metrics(
     fonds_filter: Optional[list] = None
 ) -> pd.DataFrame:
-    today_str = date.today().isoformat()
+    """
+    Metriques aggregees par commercial.
+    Clause IN dynamique pour filtrage fonds optionnel.
+    """
     fonds_sql, fonds_params = _fonds_clause(fonds_filter, alias="p")
     conn = get_connection()
     query = f"""
         SELECT
-            p.sales_owner                                            AS "Commercial",
-            COUNT(*)                                                  AS "Nb Deals",
-            COUNT(CASE WHEN p.statut='Funded' THEN 1 END)            AS "Funded",
-            COUNT(CASE WHEN p.statut IN
-                  ('Prospect','Initial Pitch','Due Diligence','Soft Commit')
-                  THEN 1 END)                                         AS "Actifs",
-            COUNT(CASE WHEN p.statut='Lost' THEN 1 END)              AS "Perdus",
-            COALESCE(SUM(
-                CASE WHEN p.statut='Funded' THEN p.funded_aum END
-            ), 0)                                                     AS "AUM Finance",
-            COALESCE(SUM(
-                CASE WHEN p.statut IN
-                ('Prospect','Initial Pitch','Due Diligence','Soft Commit')
-                THEN p.revised_aum END
-            ), 0)                                                     AS "Pipeline Actif",
-            COUNT(CASE WHEN p.next_action_date < ?
-                  AND p.statut NOT IN ('Lost','Redeemed','Funded')
-                  THEN 1 END)                                         AS "Actions en retard"
+            p.sales_owner                                      AS "Commercial",
+            COUNT(*)                                           AS "Nb Deals",
+            SUM(CASE WHEN p.statut='Funded'     THEN 1 ELSE 0 END) AS "Funded",
+            SUM(CASE WHEN p.statut='Lost'       THEN 1 ELSE 0 END) AS "Perdus",
+            SUM(CASE WHEN p.statut IN ('Prospect','Initial Pitch',
+                                       'Due Diligence','Soft Commit')
+                     THEN 1 ELSE 0 END)                        AS "Actifs",
+            COALESCE(SUM(CASE WHEN p.statut='Funded'
+                         THEN p.funded_aum ELSE 0 END), 0)     AS "AUM Finance",
+            COALESCE(SUM(CASE WHEN p.statut IN ('Prospect','Initial Pitch',
+                                                 'Due Diligence','Soft Commit')
+                         THEN p.revised_aum ELSE 0 END), 0)   AS "Pipeline Actif",
+            SUM(CASE WHEN p.next_action_date < DATE('now')
+                      AND p.statut NOT IN ('Lost','Redeemed','Funded')
+                     THEN 1 ELSE 0 END)                        AS "Actions en retard"
         FROM pipeline p
         WHERE 1=1 {fonds_sql}
         GROUP BY p.sales_owner
         ORDER BY "AUM Finance" DESC
     """
-    params = [today_str] + fonds_params
-    df = pd.read_sql_query(query, conn, params=params)
+    df = pd.read_sql_query(query, conn, params=fonds_params if fonds_params else None)
     conn.close()
     for col in ["AUM Finance", "Pipeline Actif"]:
-        df[col] = pd.to_numeric(df[col], errors="coerce").fillna(0.0)
+        if col in df.columns:
+            df[col] = pd.to_numeric(df[col], errors="coerce").fillna(0.0)
+    for col in ["Nb Deals", "Funded", "Perdus", "Actifs", "Actions en retard"]:
+        if col in df.columns:
+            df[col] = pd.to_numeric(df[col], errors="coerce").fillna(0).astype(int)
     return df
 
 
@@ -476,21 +583,24 @@ def get_next_actions_by_sales(
     days_ahead: int = 30,
     fonds_filter: Optional[list] = None
 ) -> pd.DataFrame:
-    today_str   = date.today().isoformat()
-    horizon_str = (date.today() + timedelta(days=days_ahead)).isoformat()
+    """Actions a relancer dans les N prochains jours."""
+    today_str = date.today().isoformat()
+    limit_str = (date.today() + timedelta(days=days_ahead)).isoformat()
     fonds_sql, fonds_params = _fonds_clause(fonds_filter, alias="p")
     conn = get_connection()
     query = f"""
-        SELECT p.sales_owner, c.nom_client, p.fonds, p.statut,
-               p.next_action_date, p.revised_aum
+        SELECT
+            c.nom_client AS nom_client,
+            p.fonds, p.statut, p.next_action_date,
+            p.sales_owner, p.revised_aum
         FROM pipeline p
         JOIN clients c ON c.id = p.client_id
-        WHERE p.statut NOT IN ('Lost','Redeemed','Funded')
-          AND (p.next_action_date <= ? OR p.next_action_date < ?)
+        WHERE p.next_action_date BETWEEN ? AND ?
+          AND p.statut NOT IN ('Lost','Redeemed','Funded')
           {fonds_sql}
-        ORDER BY p.sales_owner, p.next_action_date ASC
+        ORDER BY p.next_action_date ASC
     """
-    params = [horizon_str, today_str] + fonds_params
+    params = [today_str, limit_str] + fonds_params
     df = pd.read_sql_query(query, conn, params=params)
     conn.close()
     return _clean_pipeline_df(df)
@@ -499,23 +609,24 @@ def get_next_actions_by_sales(
 def get_sales_owners() -> list:
     conn = get_connection()
     c = conn.cursor()
-    c.execute("SELECT DISTINCT sales_owner FROM pipeline "
-              "WHERE sales_owner IS NOT NULL ORDER BY sales_owner")
+    c.execute(
+        "SELECT DISTINCT sales_owner FROM pipeline "
+        "WHERE sales_owner != 'Non assigne' ORDER BY sales_owner"
+    )
     owners = [r[0] for r in c.fetchall()]
     conn.close()
     return owners
 
 
 # ---------------------------------------------------------------------------
-# LECTURES — KPIs ANALYTIQUES (avec fonds_filter)
+# LECTURES — KPIs ANALYTIQUES (avec fonds_filter IN dynamique)
 # ---------------------------------------------------------------------------
 
 def get_kpis(fonds_filter: Optional[list] = None) -> dict:
     """
     Calcule les KPIs principaux.
     Si fonds_filter est fourni, TOUTES les agregations sont restreintes
-    a ces fonds. La clause _fonds_clause() garantit qu'une liste vide
-    ne genere pas de SQL invalide.
+    a ces fonds via clause IN dynamique. Une liste vide ne genere pas de SQL invalide.
     """
     fonds_sql, fonds_params = _fonds_clause(fonds_filter, alias="p")
     conn = get_connection()
@@ -552,6 +663,13 @@ def get_kpis(fonds_filter: Optional[list] = None) -> dict:
         fonds_params
     )
     nb_lost = int(c.fetchone()[0])
+
+    c.execute(
+        f"SELECT COUNT(*) FROM pipeline p "
+        f"WHERE p.statut='Paused' {fonds_sql}",
+        fonds_params
+    )
+    nb_paused = int(c.fetchone()[0])
 
     taux_conv = (
         nb_funded / (nb_funded + nb_lost) * 100
@@ -620,6 +738,7 @@ def get_kpis(fonds_filter: Optional[list] = None) -> dict:
         "nb_deals_actifs":    nb_deals_actifs,
         "nb_funded":          nb_funded,
         "nb_lost":            nb_lost,
+        "nb_paused":          nb_paused,
         "aum_by_type":        aum_by_type,
         "top_deals":          top_deals,
         "statut_repartition": statut_repartition,
@@ -628,7 +747,7 @@ def get_kpis(fonds_filter: Optional[list] = None) -> dict:
 
 
 # ---------------------------------------------------------------------------
-# LECTURES — AUM PAR REGION (nouvelle metrique geographique)
+# LECTURES — AUM PAR REGION (metrique geographique)
 # ---------------------------------------------------------------------------
 
 def get_aum_by_region(
@@ -637,7 +756,7 @@ def get_aum_by_region(
     """
     AUM Funded agrege par region geographique.
     Inclut uniquement les regions avec AUM > 0.
-    Compatible avec le filtrage fund-by-fund.
+    Compatible avec le filtrage fund-by-fund via IN dynamique.
     """
     fonds_sql, fonds_params = _fonds_clause(fonds_filter, alias="p")
     conn = get_connection()
@@ -887,14 +1006,14 @@ def upsert_pipeline_from_df(df: pd.DataFrame) -> tuple:
         if not fonds:
             continue
 
-        statut       = str(row.get("statut", "Prospect"))
-        raison       = str(row.get("raison_perte", "") or "").strip() or None
-        concurrent   = str(row.get("concurrent_choisi", "") or "").strip() or None
-        next_action  = str(row.get("next_action_date", "") or "").strip() or None
-        target_aum   = float(row.get("target_aum_initial", 0) or 0)
-        revised_aum  = float(row.get("revised_aum", 0) or 0)
-        funded_aum   = float(row.get("funded_aum", 0) or 0)
-        sales_owner  = str(row.get("sales_owner", "Non assigne") or "Non assigne")
+        statut      = str(row.get("statut", "Prospect"))
+        raison      = str(row.get("raison_perte", "") or "").strip() or None
+        concurrent  = str(row.get("concurrent_choisi", "") or "").strip() or None
+        next_action = str(row.get("next_action_date", "") or "").strip() or None
+        target_aum  = float(row.get("target_aum_initial", 0) or 0)
+        revised_aum = float(row.get("revised_aum", 0) or 0)
+        funded_aum  = float(row.get("funded_aum", 0) or 0)
+        sales_owner = str(row.get("sales_owner", "Non assigne") or "Non assigne")
 
         c.execute("SELECT id FROM pipeline WHERE client_id=? AND fonds=?",
                   (client_id, fonds))
