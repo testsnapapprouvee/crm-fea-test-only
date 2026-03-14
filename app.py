@@ -182,7 +182,7 @@ st.markdown("""
 
 /* Card commercial */
 .sales-card {
-    background: #ffffff;
+    background: #f4f8fc;
     border: 1px solid #001c4b18;
     padding: 13px;
     border-top: 3px solid #019ee1;
@@ -201,7 +201,7 @@ st.markdown("""
 
 /* Onglets — angulaires */
 .stTabs [data-baseweb="tab-list"] {
-    background: #ffffff;
+    background: #f0f4f8;
     border-bottom: 2px solid #001c4b20;
     gap: 0;
 }
@@ -393,6 +393,69 @@ def modal_lost(fonds_filter=None):
         df2["AUM_Cible"] = df2["AUM_Cible"].apply(fmt_m)
     st.dataframe(df2, use_container_width=True, hide_index=True,
                  height=min(420, 46 + len(df2) * 36))
+
+
+@st.dialog("Detail — Activites et Notes")
+def modal_activities(client_nom=None):
+    """Affiche toutes les activites + notes pour un client ou les 30 dernieres."""
+    df = db.get_activities()
+    if not df.empty and client_nom:
+        df = df[df["nom_client"] == client_nom]
+    if df.empty:
+        st.info("Aucune activite enregistree.")
+        return
+    # Affichage plat, lisible, avec notes completes
+    for _, row in df.iterrows():
+        st.markdown(
+            "<div style='border-left:2px solid #019ee1;padding:6px 12px;"
+            "margin:4px 0;background:#f4f8fc;'>"
+            "<div style='font-size:0.78rem;font-weight:700;color:#001c4b;'>"
+            "{client} &nbsp;<span style='color:#019ee1;font-weight:400;'>"
+            "{type}</span>&nbsp;"
+            "<span style='color:#888;font-size:0.70rem;'>{date}</span></div>"
+            "<div style='font-size:0.80rem;color:#444;margin-top:3px;'>"
+            "{notes}</div></div>".format(
+                client=row.get("nom_client",""),
+                type=row.get("type_interaction",""),
+                date=str(row.get("date","")),
+                notes=str(row.get("notes","")) or "<em style='color:#aaa;'>Aucune note</em>",
+            ),
+            unsafe_allow_html=True
+        )
+
+
+@st.dialog("Detail — Actions en Retard")
+def modal_overdue_detail():
+    df = db.get_overdue_actions()
+    if df.empty:
+        st.info("Aucune action en retard.")
+        return
+    today = date.today()
+    for _, row in df.iterrows():
+        nad = row.get("next_action_date")
+        days = (today - nad).days if isinstance(nad, date) else 0
+        nad_str = nad.isoformat() if isinstance(nad, date) else "—"
+        st.markdown(
+            "<div style='border-left:2px solid #f07d00;padding:6px 12px;"
+            "margin:4px 0;'>"
+            "<div style='font-size:0.80rem;font-weight:700;color:#001c4b;'>"
+            "{client}</div>"
+            "<div style='font-size:0.75rem;color:#555;'>"
+            "{fonds} &middot; {statut} &middot; "
+            "<b>{owner}</b></div>"
+            "<div style='font-size:0.72rem;margin-top:2px;'>"
+            "Prevue le <b>{nad}</b> &nbsp;"
+            "<span style='background:#f07d00;color:#fff;padding:1px 6px;"
+            "font-size:0.66rem;font-weight:700;'>RETARD +{days}j</span>"
+            "</div></div>".format(
+                client=row.get("nom_client",""),
+                fonds=row.get("fonds",""),
+                statut=row.get("statut",""),
+                owner=row.get("sales_owner",""),
+                nad=nad_str, days=days,
+            ),
+            unsafe_allow_html=True
+        )
 
 
 # ---------------------------------------------------------------------------
@@ -695,16 +758,32 @@ with tab_ingest:
         st.markdown("#### Dernieres Activites")
         df_act = db.get_activities()
         if not df_act.empty:
-            st.dataframe(
-                df_act[["nom_client", "date", "type_interaction", "notes"]].head(10),
-                use_container_width=True, height=250, hide_index=True,
-                column_config={
-                    "nom_client":       st.column_config.TextColumn("Client"),
-                    "date":             st.column_config.TextColumn("Date"),
-                    "type_interaction": st.column_config.TextColumn("Type"),
-                    "notes":            st.column_config.TextColumn("Notes"),
-                }
-            )
+            for _, arow in df_act.head(10).iterrows():
+                notes_preview = str(arow.get("notes") or "")[:60]
+                if len(str(arow.get("notes") or "")) > 60:
+                    notes_preview += "..."
+                col_a, col_b = st.columns([4, 1])
+                with col_a:
+                    st.markdown(
+                        "<div style='border-left:2px solid #019ee1;padding:4px 10px;"
+                        "margin:2px 0;'>"
+                        "<span style='font-size:0.78rem;font-weight:700;color:#001c4b;'>"
+                        "{client}</span>"
+                        " <span style='font-size:0.70rem;color:#019ee1;'>{type}</span>"
+                        " <span style='font-size:0.68rem;color:#888;'>{date}</span>"
+                        "<div style='font-size:0.74rem;color:#555;margin-top:1px;'>"
+                        "{notes}</div></div>".format(
+                            client=arow.get("nom_client",""),
+                            type=arow.get("type_interaction",""),
+                            date=str(arow.get("date","")),
+                            notes=notes_preview or "<em>—</em>",
+                        ),
+                        unsafe_allow_html=True
+                    )
+                with col_b:
+                    if st.button("Notes", key="act_{}".format(arow.get("id","")),
+                                 use_container_width=True):
+                        modal_activities(arow.get("nom_client"))
 
 
 # ============================================================================
@@ -765,11 +844,17 @@ with tab_pipeline:
     )
 
     selected_rows = event.selection.rows if event.selection else []
+    pipeline_id   = None
 
     if len(selected_rows) > 0:
-        sel_row     = df_view.iloc[selected_rows[0]]
-        pipeline_id = int(sel_row["id"])
-        row_data    = db.get_pipeline_row_by_id(pipeline_id)
+        sel_idx = selected_rows[0]
+        # Use df_display (not df_view) — it matches what is shown in the table.
+        # df_view may have a different length if filters changed after rendering.
+        if sel_idx < len(df_display):
+            pipeline_id = int(df_display.iloc[sel_idx]["id"])
+
+    if pipeline_id is not None:
+        row_data = db.get_pipeline_row_by_id(pipeline_id)
 
         if row_data:
             client_name    = str(row_data.get("nom_client", ""))
@@ -1072,34 +1157,41 @@ with tab_dash:
     # Alertes retard
     df_overdue = db.get_overdue_actions()
     if not df_overdue.empty:
-        with st.expander(
-            "Actions en retard — {} alerte(s)".format(len(df_overdue)),
-            expanded=True
-        ):
-            for _, row in df_overdue.iterrows():
-                nad = row.get("next_action_date")
-                if isinstance(nad, date):
-                    days_late = (date.today() - nad).days
-                    nad_str   = nad.isoformat()
-                else:
-                    days_late = 0
-                    nad_str   = str(nad or "—")
-                owner = str(row.get("sales_owner", "")) or ""
-                st.markdown(
-                    '<div class="alert-overdue">'
-                    '<b>{client}</b> — {fonds}'
-                    ' <span style="color:{ciel};font-weight:600;">({statut})</span>'
-                    ' — Prevue le <b>{nad}</b>'
-                    ' &nbsp;<span class="badge-retard">RETARD +{days}j</span>'
-                    '{owner_part}'
-                    '</div>'.format(
-                        client=row["nom_client"], fonds=row["fonds"],
-                        ciel=CIEL, statut=row["statut"], nad=nad_str,
-                        days=days_late,
-                        owner_part=" — <b>{}</b>".format(owner) if owner else ""
-                    ),
-                    unsafe_allow_html=True
-                )
+        col_ov, col_ov_btn = st.columns([6, 1])
+        with col_ov:
+            st.markdown(
+                "<div style='font-size:0.84rem;font-weight:700;color:#001c4b;"
+                "border-left:3px solid #f07d00;padding:4px 10px;'>"
+                "{} action(s) en retard</div>".format(len(df_overdue)),
+                unsafe_allow_html=True
+            )
+        with col_ov_btn:
+            if st.button("Voir detail", key="btn_overdue", use_container_width=True):
+                modal_overdue_detail()
+        for _, row in df_overdue.iterrows():
+            nad = row.get("next_action_date")
+            if isinstance(nad, date):
+                days_late = (date.today() - nad).days
+                nad_str   = nad.isoformat()
+            else:
+                days_late = 0
+                nad_str   = str(nad or "—")
+            owner = str(row.get("sales_owner", "")) or ""
+            st.markdown(
+                '<div class="alert-overdue">'
+                '<b>{client}</b> — {fonds}'
+                ' <span style="color:{ciel};font-weight:600;">({statut})</span>'
+                ' — Prevue le <b>{nad}</b>'
+                ' &nbsp;<span class="badge-retard">RETARD +{days}j</span>'
+                '{owner_part}'
+                '</div>'.format(
+                    client=row["nom_client"], fonds=row["fonds"],
+                    ciel=CIEL, statut=row["statut"], nad=nad_str,
+                    days=days_late,
+                    owner_part=" — <b>{}</b>".format(owner) if owner else ""
+                ),
+                unsafe_allow_html=True
+            )
 
     # Graphiques Plotly — EXPLICITES, zero helper dict
     gcol1, gcol2, gcol3 = st.columns([1, 1, 1.2], gap="medium")
@@ -1269,8 +1361,8 @@ with tab_dash:
             bar_c = MARINE if i == 0 else B_MID if i < 3 else B_PAL
             st.markdown(
                 '<div style="display:flex;align-items:center;gap:10px;'
-                'margin:4px 0;padding:7px 12px;background:#f7fafd;'
-                'border:1px solid #001c4b0a;">'
+                'margin:4px 0;padding:7px 12px;background:transparent;'
+                'border-bottom:1px solid #e8e8e8;">'
                 '<div style="font-size:0.72rem;font-weight:700;'
                 'color:{ciel};min-width:26px;">No.{rank}</div>'
                 '<div style="flex:1;">'
@@ -1455,8 +1547,8 @@ with tab_sales:
                 aum_str = fmt_m(float(row.get("revised_aum", 0) or 0))
                 st.markdown(
                     '<div style="display:flex;align-items:center;gap:10px;'
-                    'padding:6px 12px;margin:3px 0;background:#f7fafd;'
-                    'border:1px solid #001c4b0a;'
+                    'padding:6px 12px;margin:3px 0;background:transparent;'
+                    'border-bottom:1px solid #e8e8e8;'
                     'font-size:0.78rem;">'
                     '<div style="flex:1;">'
                     '<span style="font-weight:700;color:{marine};">{client}</span>'
