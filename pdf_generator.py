@@ -1,11 +1,12 @@
 # =============================================================================
 # pdf_generator.py  —  CRM Asset Management  —  Amundi Edition
-# Charte : #001c4b Marine | #019ee1 Ciel | #f07d00 Orange
-# Design Research :
-#   - Titres de section et sous-section en Orange #f07d00
-#   - Graphiques à 65% de la largeur utile, centrés
-#   - KPI page de garde : padding généreux, effet aéré
-#   - Top 10 : page dédiée, Inflows + Outflows optionnels
+# Charte : #001c4b Marine | #019ee1 Ciel | #f07d00 Orange (unique : alertes retard)
+# Layout :
+#   Page 2 : Donuts cote a cote (Type + Region)
+#   Page 3 : Top 10 Inflows (Funded) — pleine page, 10 positions garanties
+#   Page 4 : Pipeline Actif tableau
+#   Page 5 : Performance NAV (si cochee)
+# Options cochables : include_top10, include_perf (transmises depuis sidebar)
 # =============================================================================
 
 import io
@@ -36,7 +37,7 @@ from reportlab.platypus.flowables import Flowable
 # ---------------------------------------------------------------------------
 COL_MARINE = HexColor("#001c4b")
 COL_CIEL   = HexColor("#019ee1")
-COL_ORANGE = HexColor("#f07d00")
+COL_ORANGE = HexColor("#f07d00")   # retards uniquement
 COL_BLANC  = HexColor("#ffffff")
 COL_GRIS   = HexColor("#e8e8e8")
 COL_TEXTE  = HexColor("#444444")
@@ -46,7 +47,6 @@ COL_HEADER = HexColor("#f0f5fa")
 
 HX_MARINE = "#001c4b"
 HX_CIEL   = "#019ee1"
-HX_ORANGE = "#f07d00"
 HX_BLANC  = "#ffffff"
 HX_GRIS   = "#e8e8e8"
 HX_TEXTE  = "#444444"
@@ -57,24 +57,16 @@ HX_TEXTE  = "#444444"
 PAGE_W, PAGE_H = A4
 MARGIN_H  = 2.0 * cm
 MARGIN_V  = 1.8 * cm
-USABLE_W  = PAGE_W - 2 * MARGIN_H          # 481.9 pts
+USABLE_W  = PAGE_W - 2 * MARGIN_H       # 481.9 pts
 
-# Proportions Design Research : graphiques à 65%, centrés
-CHART_W   = USABLE_W * 0.65                # 313.2 pts — largeur graphique
-CHART_PAD = (USABLE_W - CHART_W) / 2.0     # marge de centrage
+DONUT_W   = USABLE_W * 0.46
+DONUT_H   = DONUT_W  * 0.95
 
-# Donuts : 65% répartis en 2 colonnes égales
-DONUT_W   = USABLE_W * 0.325               # chaque donut = la moitié de 65%
-DONUT_H   = DONUT_W  * 1.05               # légèrement plus haut que large
+# Top 10 : pleine largeur utilisable, hauteur adaptee au nb de deals
+TOP10_W   = USABLE_W
 
-# Top 10 : 65% centré
-TOP10_W   = CHART_W
-TOP10_PAD = CHART_PAD
-
-# NAV : légèrement plus large (80%) pour la lisibilité des courbes
-NAV_W     = USABLE_W * 0.80
-NAV_H     = NAV_W * 0.42
-NAV_PAD   = (USABLE_W - NAV_W) / 2.0
+NAV_W     = USABLE_W
+NAV_H     = NAV_W * 0.40
 
 PALETTE = [
     "#1a5e8a", "#001c4b", "#4a8fbd", "#003f7a",
@@ -105,10 +97,7 @@ MPL_RC = {
 class ColorRect(Flowable):
     def __init__(self, width, height, color):
         super().__init__()
-        self.width = width
-        self.height = height
-        self.color = color
-
+        self.width = width; self.height = height; self.color = color
     def draw(self):
         self.canv.setFillColor(self.color)
         self.canv.rect(0, 0, self.width, self.height, fill=1, stroke=0)
@@ -122,30 +111,17 @@ def fmt_aum(value):
         v = float(value)
     except (TypeError, ValueError):
         return "-"
-    if v == 0:
-        return "0.0 M EUR"
     if v >= 1_000_000_000:
         return "{:.1f} Md EUR".format(v / 1_000_000_000)
-    return "{:.1f} M EUR".format(v / 1_000_000)
-
-
-def _center_image(img, img_w, img_h, pad):
-    """Encapsule une image dans un tableau centré (padding gauche/droite)."""
-    tbl = Table(
-        [[Spacer(pad, 1), img, Spacer(pad, 1)]],
-        colWidths=[pad, img_w, pad],
-    )
-    tbl.setStyle(TableStyle([
-        ("LEFTPADDING",   (0, 0), (-1, -1), 0),
-        ("RIGHTPADDING",  (0, 0), (-1, -1), 0),
-        ("TOPPADDING",    (0, 0), (-1, -1), 0),
-        ("BOTTOMPADDING", (0, 0), (-1, -1), 0),
-    ]))
-    return tbl
+    if v >= 1_000_000:
+        return "{:.1f} M EUR".format(v / 1_000_000)
+    if v >= 1_000:
+        return "{:.0f} k EUR".format(v / 1_000)
+    return "{:.0f} EUR".format(v)
 
 
 # ---------------------------------------------------------------------------
-# GRAPHIQUES MATPLOTLIB
+# GRAPHIQUES
 # ---------------------------------------------------------------------------
 
 def _make_donut_png(labels, values, title, fig_w_in, fig_h_in):
@@ -166,28 +142,23 @@ def _make_donut_png(labels, values, title, fig_w_in, fig_h_in):
             wedgeprops={"width": 0.52, "edgecolor": HX_BLANC, "linewidth": 1.5},
         )
         for at in autotexts:
-            at.set_fontsize(7.5)
-            at.set_color(HX_BLANC)
-            at.set_fontweight("bold")
+            at.set_fontsize(7.5); at.set_color(HX_BLANC); at.set_fontweight("bold")
 
         total = sum(values)
         ax.text(0,  0.10, fmt_aum(total), ha="center", va="center",
-                fontsize=8, fontweight="bold", color=HX_MARINE)
+                fontsize=8.5, fontweight="bold", color=HX_MARINE)
         ax.text(0, -0.15, "Finance", ha="center", va="center",
                 fontsize=6.5, color=HX_TEXTE)
 
-        patches = [
-            mpatches.Patch(color=colors[i],
-                           label="{}: {}".format(labels[i], fmt_aum(values[i])))
-            for i in range(len(labels))
-        ]
+        patches = [mpatches.Patch(color=colors[i],
+                   label="{}: {}".format(labels[i], fmt_aum(values[i])))
+                   for i in range(len(labels))]
         ax.legend(handles=patches, loc="lower center",
-                  bbox_to_anchor=(0.5, -0.32), ncol=2,
+                  bbox_to_anchor=(0.5, -0.30), ncol=2,
                   fontsize=6.5, frameon=False, labelcolor=HX_MARINE)
-        ax.set_title(title, fontsize=8.5, fontweight="bold",
-                     color=HX_ORANGE, pad=7)   # titre donut en orange
+        ax.set_title(title, fontsize=9, fontweight="bold", color=HX_MARINE, pad=7)
 
-    fig.subplots_adjust(left=0.02, right=0.98, top=0.88, bottom=0.26)
+    fig.subplots_adjust(left=0.02, right=0.98, top=0.88, bottom=0.24)
     buf = io.BytesIO()
     fig.savefig(buf, format="png", dpi=150, facecolor=HX_BLANC)
     plt.close(fig)
@@ -195,8 +166,11 @@ def _make_donut_png(labels, values, title, fig_w_in, fig_h_in):
     return buf
 
 
-def _make_top10_png(deals, mode_comex, fig_w_in, fig_h_in,
-                    title="Top 10 Inflows — AUM Finance"):
+def _make_top10_png(deals, mode_comex, fig_w_in, fig_h_in, title="Top 10 Inflows — AUM Finance"):
+    """
+    Bar chart horizontal — uniquement funded_aum (pas revised_aum).
+    Garantit 10 positions visibles si les donnees le permettent.
+    """
     plt.rcParams.update(MPL_RC)
     fig, ax = plt.subplots(figsize=(fig_w_in, fig_h_in))
     fig.patch.set_facecolor(HX_BLANC)
@@ -215,12 +189,15 @@ def _make_top10_png(deals, mode_comex, fig_w_in, fig_h_in,
             for d in deals_10
         ]
         values = [float(d.get("funded_aum", 0)) for d in deals_10]
+
+        # Trier par valeur decroissante
         pairs  = sorted(zip(values, labels), reverse=True)
         values = [v for v, _ in pairs]
         labels = [l for _, l in pairs]
         max_v  = max(values) if values else 1.0
 
-        colors = [HX_ORANGE if i == 0 else HX_MARINE for i in range(len(deals_10))]
+        # Palette : barre 1 en marine, reste en ciel
+        colors = [HX_MARINE if i == 0 else HX_CIEL for i in range(len(deals_10))]
         bars   = ax.barh(range(len(labels)), values,
                          color=colors, edgecolor=HX_BLANC,
                          height=0.65, linewidth=0.3)
@@ -243,8 +220,7 @@ def _make_top10_png(deals, mode_comex, fig_w_in, fig_h_in,
         ax.grid(axis="x", alpha=0.22, color=HX_GRIS, linewidth=0.35)
         ax.spines["left"].set_color(HX_GRIS)
         ax.spines["bottom"].set_color(HX_GRIS)
-        ax.set_title(title, fontsize=10, fontweight="bold",
-                     color=HX_ORANGE, pad=10)  # titre top10 en orange
+        ax.set_title(title, fontsize=10, fontweight="bold", color=HX_MARINE, pad=10)
 
     fig.subplots_adjust(left=0.26, right=0.86, top=0.92, bottom=0.06)
     buf = io.BytesIO()
@@ -266,10 +242,8 @@ def _make_nav_png(nav_df, fig_w_in, fig_h_in):
                 transform=ax.transAxes)
         ax.axis("off")
     else:
-        NAV_COLORS = [
-            "#001c4b", "#019ee1", "#1a5e8a", "#4a8fbd",
-            "#003f7a", "#2c7fb8", "#004f8c", "#6baed6",
-        ]
+        NAV_COLORS = ["#001c4b","#019ee1","#1a5e8a","#4a8fbd",
+                      "#003f7a","#2c7fb8","#004f8c","#6baed6"]
         for i, col in enumerate(nav_df.columns):
             series = nav_df[col].dropna()
             if series.empty:
@@ -285,16 +259,14 @@ def _make_nav_png(nav_df, fig_w_in, fig_h_in):
         ax.axhline(100, color=HX_GRIS, linewidth=0.7, linestyle="dotted")
         ax.set_ylabel("Base 100", fontsize=7.5, color=HX_MARINE)
         ax.tick_params(colors=HX_MARINE, labelsize=7)
-        ax.spines["top"].set_visible(False)
-        ax.spines["right"].set_visible(False)
-        ax.spines["left"].set_color(HX_GRIS)
-        ax.spines["bottom"].set_color(HX_GRIS)
+        ax.spines["top"].set_visible(False); ax.spines["right"].set_visible(False)
+        ax.spines["left"].set_color(HX_GRIS); ax.spines["bottom"].set_color(HX_GRIS)
         ax.grid(axis="y", alpha=0.18, color=HX_GRIS, linewidth=0.35)
         ax.grid(axis="x", visible=False)
         ax.legend(fontsize=7, frameon=True, framealpha=0.90,
                   edgecolor=HX_GRIS, labelcolor=HX_MARINE, loc="upper left")
         ax.set_title("Evolution NAV - Base 100",
-                     fontsize=9, fontweight="bold", color=HX_ORANGE, pad=8)
+                     fontsize=9, fontweight="bold", color=HX_MARINE, pad=8)
         plt.xticks(rotation=12, ha="right", fontsize=7)
 
     fig.subplots_adjust(left=0.08, right=0.97, top=0.90, bottom=0.14)
@@ -306,32 +278,30 @@ def _make_nav_png(nav_df, fig_w_in, fig_h_in):
 
 
 # ---------------------------------------------------------------------------
-# STYLES REPORTLAB
-# Titres de section et sous-section : Orange #f07d00 (Design Research)
+# STYLES
 # ---------------------------------------------------------------------------
 def _build_styles():
-    s_cover   = ParagraphStyle("cover",   fontName="Helvetica",         fontSize=9,    textColor=COL_BLANC,  leading=17)
-    # Titres de section → Orange
-    s_section = ParagraphStyle("section", fontName="Helvetica-Bold",    fontSize=11,   textColor=COL_ORANGE, spaceBefore=10, spaceAfter=4)
-    s_subsect = ParagraphStyle("subsect", fontName="Helvetica-Bold",    fontSize=9,    textColor=COL_ORANGE, spaceBefore=6,  spaceAfter=3)
-    s_body    = ParagraphStyle("body",    fontName="Helvetica",         fontSize=8.5,  textColor=COL_TEXTE,  spaceAfter=4,  leading=13)
-    s_th      = ParagraphStyle("th",      fontName="Helvetica-Bold",    fontSize=7.5,  textColor=COL_BLANC,  alignment=TA_LEFT)
-    s_th_r    = ParagraphStyle("th_r",    fontName="Helvetica-Bold",    fontSize=7.5,  textColor=COL_BLANC,  alignment=TA_RIGHT)
-    s_td      = ParagraphStyle("td",      fontName="Helvetica",         fontSize=7.5,  textColor=COL_MARINE, alignment=TA_LEFT)
-    s_td_r    = ParagraphStyle("td_r",    fontName="Helvetica",         fontSize=7.5,  textColor=COL_MARINE, alignment=TA_RIGHT)
-    s_td_g    = ParagraphStyle("td_g",    fontName="Helvetica",         fontSize=7.5,  textColor=COL_TEXTE,  alignment=TA_LEFT)
-    s_kpi_lbl = ParagraphStyle("kpi_lbl", fontName="Helvetica",         fontSize=7.5,  textColor=COL_BLANC,  alignment=TA_CENTER)
-    s_kpi_val = ParagraphStyle("kpi_val", fontName="Helvetica-Bold",    fontSize=16,   textColor=COL_BLANC,  alignment=TA_CENTER)
-    s_disc    = ParagraphStyle("disc",    fontName="Helvetica-Oblique", fontSize=6.5,  textColor=COL_TEXTE,  alignment=TA_CENTER, leading=10)
-    s_pth_l   = ParagraphStyle("pth_l",  fontName="Helvetica-Bold",    fontSize=7.5,  textColor=COL_BLANC,  alignment=TA_LEFT)
-    s_pth_r   = ParagraphStyle("pth_r",  fontName="Helvetica-Bold",    fontSize=7.5,  textColor=COL_BLANC,  alignment=TA_RIGHT)
-    s_ptd_l   = ParagraphStyle("ptd_l",  fontName="Helvetica",         fontSize=7.5,  textColor=COL_MARINE, alignment=TA_LEFT)
-    s_ptd     = ParagraphStyle("ptd",    fontName="Helvetica",         fontSize=7.5,  textColor=COL_MARINE, alignment=TA_RIGHT)
-    s_ppos    = ParagraphStyle("ppos",   fontName="Helvetica-Bold",    fontSize=7.5,  textColor=COL_VERT,   alignment=TA_RIGHT)
-    s_pneg    = ParagraphStyle("pneg",   fontName="Helvetica-Bold",    fontSize=7.5,  textColor=COL_ROUGE,  alignment=TA_RIGHT)
-    s_caption = ParagraphStyle("caption",fontName="Helvetica-Oblique", fontSize=6.5,  textColor=COL_TEXTE,  alignment=TA_CENTER, spaceAfter=3)
-    # Badge retard : orange
-    s_alert   = ParagraphStyle("alert",  fontName="Helvetica-Bold",    fontSize=7.5,  textColor=COL_ORANGE, alignment=TA_LEFT)
+    s_cover   = ParagraphStyle("cover",   fontName="Helvetica",      fontSize=9,   textColor=COL_BLANC, leading=17)
+    s_section = ParagraphStyle("section", fontName="Helvetica-Bold", fontSize=11,  textColor=COL_CIEL,  spaceBefore=10, spaceAfter=4)
+    s_subsect = ParagraphStyle("subsect", fontName="Helvetica-Bold", fontSize=9,   textColor=COL_MARINE, spaceBefore=6, spaceAfter=3)
+    s_body    = ParagraphStyle("body",    fontName="Helvetica",      fontSize=8.5, textColor=COL_TEXTE, spaceAfter=4, leading=13)
+    s_th      = ParagraphStyle("th",      fontName="Helvetica-Bold", fontSize=7.5, textColor=COL_BLANC, alignment=TA_LEFT)
+    s_th_r    = ParagraphStyle("th_r",    fontName="Helvetica-Bold", fontSize=7.5, textColor=COL_BLANC, alignment=TA_RIGHT)
+    s_td      = ParagraphStyle("td",      fontName="Helvetica",      fontSize=7.5, textColor=COL_MARINE, alignment=TA_LEFT)
+    s_td_r    = ParagraphStyle("td_r",    fontName="Helvetica",      fontSize=7.5, textColor=COL_MARINE, alignment=TA_RIGHT)
+    s_td_g    = ParagraphStyle("td_g",    fontName="Helvetica",      fontSize=7.5, textColor=COL_TEXTE,  alignment=TA_LEFT)
+    s_kpi_lbl = ParagraphStyle("kpi_lbl", fontName="Helvetica",      fontSize=7,   textColor=COL_BLANC, alignment=TA_CENTER)
+    s_kpi_val = ParagraphStyle("kpi_val", fontName="Helvetica-Bold", fontSize=15,  textColor=COL_BLANC, alignment=TA_CENTER)
+    s_disc    = ParagraphStyle("disc",    fontName="Helvetica-Oblique", fontSize=6.5, textColor=COL_TEXTE, alignment=TA_CENTER, leading=10)
+    s_pth_l   = ParagraphStyle("pth_l",  fontName="Helvetica-Bold", fontSize=7.5, textColor=COL_BLANC, alignment=TA_LEFT)
+    s_pth_r   = ParagraphStyle("pth_r",  fontName="Helvetica-Bold", fontSize=7.5, textColor=COL_BLANC, alignment=TA_RIGHT)
+    s_ptd_l   = ParagraphStyle("ptd_l",  fontName="Helvetica",      fontSize=7.5, textColor=COL_MARINE, alignment=TA_LEFT)
+    s_ptd     = ParagraphStyle("ptd",    fontName="Helvetica",      fontSize=7.5, textColor=COL_MARINE, alignment=TA_RIGHT)
+    s_ppos    = ParagraphStyle("ppos",   fontName="Helvetica-Bold", fontSize=7.5, textColor=COL_VERT,   alignment=TA_RIGHT)
+    s_pneg    = ParagraphStyle("pneg",   fontName="Helvetica-Bold", fontSize=7.5, textColor=COL_ROUGE,  alignment=TA_RIGHT)
+    s_caption = ParagraphStyle("caption",fontName="Helvetica-Oblique", fontSize=7, textColor=COL_TEXTE, alignment=TA_CENTER, spaceAfter=3)
+    s_alert   = ParagraphStyle("alert",  fontName="Helvetica-Bold", fontSize=7.5, textColor=COL_ORANGE, alignment=TA_LEFT)
+    s_t10_hdr = ParagraphStyle("t10_hdr",fontName="Helvetica-Bold", fontSize=13,  textColor=COL_MARINE, alignment=TA_LEFT, spaceBefore=0, spaceAfter=8)
     return {
         "cover": s_cover, "section": s_section, "subsect": s_subsect,
         "body": s_body, "th": s_th, "th_r": s_th_r,
@@ -339,13 +309,12 @@ def _build_styles():
         "kpi_lbl": s_kpi_lbl, "kpi_val": s_kpi_val, "disc": s_disc,
         "pth_l": s_pth_l, "pth_r": s_pth_r, "ptd_l": s_ptd_l,
         "ptd": s_ptd, "ppos": s_ppos, "pneg": s_pneg,
-        "caption": s_caption, "alert": s_alert,
+        "caption": s_caption, "alert": s_alert, "t10_hdr": s_t10_hdr,
     }
 
 
 # ---------------------------------------------------------------------------
 # PAGE DE GARDE
-# KPI bandeau : padding augmenté pour un rendu aéré (plus de "tassé")
 # ---------------------------------------------------------------------------
 def _page_garde(styles, mode_comex, kpis, fonds_perimetre):
     elements = []
@@ -353,7 +322,7 @@ def _page_garde(styles, mode_comex, kpis, fonds_perimetre):
     perim_str = ", ".join(fonds_perimetre) if fonds_perimetre else "Tous les fonds"
 
     cover_text = (
-        "<font color='#f07d00' size='7'>CONFIDENTIEL"
+        "<font color='#019ee1' size='7'>CONFIDENTIEL"
         + ("  |  MODE COMEX ACTIF" if mode_comex else "")
         + "</font><br/><br/>"
         "<font color='white' size='22'><b>Executive Report</b></font><br/>"
@@ -364,19 +333,17 @@ def _page_garde(styles, mode_comex, kpis, fonds_perimetre):
     )
     cover_tbl = Table([[Paragraph(cover_text, styles["cover"])]], colWidths=[USABLE_W])
     cover_tbl.setStyle(TableStyle([
-        ("BACKGROUND",    (0, 0), (-1, -1), COL_MARINE),
-        ("TOPPADDING",    (0, 0), (-1, -1), 48),
-        ("BOTTOMPADDING", (0, 0), (-1, -1), 56),
-        ("LEFTPADDING",   (0, 0), (-1, -1), 36),
-        ("RIGHTPADDING",  (0, 0), (-1, -1), 24),
+        ("BACKGROUND",    (0,0),(-1,-1), COL_MARINE),
+        ("TOPPADDING",    (0,0),(-1,-1), 44),
+        ("BOTTOMPADDING", (0,0),(-1,-1), 52),
+        ("LEFTPADDING",   (0,0),(-1,-1), 30),
+        ("RIGHTPADDING",  (0,0),(-1,-1), 20),
     ]))
     elements.append(cover_tbl)
     elements.append(Spacer(1, 2))
-    # Filet orange — accent unique
-    elements.append(ColorRect(USABLE_W, 4, COL_ORANGE))
-    elements.append(Spacer(1, 20))
+    elements.append(ColorRect(USABLE_W, 3.5, COL_CIEL))
+    elements.append(Spacer(1, 16))
 
-    # KPI cards — padding généreux, effet aéré
     kpi_items = [
         ("AUM Finance Total", fmt_aum(kpis.get("total_funded", 0))),
         ("Pipeline Actif",    fmt_aum(kpis.get("pipeline_actif", 0))),
@@ -388,19 +355,19 @@ def _page_garde(styles, mode_comex, kpis, fonds_perimetre):
         [[Paragraph(i[0], styles["kpi_lbl"]) for i in kpi_items],
          [Paragraph(i[1], styles["kpi_val"]) for i in kpi_items]],
         colWidths=[col_w] * 4,
-        rowHeights=[1.10 * cm, 1.50 * cm],   # hauteurs augmentées — rendu aéré
+        rowHeights=[0.85*cm, 1.10*cm],
     )
     kpi_tbl.setStyle(TableStyle([
-        ("BACKGROUND",    (0, 0), (-1, -1), COL_MARINE),
-        ("VALIGN",        (0, 0), (-1, -1), "MIDDLE"),
-        ("TOPPADDING",    (0, 0), (-1, -1), 14),   # padding vertical doublé
-        ("BOTTOMPADDING", (0, 0), (-1, -1), 14),
-        ("LEFTPADDING",   (0, 0), (-1, -1), 10),   # padding horizontal doublé
-        ("RIGHTPADDING",  (0, 0), (-1, -1), 10),
-        ("LINEAFTER",     (0, 0), (2, -1),  0.5, COL_ORANGE),   # séparateur orange
+        ("BACKGROUND",    (0,0),(-1,-1), COL_MARINE),
+        ("VALIGN",        (0,0),(-1,-1), "MIDDLE"),
+        ("TOPPADDING",    (0,0),(-1,-1), 6),
+        ("BOTTOMPADDING", (0,0),(-1,-1), 6),
+        ("LEFTPADDING",   (0,0),(-1,-1), 4),
+        ("RIGHTPADDING",  (0,0),(-1,-1), 4),
+        ("LINEAFTER",     (0,0),(2,-1),  0.4, COL_CIEL),
     ]))
     elements.append(kpi_tbl)
-    elements.append(Spacer(1, 14))
+    elements.append(Spacer(1, 10))
 
     disc = (
         "Document strictement confidentiel a usage interne exclusif. "
@@ -415,14 +382,17 @@ def _page_garde(styles, mode_comex, kpis, fonds_perimetre):
 
 
 # ---------------------------------------------------------------------------
-# PAGE 2 : DONUTS — 65% centrés, côte à côte
+# PAGE 2 : DONUTS COTE A COTE
 # ---------------------------------------------------------------------------
 def _section_donuts(kpis, aum_by_region, styles):
+    """
+    Deux donuts (Type Client + Region) cote a cote sur une meme page.
+    Aucun Top 10 ici — il a sa propre page.
+    """
     elements = []
-    # Titre de section en orange
     elements.append(Paragraph("Repartition AUM Finance", styles["section"]))
-    elements.append(ColorRect(USABLE_W, 2, COL_ORANGE))
-    elements.append(Spacer(1, 16))
+    elements.append(ColorRect(USABLE_W, 2, COL_CIEL))
+    elements.append(Spacer(1, 14))
 
     d_w_in = DONUT_W / 72.0
     d_h_in = DONUT_H / 72.0
@@ -436,19 +406,18 @@ def _section_donuts(kpis, aum_by_region, styles):
                              "AUM par Region Geographique", d_w_in, d_h_in)
     img_d2 = Image(buf_d2, width=DONUT_W, height=DONUT_H)
 
-    # Centrage : padding de chaque côté = CHART_PAD
-    inner_gap = CHART_W - 2 * DONUT_W   # espace entre les deux donuts
+    gap = USABLE_W - 2 * DONUT_W
     tbl = Table(
-        [[Spacer(CHART_PAD, 1), img_d1, Spacer(inner_gap, 1), img_d2, Spacer(CHART_PAD, 1)]],
-        colWidths=[CHART_PAD, DONUT_W, inner_gap, DONUT_W, CHART_PAD],
+        [[img_d1, Spacer(gap, 1), img_d2]],
+        colWidths=[DONUT_W, gap, DONUT_W],
     )
     tbl.setStyle(TableStyle([
-        ("ALIGN",         (0, 0), (-1, -1), "CENTER"),
-        ("VALIGN",        (0, 0), (-1, -1), "TOP"),
-        ("LEFTPADDING",   (0, 0), (-1, -1), 0),
-        ("RIGHTPADDING",  (0, 0), (-1, -1), 0),
-        ("TOPPADDING",    (0, 0), (-1, -1), 0),
-        ("BOTTOMPADDING", (0, 0), (-1, -1), 0),
+        ("ALIGN",         (0,0),(-1,-1), "CENTER"),
+        ("VALIGN",        (0,0),(-1,-1), "TOP"),
+        ("LEFTPADDING",   (0,0),(-1,-1), 0),
+        ("RIGHTPADDING",  (0,0),(-1,-1), 0),
+        ("TOPPADDING",    (0,0),(-1,-1), 0),
+        ("BOTTOMPADDING", (0,0),(-1,-1), 0),
     ]))
     cap = Paragraph(
         "Figure 1 — Repartition AUM Finance par Type de Client (gauche) et par Region (droite)",
@@ -459,51 +428,53 @@ def _section_donuts(kpis, aum_by_region, styles):
 
 
 # ---------------------------------------------------------------------------
-# PAGE 3 : TOP 10 INFLOWS — page dédiée, 65% centrés
+# PAGE 3 : TOP 10 INFLOWS — page entiere, 10 positions garanties
 # ---------------------------------------------------------------------------
 def _section_top10(top_deals, outflows, styles, mode_comex, include_outflows):
+    """
+    Page dedicee au Top 10.
+    top_deals  = liste funded (inflows).
+    outflows   = liste redeemed (outflows, optionnel).
+    Garantit une page pleine, propre, sans chevauchement avec les donuts.
+    """
     elements = []
     elements.append(PageBreak())
     elements.append(Paragraph("Top 10 Deals", styles["section"]))
-    elements.append(ColorRect(USABLE_W, 2, COL_ORANGE))
-    elements.append(Spacer(1, 18))
+    elements.append(ColorRect(USABLE_W, 2, COL_CIEL))
+    elements.append(Spacer(1, 16))
 
     # --- Inflows (Funded) ---
     elements.append(Paragraph("Inflows — AUM Finance (Funded)", styles["subsect"]))
-    elements.append(Spacer(1, 10))
+    elements.append(Spacer(1, 8))
 
     n_in      = max(len(top_deals[:10]), 1)
-    t10_h_pts = max(180, min(320, n_in * 27 + 40))
+    t10_h_pts = max(180, min(340, n_in * 28 + 40))
     t10_w_in  = TOP10_W / 72.0
     t10_h_in  = t10_h_pts / 72.0
 
-    buf_in = _make_top10_png(top_deals, mode_comex, t10_w_in, t10_h_in,
-                             title="Top 10 Inflows — AUM Finance")
-    img_in = Image(buf_in, width=TOP10_W, height=t10_h_pts)
-    cap_in = Paragraph(
-        "Figure 2 — Top 10 Deals par AUM Finance (statut Funded uniquement)",
-        styles["caption"]
-    )
-    elements.append(KeepTogether([_center_image(img_in, TOP10_W, t10_h_pts, TOP10_PAD), cap_in]))
+    buf_in  = _make_top10_png(top_deals, mode_comex, t10_w_in, t10_h_in,
+                              title="Top 10 Inflows — AUM Finance")
+    img_in  = Image(buf_in, width=TOP10_W, height=t10_h_pts)
+    cap_in  = Paragraph("Figure 2 — Top 10 Deals par AUM Finance (statut Funded uniquement)",
+                        styles["caption"])
+    elements.append(KeepTogether([img_in, cap_in]))
 
-    # --- Outflows (Redeemed) ---
+    # --- Outflows (Redeemed) — si coches et dispo ---
     if include_outflows and outflows:
-        elements.append(Spacer(1, 22))
+        elements.append(Spacer(1, 20))
         elements.append(Paragraph("Outflows — AUM Rachete (Redeemed)", styles["subsect"]))
-        elements.append(Spacer(1, 10))
+        elements.append(Spacer(1, 8))
 
-        n_out     = max(len(outflows[:10]), 1)
-        out_h_pts = max(120, min(260, n_out * 27 + 40))
-        out_h_in  = out_h_pts / 72.0
+        n_out      = max(len(outflows[:10]), 1)
+        out_h_pts  = max(120, min(280, n_out * 28 + 40))
+        out_h_in   = out_h_pts / 72.0
 
         buf_out = _make_top10_png(outflows, mode_comex, t10_w_in, out_h_in,
                                   title="Top 10 Outflows — AUM Rachete")
         img_out = Image(buf_out, width=TOP10_W, height=out_h_pts)
-        cap_out = Paragraph(
-            "Figure 3 — Top 10 Rachats par AUM (statut Redeemed)",
-            styles["caption"]
-        )
-        elements.append(KeepTogether([_center_image(img_out, TOP10_W, out_h_pts, TOP10_PAD), cap_out]))
+        cap_out = Paragraph("Figure 3 — Top 10 Rachats par AUM (statut Redeemed)",
+                            styles["caption"])
+        elements.append(KeepTogether([img_out, cap_out]))
 
     return elements
 
@@ -515,8 +486,8 @@ def _section_pipeline(pipeline_df, styles, mode_comex):
     elements = []
     elements.append(PageBreak())
     elements.append(Paragraph("Pipeline Actif - Recapitulatif", styles["section"]))
-    elements.append(ColorRect(USABLE_W, 2, COL_ORANGE))
-    elements.append(Spacer(1, 12))
+    elements.append(ColorRect(USABLE_W, 2, COL_CIEL))
+    elements.append(Spacer(1, 10))
 
     actifs = pipeline_df[pipeline_df["statut"].isin(
         ["Prospect", "Initial Pitch", "Due Diligence", "Soft Commit"]
@@ -527,100 +498,91 @@ def _section_pipeline(pipeline_df, styles, mode_comex):
     else:
         if mode_comex:
             actifs["nom_client"] = actifs.apply(
-                lambda r: "{} - {}".format(r.get("type_client", ""), r.get("region", "")),
-                axis=1
+                lambda r: "{} - {}".format(r.get("type_client",""), r.get("region","")), axis=1
             )
         ratios     = [0.22, 0.16, 0.12, 0.13, 0.13, 0.13, 0.11]
         col_widths = [USABLE_W * r for r in ratios]
-        headers    = ["Client", "Fonds", "Statut", "AUM Cible",
-                      "AUM Revise", "Prochaine Action", "Commercial"]
+        headers    = ["Client", "Fonds", "Statut", "AUM Cible", "AUM Revise", "Prochaine Action", "Commercial"]
         rows       = [[Paragraph(h, styles["th"]) for h in headers]]
         today      = date.today()
 
         for _, row in actifs.iterrows():
             nad = row.get("next_action_date")
             if isinstance(nad, date):
-                if nad < today:
-                    nad_str   = "[RETARD] {}".format(nad.isoformat())
-                    nad_style = styles["alert"]
-                else:
-                    nad_str   = nad.isoformat()
-                    nad_style = styles["td"]
+                nad_str   = "[!] {}".format(nad.isoformat()) if nad < today else nad.isoformat()
+                nad_style = styles["alert"] if nad < today else styles["td"]
             else:
-                nad_str   = "-"
-                nad_style = styles["td"]
+                nad_str   = "-"; nad_style = styles["td"]
 
             rows.append([
-                Paragraph(str(row.get("nom_client", ""))[:26], styles["td"]),
-                Paragraph(str(row.get("fonds", "")),            styles["td"]),
-                Paragraph(str(row.get("statut", "")),           styles["td"]),
-                Paragraph(fmt_aum(float(row.get("target_aum_initial", 0) or 0)), styles["td_r"]),
-                Paragraph(fmt_aum(float(row.get("revised_aum", 0) or 0)),         styles["td_r"]),
+                Paragraph(str(row.get("nom_client",""))[:26],   styles["td"]),
+                Paragraph(str(row.get("fonds","")),              styles["td"]),
+                Paragraph(str(row.get("statut","")),             styles["td"]),
+                Paragraph(fmt_aum(float(row.get("target_aum_initial",0) or 0)), styles["td_r"]),
+                Paragraph(fmt_aum(float(row.get("revised_aum",0) or 0)),         styles["td_r"]),
                 Paragraph(nad_str, nad_style),
-                Paragraph(str(row.get("sales_owner", ""))[:14], styles["td"]),
+                Paragraph(str(row.get("sales_owner",""))[:14],  styles["td"]),
             ])
 
         tbl = Table(rows, colWidths=col_widths, repeatRows=1)
         tbl.setStyle(TableStyle([
-            ("BACKGROUND",     (0, 0), (-1, 0),  COL_MARINE),
-            ("LINEBELOW",      (0, 0), (-1, 0),  1.5, COL_ORANGE),   # séparateur orange
-            ("GRID",           (0, 0), (-1, -1), 0.3, COL_GRIS),
-            ("VALIGN",         (0, 0), (-1, -1), "MIDDLE"),
-            ("TOPPADDING",     (0, 0), (-1, -1), 5),
-            ("BOTTOMPADDING",  (0, 0), (-1, -1), 5),
-            ("LEFTPADDING",    (0, 0), (-1, -1), 5),
-            ("RIGHTPADDING",   (0, 0), (-1, -1), 5),
-            ("ROWBACKGROUNDS", (0, 1), (-1, -1), [COL_HEADER, COL_BLANC]),
+            ("BACKGROUND",     (0,0),(-1,0),  COL_MARINE),
+            ("LINEBELOW",      (0,0),(-1,0),  1.5, COL_CIEL),
+            ("GRID",           (0,0),(-1,-1), 0.3, COL_GRIS),
+            ("VALIGN",         (0,0),(-1,-1), "MIDDLE"),
+            ("TOPPADDING",     (0,0),(-1,-1), 4),
+            ("BOTTOMPADDING",  (0,0),(-1,-1), 4),
+            ("LEFTPADDING",    (0,0),(-1,-1), 5),
+            ("RIGHTPADDING",   (0,0),(-1,-1), 5),
+            ("ROWBACKGROUNDS", (0,1),(-1,-1), [COL_HEADER, COL_BLANC]),
         ]))
         elements.append(tbl)
 
-    # Tableau Lost / Paused
-    lost_paused = pipeline_df[pipeline_df["statut"].isin(["Lost", "Paused"])].copy()
+    lost_paused = pipeline_df[pipeline_df["statut"].isin(["Lost","Paused"])].copy()
     if not lost_paused.empty:
-        elements.append(Spacer(1, 18))
+        elements.append(Spacer(1, 16))
         elements.append(Paragraph("Deals Perdus / En Pause", styles["subsect"]))
         elements.append(ColorRect(USABLE_W, 1, COL_GRIS))
         elements.append(Spacer(1, 8))
         if mode_comex:
             lost_paused["nom_client"] = lost_paused.apply(
-                lambda r: "{} - {}".format(r.get("type_client", ""), r.get("region", "")),
-                axis=1
+                lambda r: "{} - {}".format(r.get("type_client",""), r.get("region","")), axis=1
             )
         lp_ratios  = [0.26, 0.18, 0.12, 0.22, 0.22]
         lp_col_w   = [USABLE_W * r for r in lp_ratios]
         lp_rows    = [[Paragraph(h, styles["th"])
-                       for h in ["Client", "Fonds", "Statut", "Raison", "Concurrent"]]]
+                       for h in ["Client","Fonds","Statut","Raison","Concurrent"]]]
         for _, row in lost_paused.iterrows():
             lp_rows.append([
-                Paragraph(str(row.get("nom_client", ""))[:24],          styles["td_g"]),
-                Paragraph(str(row.get("fonds", "")),                    styles["td_g"]),
-                Paragraph(str(row.get("statut", "")),                   styles["td_g"]),
-                Paragraph(str(row.get("raison_perte", "") or "-"),      styles["td_g"]),
-                Paragraph(str(row.get("concurrent_choisi", "") or "-"), styles["td_g"]),
+                Paragraph(str(row.get("nom_client",""))[:24],         styles["td_g"]),
+                Paragraph(str(row.get("fonds","")),                    styles["td_g"]),
+                Paragraph(str(row.get("statut","")),                   styles["td_g"]),
+                Paragraph(str(row.get("raison_perte","") or "-"),      styles["td_g"]),
+                Paragraph(str(row.get("concurrent_choisi","") or "-"), styles["td_g"]),
             ])
         lp_tbl = Table(lp_rows, colWidths=lp_col_w, repeatRows=1)
         lp_tbl.setStyle(TableStyle([
-            ("BACKGROUND",    (0, 0), (-1, 0),  HexColor("#7a7a7a")),
-            ("GRID",          (0, 0), (-1, -1), 0.3, COL_GRIS),
-            ("VALIGN",        (0, 0), (-1, -1), "MIDDLE"),
-            ("TOPPADDING",    (0, 0), (-1, -1), 4),
-            ("BOTTOMPADDING", (0, 0), (-1, -1), 4),
-            ("LEFTPADDING",   (0, 0), (-1, -1), 5),
-            ("RIGHTPADDING",  (0, 0), (-1, -1), 5),
+            ("BACKGROUND",    (0,0),(-1,0),  HexColor("#7a7a7a")),
+            ("GRID",          (0,0),(-1,-1), 0.3, COL_GRIS),
+            ("VALIGN",        (0,0),(-1,-1), "MIDDLE"),
+            ("TOPPADDING",    (0,0),(-1,-1), 4),
+            ("BOTTOMPADDING", (0,0),(-1,-1), 4),
+            ("LEFTPADDING",   (0,0),(-1,-1), 5),
+            ("RIGHTPADDING",  (0,0),(-1,-1), 5),
         ]))
         elements.append(lp_tbl)
     return elements
 
 
 # ---------------------------------------------------------------------------
-# PAGE 5 : PERFORMANCE NAV (optionnelle) — graphique 80%, tableau complet
+# PAGE 5 : PERFORMANCE NAV (optionnelle)
 # ---------------------------------------------------------------------------
 def _section_performance(perf_data, nav_base100_df, styles, fonds_perimetre):
     elements = []
     elements.append(PageBreak())
     elements.append(Paragraph("Analyse de Performance - NAV", styles["section"]))
-    elements.append(ColorRect(USABLE_W, 2, COL_ORANGE))
-    elements.append(Spacer(1, 14))
+    elements.append(ColorRect(USABLE_W, 2, COL_CIEL))
+    elements.append(Spacer(1, 12))
 
     pf = perf_data.copy() if perf_data is not None else pd.DataFrame()
     nb = nav_base100_df.copy() if nav_base100_df is not None else None
@@ -632,13 +594,18 @@ def _section_performance(perf_data, nav_base100_df, styles, fonds_perimetre):
             cols_k = [c for c in nb.columns if c in fonds_perimetre]
             nb = nb[cols_k] if cols_k else pd.DataFrame()
 
-    nav_w_in = NAV_W / 72.0
-    nav_h_in = NAV_H / 72.0
+    nav_w_in = NAV_W / 72.0; nav_h_in = NAV_H / 72.0
     buf_nav  = _make_nav_png(nb, nav_w_in, nav_h_in)
     img_nav  = Image(buf_nav, width=NAV_W, height=NAV_H)
-    cap_nav  = Paragraph("Figure — Evolution NAV Base 100", styles["caption"])
-    elements.append(KeepTogether([_center_image(img_nav, NAV_W, NAV_H, NAV_PAD), cap_nav]))
-    elements.append(Spacer(1, 18))
+    row_nav  = Table([[img_nav]], colWidths=[NAV_W])
+    row_nav.setStyle(TableStyle([("ALIGN",(0,0),(-1,-1),"CENTER"),
+                                  ("LEFTPADDING",(0,0),(-1,-1),0),
+                                  ("RIGHTPADDING",(0,0),(-1,-1),0),
+                                  ("TOPPADDING",(0,0),(-1,-1),0),
+                                  ("BOTTOMPADDING",(0,0),(-1,-1),0)]))
+    cap_nav = Paragraph("Figure — Evolution NAV Base 100", styles["caption"])
+    elements.append(KeepTogether([row_nav, cap_nav]))
+    elements.append(Spacer(1, 16))
 
     if pf.empty:
         elements.append(Paragraph("Aucune donnee de performance disponible.", styles["body"]))
@@ -648,9 +615,8 @@ def _section_performance(perf_data, nav_base100_df, styles, fonds_perimetre):
     elements.append(ColorRect(USABLE_W, 1, COL_GRIS))
     elements.append(Spacer(1, 8))
 
-    perf_cols = {"Perf 1M (%)", "Perf YTD (%)", "Perf Periode (%)"}
-    col_order = ["Fonds", "NAV Derniere", "Base 100 Actuel",
-                 "Perf 1M (%)", "Perf YTD (%)", "Perf Periode (%)"]
+    perf_cols = {"Perf 1M (%)","Perf YTD (%)","Perf Periode (%)"}
+    col_order = ["Fonds","NAV Derniere","Base 100 Actuel","Perf 1M (%)","Perf YTD (%)","Perf Periode (%)"]
     available = [c for c in col_order if c in pf.columns]
     n = len(available)
     if n == 0:
@@ -660,7 +626,7 @@ def _section_performance(perf_data, nav_base100_df, styles, fonds_perimetre):
     fonds_r    = 0.28
     rest_r     = (1.0 - fonds_r) / max(n - 1, 1)
     col_widths = [USABLE_W * (fonds_r if i == 0 else rest_r) for i in range(n)]
-    hrow = [Paragraph(c, styles["pth_l"] if i == 0 else styles["pth_r"])
+    hrow = [Paragraph(c, styles["pth_l"] if i==0 else styles["pth_r"])
             for i, c in enumerate(available)]
     rows = [hrow]
 
@@ -672,11 +638,9 @@ def _section_performance(perf_data, nav_base100_df, styles, fonds_perimetre):
                 data_row.append(Paragraph(str(val), styles["ptd_l"]))
             elif col in perf_cols:
                 try:
-                    fval = float(val)
-                    valid = not np.isnan(fval)
+                    fval = float(val); valid = not np.isnan(fval)
                 except (TypeError, ValueError):
-                    valid = False
-                    fval  = 0.0
+                    valid = False; fval = 0.0
                 if not valid:
                     data_row.append(Paragraph("n.d.", styles["ptd"]))
                 else:
@@ -694,15 +658,15 @@ def _section_performance(perf_data, nav_base100_df, styles, fonds_perimetre):
 
     ptbl = Table(rows, colWidths=col_widths, repeatRows=1)
     ptbl.setStyle(TableStyle([
-        ("BACKGROUND",     (0, 0), (-1, 0),  COL_MARINE),
-        ("LINEBELOW",      (0, 0), (-1, 0),  1.2, COL_ORANGE),
-        ("GRID",           (0, 0), (-1, -1), 0.3, COL_GRIS),
-        ("VALIGN",         (0, 0), (-1, -1), "MIDDLE"),
-        ("TOPPADDING",     (0, 0), (-1, -1), 5),
-        ("BOTTOMPADDING",  (0, 0), (-1, -1), 5),
-        ("LEFTPADDING",    (0, 0), (-1, -1), 6),
-        ("RIGHTPADDING",   (0, 0), (-1, -1), 6),
-        ("ROWBACKGROUNDS", (0, 1), (-1, -1), [COL_HEADER, COL_BLANC]),
+        ("BACKGROUND",     (0,0),(-1,0),  COL_MARINE),
+        ("LINEBELOW",      (0,0),(-1,0),  1.2, COL_CIEL),
+        ("GRID",           (0,0),(-1,-1), 0.3, COL_GRIS),
+        ("VALIGN",         (0,0),(-1,-1), "MIDDLE"),
+        ("TOPPADDING",     (0,0),(-1,-1), 5),
+        ("BOTTOMPADDING",  (0,0),(-1,-1), 5),
+        ("LEFTPADDING",    (0,0),(-1,-1), 6),
+        ("RIGHTPADDING",   (0,0),(-1,-1), 6),
+        ("ROWBACKGROUNDS", (0,1),(-1,-1), [COL_HEADER, COL_BLANC]),
     ]))
     elements.append(ptbl)
     return elements
@@ -715,20 +679,17 @@ def _header_footer(canvas, doc):
     canvas.saveState()
     if doc.page > 1:
         canvas.setFillColor(COL_MARINE)
-        canvas.rect(0, 0, PAGE_W, 0.90 * cm, fill=1, stroke=0)
+        canvas.rect(0, 0, PAGE_W, 0.90*cm, fill=1, stroke=0)
         canvas.setFont("Helvetica", 6.5)
         canvas.setFillColor(HexColor("#7ab8d8"))
-        canvas.drawString(2 * cm, 0.30 * cm,
-                          "Executive Report - Asset Management Division")
-        canvas.drawRightString(PAGE_W - 2 * cm, 0.30 * cm,
-                               "Page {}".format(doc.page))
-        # Filet orange en haut de page (cohérent avec l'accent UI)
-        canvas.setStrokeColor(COL_ORANGE)
+        canvas.drawString(2*cm, 0.30*cm, "Executive Report - Asset Management Division")
+        canvas.drawRightString(PAGE_W - 2*cm, 0.30*cm, "Page {}".format(doc.page))
+        canvas.setStrokeColor(COL_CIEL)
         canvas.setLineWidth(1.8)
-        canvas.line(0, PAGE_H - 0.38 * cm, PAGE_W, PAGE_H - 0.38 * cm)
+        canvas.line(0, PAGE_H - 0.38*cm, PAGE_W, PAGE_H - 0.38*cm)
         canvas.setFont("Helvetica", 6.5)
         canvas.setFillColor(COL_MARINE)
-        canvas.drawRightString(PAGE_W - 2 * cm, PAGE_H - 0.26 * cm, "CONFIDENTIEL")
+        canvas.drawRightString(PAGE_W - 2*cm, PAGE_H - 0.26*cm, "CONFIDENTIEL")
     canvas.restoreState()
 
 
@@ -747,21 +708,26 @@ def generate_pdf(
     include_outflows=False,
     include_perf=True,
 ):
+    """
+    Genere le PDF.
+    include_top10    : inclure la page Top 10 Inflows (cochable)
+    include_outflows : inclure le Top 10 Outflows dans la meme page (cochable)
+    include_perf     : inclure la page Performance NAV (cochable)
+    """
     aum_by_region = aum_by_region or {}
     outflows      = kpis.get("outflows", [])
 
     if mode_comex:
         pipeline_df = pipeline_df.copy()
         pipeline_df["nom_client"] = pipeline_df.apply(
-            lambda r: "{} - {}".format(r.get("type_client", ""), r.get("region", "")),
-            axis=1
+            lambda r: "{} - {}".format(r.get("type_client",""), r.get("region","")), axis=1
         )
         top_deals_safe = [
-            dict(d, nom_client="{} - {}".format(d.get("type_client", ""), d.get("region", "")))
+            dict(d, nom_client="{} - {}".format(d.get("type_client",""), d.get("region","")))
             for d in kpis.get("top_deals", [])
         ]
         outflows_safe = [
-            dict(d, nom_client="{} - {}".format(d.get("type_client", ""), d.get("region", "")))
+            dict(d, nom_client="{} - {}".format(d.get("type_client",""), d.get("region","")))
             for d in outflows
         ]
         kpis = dict(kpis, top_deals=top_deals_safe)
@@ -774,18 +740,23 @@ def generate_pdf(
     doc = SimpleDocTemplate(
         pdf_buf, pagesize=A4,
         leftMargin=MARGIN_H, rightMargin=MARGIN_H,
-        topMargin=MARGIN_V,  bottomMargin=1.4 * cm,
+        topMargin=MARGIN_V,  bottomMargin=1.4*cm,
         title="Executive Report - Asset Management",
         author="Asset Management Division",
     )
 
     elements = []
+    # Page 1 : Couverture
     elements += _page_garde(styles, mode_comex, kpis, fonds_perimetre)
+    # Page 2 : Donuts
     elements += _section_donuts(kpis, aum_by_region, styles)
+    # Page 3 : Top 10 (optionnel)
     if include_top10:
         elements += _section_top10(top_deals_safe, outflows_safe, styles,
                                    mode_comex, include_outflows)
+    # Page 4 : Pipeline
     elements += _section_pipeline(pipeline_df, styles, mode_comex)
+    # Page 5 : Performance (optionnel)
     if include_perf and perf_data is not None and not perf_data.empty:
         elements += _section_performance(perf_data, nav_base100_df, styles, fonds_perimetre)
 
