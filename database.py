@@ -1,10 +1,6 @@
 # =============================================================================
 # database.py  —  CRM Asset Management  —  Amundi Edition
-# Priorite : STABILITE ABSOLUE — zero helper complexe, SQL plat
 # Charte : #001c4b Marine | #019ee1 Ciel | #f07d00 Orange
-# Nouveau : get_pipeline_with_last_activity() — colonne derniere_activite
-#           get_pipeline_by_statut()          — drill-down statut cliquable
-#           get_overdue_actions_full()        — ligne complete pour modal retard
 # =============================================================================
 
 import sqlite3
@@ -31,6 +27,27 @@ REGIONS_REFERENTIEL = [
     "GCC", "EMEA", "APAC", "Nordics",
     "Asia ex-Japan", "North America", "LatAm",
 ]
+
+
+# ---------------------------------------------------------------------------
+# FORMATAGE FINANCIER — règle unique appliquée partout (UI + Excel)
+# Jamais de chiffre brut affiché à l'utilisateur.
+# ---------------------------------------------------------------------------
+
+def format_finance(val):
+    """
+    >= 1 Md€  =>  "X.X Md€"
+    sinon     =>  "X.X M€"
+    """
+    try:
+        v = float(val)
+    except (TypeError, ValueError):
+        return "—"
+    if v == 0:
+        return "0.0 M€"
+    if v >= 1_000_000_000:
+        return "{:.1f} Md€".format(v / 1_000_000_000)
+    return "{:.1f} M€".format(v / 1_000_000)
 
 
 # ---------------------------------------------------------------------------
@@ -228,11 +245,10 @@ def get_sales_owners():
 
 
 # ---------------------------------------------------------------------------
-# LECTURES — PIPELINE (avec derniere activite en colonne)
+# LECTURES — PIPELINE
 # ---------------------------------------------------------------------------
 
 def get_pipeline_with_clients(fonds_filter=None):
-    """Pipeline complet sans colonne activite (leger, pour les tableaux)."""
     fonds_sql, fonds_params = _fonds_clause(fonds_filter, "p")
     conn = get_connection()
     query = (
@@ -249,11 +265,6 @@ def get_pipeline_with_clients(fonds_filter=None):
 
 
 def get_pipeline_with_last_activity(fonds_filter=None):
-    """
-    Pipeline enrichi avec la derniere activite de chaque client.
-    Colonne supplementaire : derniere_activite (str, peut etre vide).
-    Utilise une sous-requete correlee SQLite — zero jointure cartesienne.
-    """
     fonds_sql, fonds_params = _fonds_clause(fonds_filter, "p")
     conn = get_connection()
     query = (
@@ -281,10 +292,6 @@ def get_pipeline_with_last_activity(fonds_filter=None):
 
 
 def get_pipeline_by_statut(statut, fonds_filter=None):
-    """
-    Retourne tous les deals d'un statut donne, enrichis de la derniere activite.
-    Utilise pour les modals drill-down des pastilles de statut.
-    """
     fonds_sql, fonds_params = _fonds_clause(fonds_filter, "p")
     conn = get_connection()
     query = (
@@ -341,7 +348,6 @@ def get_pipeline_row_by_id(pipeline_id):
 
 
 def get_overdue_actions(fonds_filter=None):
-    """Liste legere des actions en retard (pour les alertes en-tete)."""
     today_str = date.today().isoformat()
     fonds_sql, fonds_params = _fonds_clause(fonds_filter, "p")
     conn = get_connection()
@@ -359,10 +365,6 @@ def get_overdue_actions(fonds_filter=None):
 
 
 def get_overdue_deal_full(pipeline_id):
-    """
-    Retourne la ligne complete d'un deal en retard pour le modal de detail.
-    Inclut la derniere activite.
-    """
     conn = get_connection()
     df = pd.read_sql_query(
         "SELECT p.id, c.nom_client, c.type_client, c.region,"
@@ -392,7 +394,7 @@ def get_overdue_deal_full(pipeline_id):
 
 
 # ---------------------------------------------------------------------------
-# LECTURES — DRILL-DOWN modales (funded / actifs / lost)
+# LECTURES — DRILL-DOWN modales
 # ---------------------------------------------------------------------------
 
 def get_funded_deals_detail(fonds_filter=None):
@@ -409,10 +411,9 @@ def get_funded_deals_detail(fonds_filter=None):
     )
     df = pd.read_sql_query(query, conn, params=fonds_params if fonds_params else None)
     conn.close()
-    if "AUM_Finance" in df.columns:
-        df["AUM_Finance"] = pd.to_numeric(df["AUM_Finance"], errors="coerce").fillna(0.0)
-    if "AUM_Cible" in df.columns:
-        df["AUM_Cible"] = pd.to_numeric(df["AUM_Cible"], errors="coerce").fillna(0.0)
+    for col in ["AUM_Finance", "AUM_Cible"]:
+        if col in df.columns:
+            df[col] = pd.to_numeric(df[col], errors="coerce").fillna(0.0)
     return df
 
 
@@ -566,7 +567,6 @@ def get_kpis(fonds_filter=None):
     c.execute("SELECT c2.nom_client, c2.type_client, c2.region, p.fonds, p.funded_aum, p.sales_owner FROM pipeline p JOIN clients c2 ON c2.id=p.client_id WHERE p.statut='Funded' AND p.funded_aum > 0 " + fonds_sql + " ORDER BY p.funded_aum DESC LIMIT 10", fonds_params)
     top_deals = [{k: (float(v) if k == "funded_aum" else str(v)) for k, v in dict(r).items()} for r in c.fetchall()]
 
-    # Outflows = Redeemed (AUM qui sort)
     c.execute("SELECT c2.nom_client, c2.type_client, c2.region, p.fonds, p.funded_aum, p.sales_owner FROM pipeline p JOIN clients c2 ON c2.id=p.client_id WHERE p.statut='Redeemed' AND p.funded_aum > 0 " + fonds_sql + " ORDER BY p.funded_aum DESC LIMIT 10", fonds_params)
     outflows = [{k: (float(v) if k == "funded_aum" else str(v)) for k, v in dict(r).items()} for r in c.fetchall()]
 
@@ -805,22 +805,25 @@ def upsert_pipeline_from_df(df):
 
 
 # ---------------------------------------------------------------------------
-# BACKUP EXCEL
+# BACKUP EXCEL — colonnes AUM formatées en M€/Md€ via format_finance()
 # ---------------------------------------------------------------------------
 
 def get_excel_backup(fonds_filter=None):
     buf = io.BytesIO()
     df_p = get_pipeline_with_last_activity(fonds_filter).copy()
+    # Formatage uniforme — zéro chiffre brut dans l'export
     for col in ["target_aum_initial", "revised_aum", "funded_aum"]:
         if col in df_p.columns:
-            df_p[col] = (df_p[col] / 1_000_000).round(2)
+            df_p[col] = df_p[col].apply(format_finance)
     rename_p = {
         "id": "ID", "nom_client": "Client", "type_client": "Type", "region": "Region",
         "fonds": "Fonds", "statut": "Statut",
-        "target_aum_initial": "AUM_Cible_M_EUR", "revised_aum": "AUM_Revise_M_EUR",
-        "funded_aum": "AUM_Finance_M_EUR", "raison_perte": "Raison",
-        "concurrent_choisi": "Concurrent", "next_action_date": "Prochaine_Action",
-        "sales_owner": "Commercial", "derniere_activite": "Derniere_Activite",
+        "target_aum_initial": "AUM_Cible",
+        "revised_aum":        "AUM_Revise",
+        "funded_aum":         "AUM_Finance",
+        "raison_perte": "Raison", "concurrent_choisi": "Concurrent",
+        "next_action_date": "Prochaine_Action", "sales_owner": "Commercial",
+        "derniere_activite": "Derniere_Activite",
     }
     df_p = df_p.rename(columns={k: v for k, v in rename_p.items() if k in df_p.columns})
     if "Prochaine_Action" in df_p.columns:
