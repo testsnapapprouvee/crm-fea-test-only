@@ -1,13 +1,15 @@
 # =============================================================================
 # app.py — CRM Asset Management — Amundi Edition
-# Charte : #001c4b Marine | #019ee1 Ciel | #f07d00 Orange
-# UX : zéro bouton parasite dans le DOM.
-#      Technique : st.query_params — les éléments visuels sont de purs liens
-#      <a href="?open=X"> sans aucun st.button pour les zones cliquables.
-#      Au rechargement Streamlit lit ?open= et déclenche le bon @st.dialog.
+# UX : zéro bouton parasite. Technique : st.query_params + liens HTML purs.
+# Fix v9.1 :
+#   - KPI cards dans une grille CSS pure → alignement parfait
+#   - Surbrillance orange au hover (box-shadow + indicateur ▸)
+#   - Pastilles statut en grille CSS → alignement uniforme
+#   - JS scroll restore via data-scroll attribute (sans apostrophes inline)
 # =============================================================================
 
 import streamlit as st
+import streamlit.components.v1 as stc
 import pandas as pd
 import numpy as np
 import plotly.graph_objects as go
@@ -61,7 +63,7 @@ st.set_page_config(page_title="CRM - Asset Management",
                    layout="wide", initial_sidebar_state="expanded")
 
 # ---------------------------------------------------------------------------
-# CSS — éléments cliquables = liens HTML purs, zéro forme Streamlit
+# CSS
 # ---------------------------------------------------------------------------
 st.markdown("""
 <style>
@@ -70,13 +72,11 @@ st.markdown("""
     color: #001c4b;
     font-family: 'Segoe UI', Arial, sans-serif;
 }
-
 [data-testid="stSidebar"] { background-color: #001c4b; }
 [data-testid="stSidebar"] * { color: #ffffff !important; }
 [data-testid="stSidebar"] h1,
 [data-testid="stSidebar"] h2,
 [data-testid="stSidebar"] h3 { color: #019ee1 !important; }
-
 .crm-header {
     background: #001c4b; padding: 16px 24px;
     margin-bottom: 16px; border-bottom: 3px solid #019ee1;
@@ -85,47 +85,87 @@ st.markdown("""
 .crm-header p  { color:#7ab8d8; margin:3px 0 0 0; font-size:0.80rem; }
 
 /* ============================================================
-   ÉLÉMENTS CLIQUABLES — liens HTML purs, zéro bouton Streamlit
+   LIENS CLIQUABLES — retirer toute décoration de lien native
    ============================================================ */
-
-/* Lien wrapper commun — retire toute décoration de lien */
-a.click-wrap {
+a.clink {
     display: block;
-    text-decoration: none;
+    text-decoration: none !important;
     color: inherit;
     cursor: pointer;
+    outline: none;
 }
-a.click-wrap:hover { text-decoration: none; }
+a.clink:hover, a.clink:focus, a.clink:visited { text-decoration: none !important; color: inherit; }
 
-/* KPI Cards */
+/* ============================================================
+   GRILLE KPI — CSS pur, sans div Streamlit entre les cartes
+   ============================================================ */
+.kpi-grid {
+    display: grid;
+    grid-template-columns: repeat(4, 1fr);
+    gap: 8px;
+    margin-bottom: 4px;
+}
+
+/* KPI card cliquable */
 .kpi-card {
     background: #001c4b;
-    padding: 14px 10px 12px 10px;
+    padding: 14px 10px 13px 10px;
     text-align: center;
     border: 1px solid #1a5e8a;
     border-bottom: 2px solid #019ee1;
-    transition: background 0.12s, border-color 0.12s;
-    display: block;
+    transition: background 0.15s, border-color 0.15s, box-shadow 0.15s;
+    position: relative;
 }
-a.click-wrap:hover .kpi-card {
-    background: #0a2d5e;
+/* Indicateur cliquable discret */
+.kpi-card-clickable::after {
+    content: "▸";
+    position: absolute;
+    bottom: 5px; right: 7px;
+    font-size: 0.54rem;
+    color: #4a8fbd;
+    opacity: 0.7;
+    transition: color 0.15s, opacity 0.15s;
+}
+a.clink:hover .kpi-card-clickable {
+    background: #0b3060;
     border-color: #f07d00 !important;
+    box-shadow: 0 0 0 2px #f07d0050;
 }
+a.clink:hover .kpi-card-clickable::after {
+    color: #f07d00;
+    opacity: 1;
+}
+/* KPI card non cliquable (Taux conversion) */
+.kpi-card-static {
+    border-bottom: 2px solid #1a5e8a;
+}
+
 .kpi-label { font-size:0.64rem; color:#7ab8d8; text-transform:uppercase; letter-spacing:0.8px; margin-bottom:5px; font-weight:600; }
 .kpi-value { font-size:1.4rem; font-weight:800; color:#ffffff; }
 .kpi-sub   { font-size:0.61rem; color:#c8dde8; margin-top:3px; }
-.kpi-card-static { border-bottom:2px solid #1a5e8a; }
 
-/* Pastilles statut */
-.statut-pill {
-    padding: 8px 7px;
-    text-align: center;
-    transition: filter 0.10s;
-    display: block;
+/* ============================================================
+   PASTILLES STATUT — grille CSS
+   ============================================================ */
+.statut-grid {
+    display: grid;
+    gap: 6px;
+    margin-bottom: 8px;
 }
-a.click-wrap:hover .statut-pill { filter: brightness(1.14); }
+.statut-pill {
+    padding: 8px 6px;
+    text-align: center;
+    transition: filter 0.12s, box-shadow 0.12s;
+    position: relative;
+}
+a.clink:hover .statut-pill {
+    filter: brightness(1.10);
+    box-shadow: 0 0 0 2px #f07d0055;
+}
 
-/* Alertes retard */
+/* ============================================================
+   ALERTES RETARD
+   ============================================================ */
 .alert-overdue {
     background: #fef6f0;
     border-left: 3px solid #f07d00;
@@ -133,26 +173,31 @@ a.click-wrap:hover .statut-pill { filter: brightness(1.14); }
     margin: 3px 0;
     font-size: 0.77rem;
     color: #001c4b;
-    transition: background 0.10s;
-    display: block;
+    transition: background 0.12s, box-shadow 0.12s;
+    position: relative;
 }
-a.click-wrap:hover .alert-overdue { background: #fdebd5; }
+a.clink:hover .alert-overdue {
+    background: #fdebd5;
+    box-shadow: inset 3px 0 0 #f07d00;
+}
 
-/* Activités */
+/* ============================================================
+   ACTIVITÉS
+   ============================================================ */
 .activity-row {
     border-left: 2px solid #019ee1;
     padding: 7px 11px;
     margin: 3px 0;
     background: #f9fbfd;
     font-size: 0.78rem;
-    transition: background 0.10s;
+    transition: background 0.12s, border-left-color 0.12s;
     display: block;
 }
-a.click-wrap:hover .activity-row { background: #e4f1f9; }
+a.clink:hover .activity-row {
+    background: #e4f1f9;
+    border-left-color: #f07d00;
+}
 
-/* ============================================================
-   AUTRES ÉLÉMENTS
-   ============================================================ */
 .badge-retard {
     display:inline-block; background:#f07d00; color:#ffffff;
     padding:1px 7px; font-size:0.66rem; font-weight:700; letter-spacing:0.4px;
@@ -178,7 +223,6 @@ a.click-wrap:hover .activity-row { background: #e4f1f9; }
 .stTabs [data-baseweb="tab"] { color:#001c4b; font-weight:600; font-size:0.81rem; padding:7px 16px; background:#f0f4f8; border-right:1px solid #d0d8e0; }
 .stTabs [aria-selected="true"] { background:#001c4b !important; color:#ffffff !important; }
 
-/* Boutons normaux (formulaires, sidebar, PDF) */
 .stButton > button {
     background:#019ee1; color:#ffffff; border:none; font-weight:600;
     padding:6px 15px; font-size:0.80rem; transition:background 0.12s;
@@ -196,6 +240,19 @@ code { background:#001c4b08; color:#001c4b; }
 </style>
 """, unsafe_allow_html=True)
 
+# JS : restauration scroll après navigation par query_param
+stc.html("""<script>
+(function() {
+  var y = sessionStorage.getItem("crmScroll");
+  if (y) { sessionStorage.removeItem("crmScroll"); window.scrollTo(0, parseInt(y)); }
+  // Intercepter tous les liens clink pour sauvegarder la position
+  document.addEventListener("click", function(e) {
+    var a = e.target.closest("a.clink");
+    if (a) { sessionStorage.setItem("crmScroll", window.scrollY); }
+  });
+})();
+</script>""", height=0)
+
 
 # ---------------------------------------------------------------------------
 # INIT DB
@@ -208,20 +265,8 @@ _init()
 
 
 # ---------------------------------------------------------------------------
-# HELPER — lien cliquable sans st.button
-# Génère <a href="?open=KEY" target="_self" class="click-wrap">HTML</a>
-# Streamlit relit les query_params au rechargement → déclenche le dialog.
+# HELPERS
 # ---------------------------------------------------------------------------
-def clickable(html_content, open_key):
-    """Rend html_content entièrement cliquable via un lien query_param."""
-    st.markdown(
-        '<a href="?open={key}" target="_self" class="click-wrap">'
-        '{content}'
-        '</a>'.format(key=open_key, content=html_content),
-        unsafe_allow_html=True
-    )
-
-
 def statut_badge(statut):
     colors = {
         "Funded":        (B_MID,       BLANC),  "Soft Commit":   ("#2c7fb8", BLANC),
@@ -231,6 +276,13 @@ def statut_badge(statut):
     }
     bg, fg = colors.get(statut, (GRIS, "#555"))
     return '<span style="padding:2px 9px;font-size:0.71rem;font-weight:600;background:{};color:{};">{}</span>'.format(bg, fg, statut)
+
+
+def clink(html, key):
+    """Lien HTML pur vers ?open=key. Zéro widget Streamlit."""
+    st.markdown(
+        '<a href="?open={k}" target="_self" class="clink">{h}</a>'.format(k=key, h=html),
+        unsafe_allow_html=True)
 
 
 # ---------------------------------------------------------------------------
@@ -380,33 +432,24 @@ def modal_statut_detail(statut_nom, fonds_filter=None):
 
 
 # ---------------------------------------------------------------------------
-# LECTURE DU QUERY PARAM — déclenche le bon dialog en haut de page
-# (avant tout rendu, pour que le dialog s'ouvre immédiatement)
+# LECTURE QUERY PARAMS → ouvre le bon dialog
 # ---------------------------------------------------------------------------
 _open = st.query_params.get("open", "")
-_filtre_effectif = None   # sera recalculé dans la sidebar, mais on en a besoin ici aussi
-                           # pour les modals déclenchés par query_param
+_filtre_effectif = None  # recalculé dans sidebar
 
 if _open == "funded":
-    modal_funded(None)
-    st.query_params.clear()
+    modal_funded(None); st.query_params.clear()
 elif _open == "pipeline":
-    modal_pipeline_actif(None)
-    st.query_params.clear()
+    modal_pipeline_actif(None); st.query_params.clear()
 elif _open == "lost":
-    modal_lost(None)
-    st.query_params.clear()
+    modal_lost(None); st.query_params.clear()
 elif _open == "overdue":
-    modal_overdue_detail()
-    st.query_params.clear()
+    modal_overdue_detail(); st.query_params.clear()
 elif _open.startswith("statut_"):
-    statut_nom = _open[len("statut_"):]
-    modal_statut_detail(statut_nom, None)
-    st.query_params.clear()
+    modal_statut_detail(_open[len("statut_"):], None); st.query_params.clear()
 elif _open.startswith("act_"):
-    client_nom = _open[len("act_"):]
-    modal_activities_tab(client_nom if client_nom else None)
-    st.query_params.clear()
+    client_nom = _open[len("act_"):].replace("+", " ")
+    modal_activities_tab(client_nom if client_nom else None); st.query_params.clear()
 
 
 # ---------------------------------------------------------------------------
@@ -455,7 +498,6 @@ with st.sidebar:
     _filtre_effectif = (fonds_perimetre
                         if (fonds_perimetre and len(fonds_perimetre) < len(FONDS))
                         else None)
-
     mode_comex = st.toggle("Mode Comex — Anonymisation", value=False)
 
     st.markdown('<div style="color:#8ab8d8;font-size:0.64rem;font-weight:600;'
@@ -512,7 +554,7 @@ with st.sidebar:
                 st.error("Erreur : {}".format(e))
 
     st.divider()
-    st.caption("Version 9.0 — Amundi Edition")
+    st.caption("Version 9.1 — Amundi Edition")
 
 
 # ---------------------------------------------------------------------------
@@ -641,23 +683,25 @@ with tab_ingest:
         st.markdown("#### Dernieres Activites")
         df_act = db.get_activities()
         if not df_act.empty:
+            acts_html = ""
             for _, arow in df_act.head(8).iterrows():
                 notes_full    = str(arow.get("notes",""))
                 notes_preview = notes_full[:90] + ("…" if len(notes_full) > 90 else "")
-                client_enc    = str(arow.get("nom_client","")).replace(" ", "+")
-                # Lien pur — zéro bouton Streamlit
-                clickable(
-                    "<div class='activity-row'>"
-                    "<b>{client}</b> &nbsp;<span style='color:#019ee1;'>{type}</span>"
-                    " &nbsp;<span style='color:#888;font-size:0.70rem;'>{date}</span><br/>"
-                    "<span style='color:#444;'>{notes}</span>"
-                    "</div>".format(
-                        client=arow.get("nom_client",""),
-                        type=arow.get("type_interaction",""),
-                        date=str(arow.get("date","")),
-                        notes=notes_preview),
-                    open_key="act_{}".format(client_enc)
-                )
+                client_key    = str(arow.get("nom_client","")).replace(" ", "+")
+                acts_html += (
+                    '<a href="?open=act_{k}" target="_self" class="clink">'
+                    '<div class="activity-row">'
+                    '<b>{client}</b> &nbsp;<span style="color:#019ee1;">{type}</span>'
+                    ' &nbsp;<span style="color:#888;font-size:0.70rem;">{date}</span><br/>'
+                    '<span style="color:#444;">{notes}</span>'
+                    '</div></a>'
+                ).format(
+                    k=client_key,
+                    client=arow.get("nom_client",""),
+                    type=arow.get("type_interaction",""),
+                    date=str(arow.get("date","")),
+                    notes=notes_preview)
+            st.markdown(acts_html, unsafe_allow_html=True)
 
 
 # ============================================================================
@@ -835,7 +879,8 @@ with tab_pipeline:
 
 # ============================================================================
 # ONGLET 3 — EXECUTIVE DASHBOARD
-# Zéro st.button visible — tout est un lien HTML pur via clickable()
+# KPI grid CSS pur → alignement parfait
+# Surbrillance orange au hover + indicateur ▸
 # ============================================================================
 with tab_dash:
     st.markdown('<div class="section-title">Executive Dashboard</div>',
@@ -844,75 +889,75 @@ with tab_dash:
     kpis = db.get_kpis()
     nb_lost_paused = kpis["nb_lost"] + kpis.get("nb_paused", 0)
 
-    # ---- KPI Cards — liens purs, zéro bouton ----
-    kc1, kc2, kc3, kc4 = st.columns(4, gap="small")
+    # ---- KPI Cards — une seule div grille, zéro st.columns ----
+    # Toutes les 4 cards dans un seul st.markdown → hauteurs uniformes, pas de gap Streamlit
+    card_lp = (
+        '<a href="?open=lost" target="_self" class="clink">'
+        '<div class="kpi-card kpi-card-clickable">'
+        '<div class="kpi-label">Lost / Paused</div>'
+        '<div class="kpi-value">{n}</div>'
+        '<div class="kpi-sub" style="color:#019ee1;">{n} deals</div>'
+        '</div></a>'
+    ).format(n=nb_lost_paused) if nb_lost_paused > 0 else (
+        '<div class="kpi-card kpi-card-static">'
+        '<div class="kpi-label">Lost / Paused</div>'
+        '<div class="kpi-value">0</div>'
+        '<div class="kpi-sub">Aucun deal perdu</div>'
+        '</div>'
+    )
 
-    with kc1:
-        clickable(
-            '<div class="kpi-card">'
-            '<div class="kpi-label">AUM Finance Total</div>'
-            '<div class="kpi-value">{}</div>'
-            '<div class="kpi-sub" style="color:#019ee1;">{} deal(s) Funded</div>'
-            '</div>'.format(fmt_m(kpis["total_funded"]), kpis["nb_funded"]),
-            "funded")
-
-    with kc2:
-        clickable(
-            '<div class="kpi-card">'
-            '<div class="kpi-label">Pipeline Actif</div>'
-            '<div class="kpi-value">{}</div>'
-            '<div class="kpi-sub" style="color:#019ee1;">{} deals en cours</div>'
-            '</div>'.format(fmt_m(kpis["pipeline_actif"]), kpis["nb_deals_actifs"]),
-            "pipeline")
-
-    with kc3:
-        # Pas de drill-down — pas de lien
-        st.markdown(
-            '<div class="kpi-card kpi-card-static">'
-            '<div class="kpi-label">Taux Conversion</div>'
-            '<div class="kpi-value">{:.1f}%</div>'
-            '<div class="kpi-sub">{} funded / {} lost</div>'
-            '</div>'.format(kpis["taux_conversion"], kpis["nb_funded"], kpis["nb_lost"]),
-            unsafe_allow_html=True)
-
-    with kc4:
-        if nb_lost_paused > 0:
-            clickable(
-                '<div class="kpi-card">'
-                '<div class="kpi-label">Lost / Paused</div>'
-                '<div class="kpi-value">{}</div>'
-                '<div class="kpi-sub" style="color:#019ee1;">{} deals</div>'
-                '</div>'.format(nb_lost_paused, nb_lost_paused),
-                "lost")
-        else:
-            st.markdown(
-                '<div class="kpi-card kpi-card-static">'
-                '<div class="kpi-label">Lost / Paused</div>'
-                '<div class="kpi-value">0</div>'
-                '<div class="kpi-sub">Aucun deal perdu</div>'
-                '</div>', unsafe_allow_html=True)
+    st.markdown(
+        '<div class="kpi-grid">'
+        '<a href="?open=funded" target="_self" class="clink">'
+        '<div class="kpi-card kpi-card-clickable">'
+        '<div class="kpi-label">AUM Finance Total</div>'
+        '<div class="kpi-value">{aum_f}</div>'
+        '<div class="kpi-sub" style="color:#019ee1;">{nb_f} deal(s) Funded</div>'
+        '</div></a>'
+        '<a href="?open=pipeline" target="_self" class="clink">'
+        '<div class="kpi-card kpi-card-clickable">'
+        '<div class="kpi-label">Pipeline Actif</div>'
+        '<div class="kpi-value">{aum_p}</div>'
+        '<div class="kpi-sub" style="color:#019ee1;">{nb_p} deals en cours</div>'
+        '</div></a>'
+        '<div class="kpi-card kpi-card-static">'
+        '<div class="kpi-label">Taux Conversion</div>'
+        '<div class="kpi-value">{taux:.1f}%</div>'
+        '<div class="kpi-sub">{nb_f2} funded / {nb_l} lost</div>'
+        '</div>'
+        '{card_lp}'
+        '</div>'.format(
+            aum_f=fmt_m(kpis["total_funded"]), nb_f=kpis["nb_funded"],
+            aum_p=fmt_m(kpis["pipeline_actif"]), nb_p=kpis["nb_deals_actifs"],
+            taux=kpis["taux_conversion"], nb_f2=kpis["nb_funded"], nb_l=kpis["nb_lost"],
+            card_lp=card_lp),
+        unsafe_allow_html=True)
 
     st.markdown("<br>", unsafe_allow_html=True)
 
-    # ---- Pastilles statut — liens purs ----
+    # ---- Pastilles statut — grille CSS, liens purs ----
     statut_order = [s for s in STATUTS if kpis["statut_repartition"].get(s, 0) > 0]
     if statut_order:
-        bcols = st.columns(len(statut_order), gap="small")
-        for col, s in zip(bcols, statut_order):
+        n_cols = len(statut_order)
+        pills = ""
+        for s in statut_order:
             c_hex = STATUT_COLORS.get(s, GRIS)
             count = kpis["statut_repartition"][s]
-            with col:
-                clickable(
-                    '<div class="statut-pill" style="background:{c}16;border:1px solid {c}44;">'
-                    '<div style="font-size:0.61rem;color:{marine};font-weight:700;'
-                    'text-transform:uppercase;">{s}</div>'
-                    '<div style="font-size:1.3rem;font-weight:800;color:{c};">{n}</div>'
-                    '</div>'.format(c=c_hex, marine=MARINE, s=s, n=count),
-                    "statut_{}".format(s))
+            pills += (
+                '<a href="?open=statut_{s}" target="_self" class="clink">'
+                '<div class="statut-pill" style="background:{c}16;border:1px solid {c}44;">'
+                '<div style="font-size:0.61rem;color:{marine};font-weight:700;text-transform:uppercase;">{s}</div>'
+                '<div style="font-size:1.3rem;font-weight:800;color:{c};">{n}</div>'
+                '</div></a>'
+            ).format(s=s, c=c_hex, marine=MARINE, n=count)
+        st.markdown(
+            '<div class="statut-grid" style="grid-template-columns:repeat({n},1fr);">'
+            '{pills}</div>'.format(n=n_cols, pills=pills),
+            unsafe_allow_html=True)
 
     st.divider()
 
-    # ---- Alertes retard — liens purs ----
+    # ---- Alertes retard — toutes dans un seul bloc HTML ----
     df_overdue = db.get_overdue_actions()
     if not df_overdue.empty:
         st.markdown(
@@ -921,23 +966,26 @@ with tab_dash:
             "{} action(s) en retard</div>".format(len(df_overdue)),
             unsafe_allow_html=True)
         today = date.today()
-        for idx, row in df_overdue.iterrows():
+        alertes = ""
+        for _, row in df_overdue.iterrows():
             nad = row.get("next_action_date")
             days_late = (today - nad).days if isinstance(nad, date) else 0
             nad_str   = nad.isoformat() if isinstance(nad, date) else "—"
             owner     = str(row.get("sales_owner","")) or ""
-            clickable(
+            alertes += (
+                '<a href="?open=overdue" target="_self" class="clink">'
                 '<div class="alert-overdue">'
                 '<b>{client}</b> — {fonds}'
                 ' <span style="color:{ciel};font-weight:600;">({statut})</span>'
                 ' — Prevue le <b>{nad}</b>'
                 ' &nbsp;<span class="badge-retard">RETARD +{days}j</span>'
                 '{owner_part}'
-                '</div>'.format(
-                    client=row["nom_client"], fonds=row["fonds"], ciel=CIEL,
-                    statut=row["statut"], nad=nad_str, days=days_late,
-                    owner_part=" — <b>{}</b>".format(owner) if owner else ""),
-                "overdue")
+                '</div></a>'
+            ).format(
+                client=row["nom_client"], fonds=row["fonds"], ciel=CIEL,
+                statut=row["statut"], nad=nad_str, days=days_late,
+                owner_part=" — <b>{}</b>".format(owner) if owner else "")
+        st.markdown(alertes, unsafe_allow_html=True)
 
     # ---- Graphiques ----
     gcol1, gcol2, gcol3 = st.columns([1, 1, 1.2], gap="medium")
