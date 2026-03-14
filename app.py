@@ -1,8 +1,10 @@
 # =============================================================================
 # app.py — CRM Asset Management — Amundi Edition
 # Charte : #001c4b Marine | #019ee1 Ciel | #f07d00 Orange
-# UX : zéro bouton parasite — technique du bouton fantôme (opacity:0, inset:0)
-#      Le st.button est invisible et recouvre l'élément visuel cliquable.
+# UX : zéro bouton parasite dans le DOM.
+#      Technique : st.query_params — les éléments visuels sont de purs liens
+#      <a href="?open=X"> sans aucun st.button pour les zones cliquables.
+#      Au rechargement Streamlit lit ?open= et déclenche le bon @st.dialog.
 # =============================================================================
 
 import streamlit as st
@@ -50,7 +52,7 @@ STATUT_COLORS = {
     "Paused":        "#c0c0c0", "Redeemed":      "#b8b8d0",
 }
 
-fmt_m = db.format_finance  # alias vers la fonction unique
+fmt_m = db.format_finance
 
 # ---------------------------------------------------------------------------
 # CONFIG
@@ -59,18 +61,10 @@ st.set_page_config(page_title="CRM - Asset Management",
                    layout="wide", initial_sidebar_state="expanded")
 
 # ---------------------------------------------------------------------------
-# CSS
-# Technique bouton fantôme :
-#   .ghost-wrap { position:relative }
-#   .ghost-wrap .stButton button { position:absolute; inset:0; opacity:0; cursor:pointer }
-# L'élément HTML garde son rendu. Le bouton invisible se déclenche au clic.
+# CSS — éléments cliquables = liens HTML purs, zéro forme Streamlit
 # ---------------------------------------------------------------------------
 st.markdown("""
 <style>
-/* ============================================================
-   CHARTE AMUNDI — Marine #001c4b | Ciel #019ee1 | Orange #f07d00
-   ============================================================ */
-
 .stApp, .main .block-container {
     background-color: #ffffff;
     color: #001c4b;
@@ -91,76 +85,47 @@ st.markdown("""
 .crm-header p  { color:#7ab8d8; margin:3px 0 0 0; font-size:0.80rem; }
 
 /* ============================================================
-   BOUTON FANTÔME — recouvre l'élément parent, invisible
+   ÉLÉMENTS CLIQUABLES — liens HTML purs, zéro bouton Streamlit
    ============================================================ */
-.ghost-wrap {
-    position: relative;
-    display: block;
-}
-.ghost-wrap > div[data-testid="element-container"] {
-    position: absolute;
-    inset: 0;
-    z-index: 10;
-    margin: 0 !important;
-    padding: 0 !important;
-}
-.ghost-wrap .stButton,
-.ghost-wrap .stButton > button {
-    position: absolute !important;
-    inset: 0 !important;
-    width: 100% !important;
-    height: 100% !important;
-    margin: 0 !important;
-    padding: 0 !important;
-    opacity: 0 !important;
-    cursor: pointer !important;
-    border: none !important;
-    background: transparent !important;
-    font-size: 0 !important;
-}
 
-/* ============================================================
-   KPI CARDS
-   ============================================================ */
+/* Lien wrapper commun — retire toute décoration de lien */
+a.click-wrap {
+    display: block;
+    text-decoration: none;
+    color: inherit;
+    cursor: pointer;
+}
+a.click-wrap:hover { text-decoration: none; }
+
+/* KPI Cards */
 .kpi-card {
     background: #001c4b;
     padding: 14px 10px 12px 10px;
     text-align: center;
     border: 1px solid #1a5e8a;
     border-bottom: 2px solid #019ee1;
-    cursor: pointer;
     transition: background 0.12s, border-color 0.12s;
-    user-select: none;
+    display: block;
 }
-.kpi-card:hover { background: #0a2d5e; border-color: #f07d00 !important; }
+a.click-wrap:hover .kpi-card {
+    background: #0a2d5e;
+    border-color: #f07d00 !important;
+}
 .kpi-label { font-size:0.64rem; color:#7ab8d8; text-transform:uppercase; letter-spacing:0.8px; margin-bottom:5px; font-weight:600; }
 .kpi-value { font-size:1.4rem; font-weight:800; color:#ffffff; }
 .kpi-sub   { font-size:0.61rem; color:#c8dde8; margin-top:3px; }
+.kpi-card-static { border-bottom:2px solid #1a5e8a; }
 
-/* Carte sans drill-down */
-.kpi-card-static { border-bottom: 2px solid #1a5e8a; }
-
-/* ============================================================
-   PASTILLES STATUT
-   ============================================================ */
+/* Pastilles statut */
 .statut-pill {
-    background: transparent;
-    border: none;
-    padding: 0;
-    cursor: pointer;
-    display: block;
-}
-.statut-pill-inner {
     padding: 8px 7px;
     text-align: center;
     transition: filter 0.10s;
-    user-select: none;
+    display: block;
 }
-.statut-pill:hover .statut-pill-inner { filter: brightness(1.14); }
+a.click-wrap:hover .statut-pill { filter: brightness(1.14); }
 
-/* ============================================================
-   ALERTES RETARD — toute la ligne est cliquable
-   ============================================================ */
+/* Alertes retard */
 .alert-overdue {
     background: #fef6f0;
     border-left: 3px solid #f07d00;
@@ -168,29 +133,25 @@ st.markdown("""
     margin: 3px 0;
     font-size: 0.77rem;
     color: #001c4b;
-    cursor: pointer;
     transition: background 0.10s;
-    user-select: none;
+    display: block;
 }
-.alert-overdue:hover { background: #fdebd5; }
+a.click-wrap:hover .alert-overdue { background: #fdebd5; }
 
-/* ============================================================
-   ACTIVITÉS — ligne entière cliquable
-   ============================================================ */
+/* Activités */
 .activity-row {
     border-left: 2px solid #019ee1;
     padding: 7px 11px;
     margin: 3px 0;
     background: #f9fbfd;
     font-size: 0.78rem;
-    cursor: pointer;
     transition: background 0.10s;
-    user-select: none;
+    display: block;
 }
-.activity-row:hover { background: #e4f1f9; }
+a.click-wrap:hover .activity-row { background: #e4f1f9; }
 
 /* ============================================================
-   AUTRES ELEMENTS
+   AUTRES ÉLÉMENTS
    ============================================================ */
 .badge-retard {
     display:inline-block; background:#f07d00; color:#ffffff;
@@ -213,32 +174,22 @@ st.markdown("""
 .pipeline-hint { background:#019ee108; border-left:2px solid #001c4b; padding:6px 11px; font-size:0.77rem; color:#001c4b; margin-bottom:8px; }
 .sidebar-kpi { background:#ffffff14; padding:8px; margin-bottom:5px; }
 
-/* Onglets */
 .stTabs [data-baseweb="tab-list"] { background:#f0f4f8; border-bottom:2px solid #001c4b20; gap:0; }
 .stTabs [data-baseweb="tab"] { color:#001c4b; font-weight:600; font-size:0.81rem; padding:7px 16px; background:#f0f4f8; border-right:1px solid #d0d8e0; }
 .stTabs [aria-selected="true"] { background:#001c4b !important; color:#ffffff !important; }
 
-/* Boutons normaux (sidebar, import, demo) */
+/* Boutons normaux (formulaires, sidebar, PDF) */
 .stButton > button {
     background:#019ee1; color:#ffffff; border:none; font-weight:600;
     padding:6px 15px; font-size:0.80rem; transition:background 0.12s;
 }
 .stButton > button:hover { background:#f07d00 !important; color:#ffffff !important; }
-
-[data-testid="stDownloadButton"] > button {
-    background:#019ee1 !important; color:#ffffff !important; border:none !important; font-weight:600 !important;
-}
+[data-testid="stDownloadButton"] > button { background:#019ee1 !important; color:#ffffff !important; border:none !important; font-weight:600 !important; }
 [data-testid="stDownloadButton"] > button:hover { background:#f07d00 !important; color:#ffffff !important; }
-
-[data-testid="stFormSubmitButton"] > button {
-    background:#001c4b !important; color:#ffffff !important; font-weight:700 !important;
-}
+[data-testid="stFormSubmitButton"] > button { background:#001c4b !important; color:#ffffff !important; font-weight:700 !important; }
 [data-testid="stFormSubmitButton"] > button:hover { background:#019ee1 !important; }
-
 .stSelectbox label, .stTextInput label, .stNumberInput label,
-.stDateInput label, .stTextArea label, .stRadio label {
-    color:#001c4b !important; font-weight:600; font-size:0.78rem;
-}
+.stDateInput label, .stTextArea label, .stRadio label { color:#001c4b !important; font-weight:600; font-size:0.78rem; }
 h1,h2,h3,h4 { color:#001c4b !important; }
 hr { border-color:#001c4b10; }
 code { background:#001c4b08; color:#001c4b; }
@@ -257,21 +208,18 @@ _init()
 
 
 # ---------------------------------------------------------------------------
-# HELPER — bouton fantôme
-# Encapsule une card HTML + un st.button invisible qui la recouvre.
-# Retourne True si cliqué.
+# HELPER — lien cliquable sans st.button
+# Génère <a href="?open=KEY" target="_self" class="click-wrap">HTML</a>
+# Streamlit relit les query_params au rechargement → déclenche le dialog.
 # ---------------------------------------------------------------------------
-def ghost_button(html_content, key):
-    """
-    Affiche html_content comme élément visuel cliquable.
-    Le st.button sous-jacent est rendu invisible via CSS (.ghost-wrap).
-    Retourne True si l'utilisateur clique sur la surface.
-    """
-    st.markdown('<div class="ghost-wrap">', unsafe_allow_html=True)
-    st.markdown(html_content, unsafe_allow_html=True)
-    clicked = st.button(" ", key=key, use_container_width=True)
-    st.markdown('</div>', unsafe_allow_html=True)
-    return clicked
+def clickable(html_content, open_key):
+    """Rend html_content entièrement cliquable via un lien query_param."""
+    st.markdown(
+        '<a href="?open={key}" target="_self" class="click-wrap">'
+        '{content}'
+        '</a>'.format(key=open_key, content=html_content),
+        unsafe_allow_html=True
+    )
 
 
 def statut_badge(statut):
@@ -356,12 +304,11 @@ def modal_overdue_detail():
         st.info("Aucune action en retard."); return
     today = date.today()
     for _, row in df.iterrows():
-        pid = int(row.get("id", 0)) if "id" in df.columns else None
+        pid  = int(row.get("id", 0)) if "id" in df.columns else None
         deal = db.get_overdue_deal_full(pid) if pid else None
-        nad = row.get("next_action_date")
+        nad  = row.get("next_action_date")
         days = (today - nad).days if isinstance(nad, date) else 0
         nad_str = nad.isoformat() if isinstance(nad, date) else "—"
-
         st.markdown(
             "<div style='border-left:3px solid #f07d00;padding:8px 14px;"
             "margin:8px 0;background:#fef6f0;'>"
@@ -383,8 +330,7 @@ def modal_overdue_detail():
                 st.markdown("**Region**"); st.write(deal.get("region","—"))
                 st.markdown("**Prochaine Action**"); st.write(nad_str)
                 st.markdown("**Derniere Activite**")
-                act = deal.get("derniere_activite","")
-                st.write(act if act else "—")
+                st.write(deal.get("derniere_activite","") or "—")
         st.markdown("</div>", unsafe_allow_html=True)
 
 
@@ -402,8 +348,7 @@ def modal_statut_detail(statut_nom, fonds_filter=None):
             timing_html = (
                 "<span class='badge-retard'>RETARD +{}j</span>".format(abs(delta)) if delta < 0
                 else "<span style='color:#019ee1;font-weight:700;'>Aujourd'hui</span>" if delta == 0
-                else "<span style='color:#444;'>Dans {}j</span>".format(delta)
-            )
+                else "<span style='color:#444;'>Dans {}j</span>".format(delta))
         else:
             nad_str = "—"; timing_html = "—"
         act = str(row.get("derniere_activite",""))
@@ -431,8 +376,37 @@ def modal_statut_detail(statut_nom, fonds_filter=None):
                     "<div style='margin-top:5px;font-size:0.73rem;color:#666;"
                     "border-top:1px solid #e8e8e8;padding-top:4px;'>"
                     "<b>Derniere activite :</b> {}</div>".format(act)
-                ) if act else ""
-            ), unsafe_allow_html=True)
+                ) if act else ""), unsafe_allow_html=True)
+
+
+# ---------------------------------------------------------------------------
+# LECTURE DU QUERY PARAM — déclenche le bon dialog en haut de page
+# (avant tout rendu, pour que le dialog s'ouvre immédiatement)
+# ---------------------------------------------------------------------------
+_open = st.query_params.get("open", "")
+_filtre_effectif = None   # sera recalculé dans la sidebar, mais on en a besoin ici aussi
+                           # pour les modals déclenchés par query_param
+
+if _open == "funded":
+    modal_funded(None)
+    st.query_params.clear()
+elif _open == "pipeline":
+    modal_pipeline_actif(None)
+    st.query_params.clear()
+elif _open == "lost":
+    modal_lost(None)
+    st.query_params.clear()
+elif _open == "overdue":
+    modal_overdue_detail()
+    st.query_params.clear()
+elif _open.startswith("statut_"):
+    statut_nom = _open[len("statut_"):]
+    modal_statut_detail(statut_nom, None)
+    st.query_params.clear()
+elif _open.startswith("act_"):
+    client_nom = _open[len("act_"):]
+    modal_activities_tab(client_nom if client_nom else None)
+    st.query_params.clear()
 
 
 # ---------------------------------------------------------------------------
@@ -538,7 +512,7 @@ with st.sidebar:
                 st.error("Erreur : {}".format(e))
 
     st.divider()
-    st.caption("Version 8.0 — Amundi Edition")
+    st.caption("Version 9.0 — Amundi Edition")
 
 
 # ---------------------------------------------------------------------------
@@ -669,9 +643,10 @@ with tab_ingest:
         if not df_act.empty:
             for _, arow in df_act.head(8).iterrows():
                 notes_full    = str(arow.get("notes",""))
-                notes_preview = notes_full[:88] + ("…" if len(notes_full) > 88 else "")
-                # Ligne entière cliquable — ghost_button recouvre la div
-                clicked_act = ghost_button(
+                notes_preview = notes_full[:90] + ("…" if len(notes_full) > 90 else "")
+                client_enc    = str(arow.get("nom_client","")).replace(" ", "+")
+                # Lien pur — zéro bouton Streamlit
+                clickable(
                     "<div class='activity-row'>"
                     "<b>{client}</b> &nbsp;<span style='color:#019ee1;'>{type}</span>"
                     " &nbsp;<span style='color:#888;font-size:0.70rem;'>{date}</span><br/>"
@@ -680,12 +655,9 @@ with tab_ingest:
                         client=arow.get("nom_client",""),
                         type=arow.get("type_interaction",""),
                         date=str(arow.get("date","")),
-                        notes=notes_preview,
-                    ),
-                    key="act_{}".format(arow.get("id",""))
+                        notes=notes_preview),
+                    open_key="act_{}".format(client_enc)
                 )
-                if clicked_act:
-                    modal_activities_tab(arow.get("nom_client"))
 
 
 # ============================================================================
@@ -822,7 +794,7 @@ with tab_pipeline:
             'padding:20px;text-align:center;margin-top:10px;">'
             '<div style="color:{};font-weight:600;font-size:0.85rem;">Selectionnez un deal dans le tableau</div>'
             '<div style="color:#888;font-size:0.75rem;margin-top:2px;">'
-            "Le formulaire d'edition et l'historique s'afficheront ici</div>"
+            "Le formulaire d'edition s'affichera ici</div>"
             '</div>'.format(MARINE), unsafe_allow_html=True)
 
     st.divider()
@@ -863,7 +835,7 @@ with tab_pipeline:
 
 # ============================================================================
 # ONGLET 3 — EXECUTIVE DASHBOARD
-# Tous les éléments cliquables utilisent ghost_button — zéro texte de bouton visible
+# Zéro st.button visible — tout est un lien HTML pur via clickable()
 # ============================================================================
 with tab_dash:
     st.markdown('<div class="section-title">Executive Dashboard</div>',
@@ -872,31 +844,29 @@ with tab_dash:
     kpis = db.get_kpis()
     nb_lost_paused = kpis["nb_lost"] + kpis.get("nb_paused", 0)
 
-    # ---- KPI Cards — ghost_button : la carte est le bouton ----
+    # ---- KPI Cards — liens purs, zéro bouton ----
     kc1, kc2, kc3, kc4 = st.columns(4, gap="small")
 
     with kc1:
-        if ghost_button(
+        clickable(
             '<div class="kpi-card">'
             '<div class="kpi-label">AUM Finance Total</div>'
             '<div class="kpi-value">{}</div>'
             '<div class="kpi-sub" style="color:#019ee1;">{} deal(s) Funded</div>'
             '</div>'.format(fmt_m(kpis["total_funded"]), kpis["nb_funded"]),
-            key="btn_funded"):
-            modal_funded(_filtre_effectif)
+            "funded")
 
     with kc2:
-        if ghost_button(
+        clickable(
             '<div class="kpi-card">'
             '<div class="kpi-label">Pipeline Actif</div>'
             '<div class="kpi-value">{}</div>'
             '<div class="kpi-sub" style="color:#019ee1;">{} deals en cours</div>'
             '</div>'.format(fmt_m(kpis["pipeline_actif"]), kpis["nb_deals_actifs"]),
-            key="btn_pipe"):
-            modal_pipeline_actif(_filtre_effectif)
+            "pipeline")
 
     with kc3:
-        # Pas de drill-down — pas de ghost_button
+        # Pas de drill-down — pas de lien
         st.markdown(
             '<div class="kpi-card kpi-card-static">'
             '<div class="kpi-label">Taux Conversion</div>'
@@ -907,14 +877,13 @@ with tab_dash:
 
     with kc4:
         if nb_lost_paused > 0:
-            if ghost_button(
+            clickable(
                 '<div class="kpi-card">'
                 '<div class="kpi-label">Lost / Paused</div>'
                 '<div class="kpi-value">{}</div>'
                 '<div class="kpi-sub" style="color:#019ee1;">{} deals</div>'
                 '</div>'.format(nb_lost_paused, nb_lost_paused),
-                key="btn_lost"):
-                modal_lost(_filtre_effectif)
+                "lost")
         else:
             st.markdown(
                 '<div class="kpi-card kpi-card-static">'
@@ -925,7 +894,7 @@ with tab_dash:
 
     st.markdown("<br>", unsafe_allow_html=True)
 
-    # ---- Pastilles statut — ghost_button sur chaque pastille ----
+    # ---- Pastilles statut — liens purs ----
     statut_order = [s for s in STATUTS if kpis["statut_repartition"].get(s, 0) > 0]
     if statut_order:
         bcols = st.columns(len(statut_order), gap="small")
@@ -933,19 +902,17 @@ with tab_dash:
             c_hex = STATUT_COLORS.get(s, GRIS)
             count = kpis["statut_repartition"][s]
             with col:
-                if ghost_button(
-                    '<div class="statut-pill">'
-                    '<div class="statut-pill-inner" style="background:{c}16;border:1px solid {c}44;">'
+                clickable(
+                    '<div class="statut-pill" style="background:{c}16;border:1px solid {c}44;">'
                     '<div style="font-size:0.61rem;color:{marine};font-weight:700;'
                     'text-transform:uppercase;">{s}</div>'
                     '<div style="font-size:1.3rem;font-weight:800;color:{c};">{n}</div>'
-                    '</div></div>'.format(c=c_hex, marine=MARINE, s=s, n=count),
-                    key="statut_btn_{}".format(s)):
-                    modal_statut_detail(s, _filtre_effectif)
+                    '</div>'.format(c=c_hex, marine=MARINE, s=s, n=count),
+                    "statut_{}".format(s))
 
     st.divider()
 
-    # ---- Alertes retard — ghost_button sur toute la ligne ----
+    # ---- Alertes retard — liens purs ----
     df_overdue = db.get_overdue_actions()
     if not df_overdue.empty:
         st.markdown(
@@ -959,8 +926,7 @@ with tab_dash:
             days_late = (today - nad).days if isinstance(nad, date) else 0
             nad_str   = nad.isoformat() if isinstance(nad, date) else "—"
             owner     = str(row.get("sales_owner","")) or ""
-
-            if ghost_button(
+            clickable(
                 '<div class="alert-overdue">'
                 '<b>{client}</b> — {fonds}'
                 ' <span style="color:{ciel};font-weight:600;">({statut})</span>'
@@ -971,8 +937,7 @@ with tab_dash:
                     client=row["nom_client"], fonds=row["fonds"], ciel=CIEL,
                     statut=row["statut"], nad=nad_str, days=days_late,
                     owner_part=" — <b>{}</b>".format(owner) if owner else ""),
-                key="overdue_{}".format(idx)):
-                modal_overdue_detail()
+                "overdue")
 
     # ---- Graphiques ----
     gcol1, gcol2, gcol3 = st.columns([1, 1, 1.2], gap="medium")
@@ -1201,17 +1166,15 @@ with tab_perf:
             df_nav.columns = [c.strip() for c in df_nav.columns]
             missing = [c for c in ["Date","Fonds","NAV"] if c not in df_nav.columns]
             if missing:
-                st.error("Colonnes manquantes : {}. Trouvees : {}".format(
-                    missing, list(df_nav.columns))); st.stop()
-            df_nav["Date"] = pd.to_datetime(df_nav["Date"], format="mixed",
-                                             dayfirst=True, errors="coerce")
+                st.error("Colonnes manquantes : {}".format(missing)); st.stop()
+            df_nav["Date"] = pd.to_datetime(df_nav["Date"], format="mixed", dayfirst=True, errors="coerce")
             df_nav = df_nav.dropna(subset=["Date"])
             df_nav["NAV"]   = pd.to_numeric(df_nav["NAV"], errors="coerce")
             df_nav = df_nav.dropna(subset=["NAV"])
             df_nav["Fonds"] = df_nav["Fonds"].astype(str).str.strip()
             df_nav = df_nav.sort_values("Date").reset_index(drop=True)
             if df_nav.empty:
-                st.error("Aucune donnee valide apres nettoyage."); st.stop()
+                st.error("Aucune donnee valide."); st.stop()
 
             fonds_list = sorted(df_nav["Fonds"].unique().tolist())
             d_min = df_nav["Date"].min(); d_max = df_nav["Date"].max()
@@ -1239,7 +1202,7 @@ with tab_perf:
                     (df_nav["Date"].dt.date <= d_fin))
             df_fn = df_nav[mask].copy()
             if df_fn.empty:
-                st.warning("Aucune donnee pour la periode selectionnee."); st.stop()
+                st.warning("Aucune donnee pour la periode."); st.stop()
 
             pivot = (df_fn.pivot_table(index="Date", columns="Fonds", values="NAV", aggfunc="last")
                      .sort_index().ffill())
