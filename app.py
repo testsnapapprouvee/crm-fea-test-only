@@ -72,23 +72,34 @@ st.set_page_config(page_title="CRM - Asset Management",
 
 st.markdown("""
 <style>
+/* =====================================================================
+   CHARTE AMUNDI — Marine #001c4b | Ciel #019ee1 | Orange #f07d00 (unique)
+   Principe : zero border-radius, design institutionnel angulaire
+   ===================================================================== */
+
 .stApp, .main .block-container {
     background-color: #ffffff;
     color: #001c4b;
     font-family: 'Segoe UI', Arial, sans-serif;
 }
-[data-testid="stSidebar"] { background-color: #001c4b; }
+
+/* Sidebar — fond marine plein, aucun arrondi */
+[data-testid="stSidebar"] {
+    background-color: #001c4b;
+}
 [data-testid="stSidebar"] * { color: #ffffff !important; }
 [data-testid="stSidebar"] h1,
 [data-testid="stSidebar"] h2,
 [data-testid="stSidebar"] h3 { color: #019ee1 !important; }
+[data-testid="stSidebar"] .stMultiSelect > div,
+[data-testid="stSidebar"] .stSelectbox > div { !important; }
 
+/* En-tete application */
 .crm-header {
     background: #001c4b;
     padding: 16px 24px;
-    border-radius: 6px;
     margin-bottom: 16px;
-    border-bottom: 3px solid #f07d00;
+    border-bottom: 3px solid #019ee1;
 }
 .crm-header h1 {
     color: #ffffff !important;
@@ -96,26 +107,29 @@ st.markdown("""
     font-size: 1.4rem;
     font-weight: 700;
 }
-.crm-header p { color: #4a8fbd; margin: 3px 0 0 0; font-size: 0.80rem; }
+.crm-header p { color: #7ab8d8; margin: 3px 0 0 0; font-size: 0.80rem; }
 
+/* KPI Cards — fond marine, aucun arrondi, cliquable via JS */
 .kpi-card {
     background: #001c4b;
     padding: 13px 10px;
-    border-radius: 6px;
     text-align: center;
     border: 1px solid #1a5e8a;
+    cursor: pointer;
 }
+.kpi-card:hover { background: #0a2d5e; }
 .kpi-label {
-    font-size: 0.65rem;
-    color: #4a8fbd;
+    font-size: 0.64rem;
+    color: #7ab8d8;
     text-transform: uppercase;
     letter-spacing: 0.8px;
     margin-bottom: 5px;
     font-weight: 600;
 }
 .kpi-value { font-size: 1.4rem; font-weight: 800; color: #ffffff; }
-.kpi-sub   { font-size: 0.62rem; color: #e8e8e8; margin-top: 3px; }
+.kpi-sub   { font-size: 0.61rem; color: #c8dde8; margin-top: 3px; }
 
+/* Titres de sections */
 .section-title {
     font-size: 0.90rem;
     font-weight: 700;
@@ -124,49 +138,54 @@ st.markdown("""
     padding-bottom: 4px;
     margin: 14px 0 9px 0;
 }
+
+/* Badge RETARD — orange, seul usage orange dans l'UI */
 .badge-retard {
     display: inline-block;
     background: #f07d00;
     color: #ffffff;
-    border-radius: 3px;
     padding: 1px 7px;
-    font-size: 0.67rem;
+    font-size: 0.66rem;
     font-weight: 700;
     letter-spacing: 0.4px;
 }
+
+/* Badge perimetre fonds — sidebar */
 .perimetre-badge {
     display: inline-block;
-    background: #4a8fbd18;
-    border: 1px solid #4a8fbd44;
-    border-radius: 4px;
+    background: #019ee122;
+    border: 1px solid #019ee155;
     padding: 2px 8px;
-    font-size: 0.71rem;
-    color: #001c4b;
+    font-size: 0.70rem;
+    color: #ffffff;
     font-weight: 600;
     margin: 2px;
 }
+
+/* Panneau de detail pipeline */
 .detail-panel {
-    background: #f4f8fc;
-    border: 1px solid #001c4b18;
-    border-radius: 8px;
-    padding: 15px 17px 12px 17px;
-    margin-top: 11px;
+    background: #f2f6fa;
+    border-left: 3px solid #019ee1;
+    padding: 14px 16px 11px 16px;
+    margin-top: 10px;
 }
+
+/* Alertes retard */
 .alert-overdue {
-    background: #fff5f0;
+    background: #fef6f0;
     border-left: 3px solid #f07d00;
-    border-radius: 0 4px 4px 0;
     padding: 6px 11px;
     margin: 3px 0;
     font-size: 0.77rem;
     color: #001c4b;
 }
+
+/* Card commercial */
 .sales-card {
     background: #ffffff;
-    border: 1px solid #001c4b12;
-    border-radius: 6px;
+    border: 1px solid #001c4b18;
     padding: 13px;
-    border-top: 3px solid #001c4b;
+    border-top: 3px solid #019ee1;
 }
 .sales-card-name {
     font-size: 0.87rem;
@@ -178,64 +197,90 @@ st.markdown("""
 }
 .sales-metric { font-size: 0.69rem; color: #666; margin-bottom: 2px; }
 .sales-metric-val { font-size: 0.93rem; font-weight: 700; color: #001c4b; }
-.sales-metric-acc { font-size: 0.93rem; font-weight: 700; color: #1a5e8a; }
+.sales-metric-acc { font-size: 0.93rem; font-weight: 700; color: #019ee1; }
 
+/* Onglets — angulaires */
 .stTabs [data-baseweb="tab-list"] {
     background: #ffffff;
-    border-bottom: 2px solid #001c4b14;
-    gap: 2px;
+    border-bottom: 2px solid #001c4b20;
+    gap: 0;
 }
 .stTabs [data-baseweb="tab"] {
     color: #001c4b;
     font-weight: 600;
     font-size: 0.81rem;
-    padding: 7px 15px;
-    border-radius: 4px 4px 0 0;
-    background: #001c4b06;
+    padding: 7px 16px;
+    background: #f0f4f8;
+    border-right: 1px solid #d0d8e0;
 }
 .stTabs [aria-selected="true"] {
     background: #001c4b !important;
     color: #ffffff !important;
 }
+
+/* Boutons — angulaires, bleu ciel au hover */
 .stButton > button {
     background: #001c4b;
     color: #ffffff;
     border: none;
-    border-radius: 4px;
     font-weight: 600;
     padding: 6px 15px;
     font-size: 0.80rem;
-    transition: background 0.15s;
+    transition: background 0.12s;
 }
-.stButton > button:hover { background: #1a5e8a; color: #ffffff; }
+.stButton > button:hover { background: #019ee1; color: #ffffff; }
 
+/* Bouton Sauvegarder — ciel (action principale, PAS orange) */
 [data-testid="stFormSubmitButton"] > button {
-    background: #f07d00 !important;
+    background: #019ee1 !important;
     color: #ffffff !important;
     border: none;
     font-weight: 700;
 }
 [data-testid="stFormSubmitButton"] > button:hover {
-    background: #c06200 !important;
+    background: #0180c0 !important;
 }
 
+/* Download buttons */
+[data-testid="stDownloadButton"] > button {
+    !important;
+}
+
+/* Inputs — angulaires */
+.stSelectbox > div > div,
+.stTextInput > div > div,
+.stNumberInput > div > div,
+.stMultiSelect > div {
+    !important;
+}
+
+/* Labels */
 .stSelectbox label, .stTextInput label, .stNumberInput label,
 .stDateInput label, .stTextArea label, .stRadio label {
     color: #001c4b !important;
     font-weight: 600;
     font-size: 0.78rem;
 }
+
 h1, h2, h3, h4 { color: #001c4b !important; }
 hr { border-color: #001c4b10; }
-code { background: #001c4b08; color: #001c4b; border-radius: 3px; }
+code { background: #001c4b08; color: #001c4b; }
+
+/* Hint pipeline */
 .pipeline-hint {
-    background: #4a8fbd0d;
+    background: #019ee108;
     border-left: 2px solid #001c4b;
-    border-radius: 0 4px 4px 0;
     padding: 6px 11px;
     font-size: 0.77rem;
     color: #001c4b;
     margin-bottom: 8px;
+}
+
+/* Sidebar KPI blocks — sans arrondi */
+.sidebar-kpi {
+    background: #ffffff14;
+    padding: 8px;
+    margin-bottom: 5px;
 }
 </style>
 """, unsafe_allow_html=True)
@@ -297,7 +342,7 @@ def statut_badge(statut):
     }
     bg, fg = colors.get(statut, (GRIS, "#555"))
     return (
-        '<span style="padding:2px 9px;border-radius:9px;'
+        '<span style="padding:2px 9px;'
         'font-size:0.71rem;font-weight:600;'
         'background:{};color:{};">{}</span>'
     ).format(bg, fg, statut)
@@ -379,10 +424,9 @@ with st.sidebar:
         ("Pipeline Actif",    fmt_m(kpis_global["pipeline_actif"])),
     ]:
         st.markdown(
-            '<div style="background:#ffffff14;padding:8px;border-radius:5px;'
-            'margin-bottom:5px;">'
-            '<div style="font-size:0.63rem;color:#e8e8e8;">{}</div>'
-            '<div style="font-size:1.08rem;font-weight:800;color:#ffffff;">{}</div>'
+            '<div class="sidebar-kpi">'
+            '<div style="font-size:0.62rem;color:#c8dde8;">{}</div>'
+            '<div style="font-size:1.06rem;font-weight:800;color:#ffffff;">{}</div>'
             '</div>'.format(lbl, val),
             unsafe_allow_html=True
         )
@@ -833,7 +877,7 @@ with tab_pipeline:
     else:
         st.markdown(
             '<div style="background:#001c4b04;border:1px dashed #001c4b20;'
-            'border-radius:6px;padding:20px;text-align:center;margin-top:10px;">'
+            'padding:20px;text-align:center;margin-top:10px;">'
             '<div style="color:{};font-weight:600;font-size:0.85rem;">'
             'Selectionnez un deal dans le tableau</div>'
             '<div style="color:#888;font-size:0.75rem;margin-top:2px;">'
@@ -943,41 +987,62 @@ with tab_dash:
     kpis = db.get_kpis()
     nb_lost_paused = kpis["nb_lost"] + kpis.get("nb_paused", 0)
 
-    # KPI Cards avec boutons drill-down
-    kc1, kc2, kc3, kc4 = st.columns(4, gap="medium")
+    # KPI Cards — interactivite via boutons Streamlit integres dans le bloc visuel
+    # Le bouton est rendu sous la card mais visuellement "fusionne" via CSS
+    kc1, kc2, kc3, kc4 = st.columns(4, gap="small")
 
     with kc1:
         st.markdown(
-            kpi_card("AUM Finance Total", fmt_m(kpis["total_funded"]),
-                     "{} deal(s) Funded".format(kpis["nb_funded"])),
+            '<div class="kpi-card" style="border-bottom:2px solid #019ee1;">'
+            '<div class="kpi-label">AUM Finance Total</div>'
+            '<div class="kpi-value">{}</div>'
+            '<div class="kpi-sub" style="color:#019ee1;cursor:pointer;">'
+            '{} deal(s) Funded &rsaquo;</div>'
+            '</div>'.format(fmt_m(kpis["total_funded"]), kpis["nb_funded"]),
             unsafe_allow_html=True
         )
-        if st.button("Voir detail Funded", key="btn_funded", use_container_width=True):
+        if st.button("Detail AUM Finance", key="btn_funded",
+                     use_container_width=True, type="secondary"):
             modal_funded(_filtre_effectif)
 
     with kc2:
         st.markdown(
-            kpi_card("Pipeline Actif", fmt_m(kpis["pipeline_actif"]),
-                     "{} deals en cours".format(kpis["nb_deals_actifs"])),
+            '<div class="kpi-card" style="border-bottom:2px solid #019ee1;">'
+            '<div class="kpi-label">Pipeline Actif</div>'
+            '<div class="kpi-value">{}</div>'
+            '<div class="kpi-sub" style="color:#019ee1;cursor:pointer;">'
+            '{} deals en cours &rsaquo;</div>'
+            '</div>'.format(fmt_m(kpis["pipeline_actif"]), kpis["nb_deals_actifs"]),
             unsafe_allow_html=True
         )
-        if st.button("Voir detail Pipeline", key="btn_pipe", use_container_width=True):
+        if st.button("Detail Pipeline", key="btn_pipe",
+                     use_container_width=True, type="secondary"):
             modal_pipeline_actif(_filtre_effectif)
 
     with kc3:
         st.markdown(
-            kpi_card("Taux Conversion", "{:.1f}%".format(kpis["taux_conversion"]),
-                     "{} funded / {} lost".format(kpis["nb_funded"], kpis["nb_lost"])),
+            '<div class="kpi-card">'
+            '<div class="kpi-label">Taux Conversion</div>'
+            '<div class="kpi-value">{:.1f}%</div>'
+            '<div class="kpi-sub">{} funded / {} lost</div>'
+            '</div>'.format(
+                kpis["taux_conversion"], kpis["nb_funded"], kpis["nb_lost"]),
             unsafe_allow_html=True
         )
 
     with kc4:
         st.markdown(
-            kpi_card("Lost / Paused", str(nb_lost_paused), "Cliquer pour analyser"),
+            '<div class="kpi-card" style="border-bottom:2px solid #019ee1;">'
+            '<div class="kpi-label">Lost / Paused</div>'
+            '<div class="kpi-value">{}</div>'
+            '<div class="kpi-sub" style="color:#019ee1;cursor:pointer;">'
+            'Analyser &rsaquo;</div>'
+            '</div>'.format(nb_lost_paused),
             unsafe_allow_html=True
         )
         if nb_lost_paused > 0:
-            if st.button("Voir detail Lost/Paused", key="btn_lost", use_container_width=True):
+            if st.button("Detail Lost / Paused", key="btn_lost",
+                         use_container_width=True, type="secondary"):
                 modal_lost(_filtre_effectif)
 
     st.markdown("<br>", unsafe_allow_html=True)
@@ -991,7 +1056,7 @@ with tab_dash:
             with col:
                 st.markdown(
                     '<div style="background:{c}16;border:1px solid {c}44;'
-                    'border-radius:5px;padding:7px;text-align:center;">'
+                    'padding:7px;text-align:center;">'
                     '<div style="font-size:0.61rem;color:{marine};font-weight:700;'
                     'text-transform:uppercase;">{s}</div>'
                     '<div style="font-size:1.3rem;font-weight:800;color:{c};">{n}</div>'
@@ -1205,7 +1270,7 @@ with tab_dash:
             st.markdown(
                 '<div style="display:flex;align-items:center;gap:10px;'
                 'margin:4px 0;padding:7px 12px;background:#f7fafd;'
-                'border-radius:5px;border:1px solid #001c4b0a;">'
+                'border:1px solid #001c4b0a;">'
                 '<div style="font-size:0.72rem;font-weight:700;'
                 'color:{ciel};min-width:26px;">No.{rank}</div>'
                 '<div style="flex:1;">'
@@ -1213,10 +1278,10 @@ with tab_dash:
                 'color:{marine};">{client}</div>'
                 '<div style="font-size:0.67rem;color:#777;">'
                 '{fonds} &middot; {type} &middot; {region}</div>'
-                '<div style="background:{gris};border-radius:2px;height:3px;'
+                '<div style="background:{gris};height:3px;'
                 'margin-top:4px;overflow:hidden;">'
                 '<div style="background:{barc};width:{pct:.0f}%;'
-                'height:100%;border-radius:2px;"></div></div></div>'
+                'height:100%;"></div></div></div>'
                 '<div style="text-align:right;min-width:72px;">'
                 '<div style="font-size:0.86rem;font-weight:800;'
                 'color:{marine};">{aum}</div>'
@@ -1370,7 +1435,7 @@ with tab_sales:
                     elif days_diff <= 7:
                         urgence = (
                             '<span style="background:{marine};color:{blanc};'
-                            'border-radius:3px;padding:1px 6px;'
+                            'padding:1px 6px;'
                             'font-size:0.66rem;font-weight:700;">J+{d}</span>'.format(
                                 marine=MARINE, blanc=BLANC, d=days_diff
                             )
@@ -1378,7 +1443,7 @@ with tab_sales:
                     else:
                         urgence = (
                             '<span style="background:{gris};color:{marine};'
-                            'border-radius:3px;padding:1px 6px;'
+                            'padding:1px 6px;'
                             'font-size:0.66rem;font-weight:600;">J+{d}</span>'.format(
                                 gris=GRIS, marine=MARINE, d=days_diff
                             )
@@ -1391,7 +1456,7 @@ with tab_sales:
                 st.markdown(
                     '<div style="display:flex;align-items:center;gap:10px;'
                     'padding:6px 12px;margin:3px 0;background:#f7fafd;'
-                    'border-radius:4px;border:1px solid #001c4b0a;'
+                    'border:1px solid #001c4b0a;'
                     'font-size:0.78rem;">'
                     '<div style="flex:1;">'
                     '<span style="font-weight:700;color:{marine};">{client}</span>'
@@ -1518,9 +1583,18 @@ with tab_perf:
 
                     # Graphique Base 100 — Plotly EXPLICITE
                     st.markdown("#### Courbe NAV — Base 100")
-                    DASH_STYLES = ["solid", "dash", "dot", "dashdot", "longdash"]
-                    NAV_PALETTE = [MARINE, B_MID, B_PAL, B_DEP,
-                                   "#2c7fb8", "#004f8c", "#6baed6", "#08519c"]
+                    # Palette NAV — 6 couleurs vraiment distinctives, lisibles
+                    # Principe : contraste maximal entre chaque serie
+                    NAV_COLORS = [
+                        "#001c4b",   # Marine profond
+                        "#019ee1",   # Ciel Amundi
+                        "#e63946",   # Rouge vif
+                        "#2a9d8f",   # Vert teal
+                        "#f4a261",   # Ambre chaud
+                        "#9b59b6",   # Violet
+                        "#27ae60",   # Vert emeraude
+                        "#e67e22",   # Orange brun
+                    ]
 
                     fig_nav = go.Figure()
                     for i_n, fonds_n in enumerate(base100.columns):
@@ -1532,9 +1606,9 @@ with tab_perf:
                             y=series_n.values,
                             name=fonds_n,
                             mode="lines",
-                            line_color=NAV_PALETTE[i_n % len(NAV_PALETTE)],
-                            line_width=1.8,
-                            line_dash=DASH_STYLES[i_n % len(DASH_STYLES)],
+                            line_color=NAV_COLORS[i_n % len(NAV_COLORS)],
+                            line_width=2.0,
+                            line_dash="solid",
                             hovertemplate=(
                                 "<b>" + fonds_n + "</b><br>"
                                 "Date : %{x|%d/%m/%Y}<br>"
@@ -1731,7 +1805,7 @@ with tab_perf:
     else:
         st.markdown(
             '<div style="background:#001c4b04;border:2px dashed #001c4b1a;'
-            'border-radius:8px;padding:44px;text-align:center;margin-top:12px;">'
+            'padding:44px;text-align:center;margin-top:12px;">'
             '<div style="font-size:0.92rem;font-weight:700;color:{marine};">'
             'Module Performance et NAV</div>'
             '<div style="color:#777;font-size:0.79rem;max-width:380px;'
