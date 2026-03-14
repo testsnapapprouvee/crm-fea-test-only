@@ -27,7 +27,7 @@ from reportlab.lib.colors import HexColor
 from reportlab.lib.enums import TA_CENTER, TA_LEFT, TA_RIGHT
 from reportlab.platypus import (
     SimpleDocTemplate, Paragraph, Spacer, Table, TableStyle,
-    Image, PageBreak,
+    Image, PageBreak, KeepTogether,
 )
 from reportlab.platypus.flowables import Flowable
 
@@ -260,6 +260,7 @@ def _make_top10_png(top_deals, mode_comex, fig_w_in, fig_h_in):
         ax.set_title("Top 10 Deals - AUM Finance",
                      fontsize=9, fontweight="bold", color=HX_MARINE, pad=8)
 
+    fig.subplots_adjust(left=0.22, right=0.88, top=0.92, bottom=0.08)
     buf = io.BytesIO()
     fig.savefig(buf, format="png", dpi=150, facecolor=HX_BLANC)
     plt.close(fig)
@@ -320,7 +321,8 @@ def _make_nav_png(nav_df, fig_w_in, fig_h_in):
                      fontsize=9, fontweight="bold", color=HX_MARINE, pad=8)
         plt.xticks(rotation=12, ha="right", fontsize=7)
 
-    fig.tight_layout(pad=0.6)
+    # subplots_adjust instead of tight_layout to preserve declared figsize
+    fig.subplots_adjust(left=0.08, right=0.97, top=0.90, bottom=0.14)
     buf = io.BytesIO()
     fig.savefig(buf, format="png", dpi=150, facecolor=HX_BLANC)
     plt.close(fig)
@@ -473,40 +475,42 @@ def _page_garde(styles, mode_comex, kpis, fonds_perimetre):
 # ---------------------------------------------------------------------------
 
 def _section_charts(kpis, aum_by_region, top_deals_safe, styles, mode_comex):
+    """
+    Layout : donuts cote a cote (1 ligne) + Top 10 dessous.
+    Chaque bloc est dans un KeepTogether pour eviter tout split de page.
+    Un PageBreak force garantit que les graphiques commencent sur page 2.
+    """
     elements = []
+
+    # PageBreak explicite : garantit que les charts sont sur une page propre
+    elements.append(PageBreak())
     elements.append(Paragraph("Analyse du Pipeline", styles["section"]))
     elements.append(ColorRect(USABLE_W, 2, COL_CIEL))
-    elements.append(Spacer(1, 14))
+    elements.append(Spacer(1, 12))
 
-    # --- Ligne 1 : 2 donuts cote a cote ---
-    # Dimensions en pouces pour Matplotlib (72 pts/inch)
+    # --- Bloc 1 : 2 donuts cote a cote — dans un KeepTogether ---
     d_w_in = DONUT_W / 72.0
     d_h_in = DONUT_H / 72.0
 
-    # Donut 1 — Type de Client
     abt    = kpis.get("aum_by_type", {})
     buf_d1 = _make_donut_png(
         list(abt.keys()), list(abt.values()),
-        "AUM par Type de Client",
-        d_w_in, d_h_in
+        "AUM par Type de Client", d_w_in, d_h_in
     )
     img_d1 = Image(buf_d1, width=DONUT_W, height=DONUT_H)
 
-    # Donut 2 — Region
     buf_d2 = _make_donut_png(
         list(aum_by_region.keys()), list(aum_by_region.values()),
-        "AUM par Region Geographique",
-        d_w_in, d_h_in
+        "AUM par Region Geographique", d_w_in, d_h_in
     )
     img_d2 = Image(buf_d2, width=DONUT_W, height=DONUT_H)
 
-    # Gap entre les deux donuts
     gap = USABLE_W - 2 * DONUT_W
-    row_donuts = Table(
+    tbl_donuts = Table(
         [[img_d1, Spacer(gap, 1), img_d2]],
         colWidths=[DONUT_W, gap, DONUT_W],
     )
-    row_donuts.setStyle(TableStyle([
+    tbl_donuts.setStyle(TableStyle([
         ("ALIGN",         (0, 0), (-1, -1), "CENTER"),
         ("VALIGN",        (0, 0), (-1, -1), "TOP"),
         ("LEFTPADDING",   (0, 0), (-1, -1), 0),
@@ -514,39 +518,36 @@ def _section_charts(kpis, aum_by_region, top_deals_safe, styles, mode_comex):
         ("TOPPADDING",    (0, 0), (-1, -1), 0),
         ("BOTTOMPADDING", (0, 0), (-1, -1), 0),
     ]))
-    elements.append(row_donuts)
-    elements.append(Paragraph(
+    cap_donuts = Paragraph(
         "Figure 1 — Repartition AUM Finance par Type de Client et par Region",
         styles["caption"]
-    ))
-    elements.append(Spacer(1, 16))
+    )
+    # KeepTogether : donuts + caption => jamais coupes a cheval sur 2 pages
+    elements.append(KeepTogether([tbl_donuts, cap_donuts]))
+    elements.append(Spacer(1, 18))
 
-    # --- Ligne 2 : Top 10 Deals centré ---
-    n_deals = len(top_deals_safe[:10])
-    # Hauteur proportionnelle au nombre de deals — min 3cm, max 8cm
-    t10_h_pts = max(85, min(230, n_deals * 22 + 30))
+    # --- Bloc 2 : Top 10 Deals centre — dans un KeepTogether ---
+    n_deals   = len(top_deals_safe[:10])
+    # Hauteur lineaire mais plafonnee pour tenir sur la page
+    t10_h_pts = max(80, min(210, n_deals * 20 + 25))
     t10_w_in  = TOP10_W / 72.0
     t10_h_in  = t10_h_pts / 72.0
 
     buf_top = _make_top10_png(top_deals_safe, mode_comex, t10_w_in, t10_h_in)
     img_top = Image(buf_top, width=TOP10_W, height=t10_h_pts)
 
-    # Centrage via padding lateral
-    row_top = Table(
+    tbl_top = Table(
         [[Spacer(PAD_TOP10, 1), img_top, Spacer(PAD_TOP10, 1)]],
         colWidths=[PAD_TOP10, TOP10_W, PAD_TOP10],
     )
-    row_top.setStyle(TableStyle([
+    tbl_top.setStyle(TableStyle([
         ("LEFTPADDING",   (0, 0), (-1, -1), 0),
         ("RIGHTPADDING",  (0, 0), (-1, -1), 0),
         ("TOPPADDING",    (0, 0), (-1, -1), 0),
         ("BOTTOMPADDING", (0, 0), (-1, -1), 0),
     ]))
-    elements.append(row_top)
-    elements.append(Paragraph(
-        "Figure 2 — Top 10 Deals par AUM Finance",
-        styles["caption"]
-    ))
+    cap_top = Paragraph("Figure 2 — Top 10 Deals par AUM Finance", styles["caption"])
+    elements.append(KeepTogether([tbl_top, cap_top]))
     elements.append(Spacer(1, 8))
     return elements
 
@@ -694,8 +695,8 @@ def _section_performance(perf_data, nav_base100_df, styles, fonds_perimetre):
         ("TOPPADDING",    (0, 0), (-1, -1), 0),
         ("BOTTOMPADDING", (0, 0), (-1, -1), 0),
     ]))
-    elements.append(row_nav)
-    elements.append(Paragraph("Figure 3 - Evolution NAV Base 100", styles["caption"]))
+    cap_nav = Paragraph("Figure 3 - Evolution NAV Base 100", styles["caption"])
+    elements.append(KeepTogether([row_nav, cap_nav]))
     elements.append(Spacer(1, 16))
 
     if pf.empty:
