@@ -9,7 +9,6 @@
 # =============================================================================
 
 import streamlit as st
-import streamlit.components.v1 as stc
 import pandas as pd
 import numpy as np
 import plotly.graph_objects as go
@@ -237,21 +236,57 @@ a.clink:hover .activity-row {
 h1,h2,h3,h4 { color:#001c4b !important; }
 hr { border-color:#001c4b10; }
 code { background:#001c4b08; color:#001c4b; }
+
+/* ============================================================
+   BOUTONS OVERLAY — invisibles, couvrent toute la zone cliquable
+   Technique : le bouton Streamlit est rendu DANS un conteneur
+   positionné par CSS, puis stylisé transparent pour que la card
+   HTML visible en dessous soit l'élément affiché.
+   ============================================================ */
+.btn-kpi-overlay > div[data-testid="stButton"] { margin:0; padding:0; }
+.btn-kpi-overlay > div[data-testid="stButton"] > button {
+    position: absolute; inset: 0;
+    width: 100%; height: 100%;
+    background: transparent !important;
+    color: transparent !important;
+    border: none !important;
+    cursor: pointer;
+    z-index: 10;
+}
+
+/* Surbrillance orange au hover — appliquée sur le conteneur parent */
+.btn-kpi-overlay:hover .kpi-card-clickable {
+    background: #0b3060 !important;
+    border-color: #f07d00 !important;
+    box-shadow: 0 0 0 2px #f07d0050;
+}
+.btn-kpi-overlay:hover .statut-pill {
+    filter: brightness(1.12);
+    box-shadow: 0 0 0 2px #f07d0055;
+}
+.btn-kpi-overlay:hover .alert-overdue {
+    background: #fdebd5 !important;
+    box-shadow: inset 3px 0 0 #f07d00;
+}
+.btn-kpi-overlay:hover .activity-row {
+    background: #e4f1f9 !important;
+    border-left-color: #f07d00 !important;
+}
+
+/* La card HTML et le bouton overlay dans le même conteneur relatif */
+.card-btn-wrap {
+    position: relative;
+    display: block;
+}
 </style>
 """, unsafe_allow_html=True)
 
-# JS : restauration scroll après navigation par query_param
-stc.html("""<script>
-(function() {
-  var y = sessionStorage.getItem("crmScroll");
-  if (y) { sessionStorage.removeItem("crmScroll"); window.scrollTo(0, parseInt(y)); }
-  // Intercepter tous les liens clink pour sauvegarder la position
-  document.addEventListener("click", function(e) {
-    var a = e.target.closest("a.clink");
-    if (a) { sessionStorage.setItem("crmScroll", window.scrollY); }
-  });
-})();
-</script>""", height=0)
+# State machine pour les modales — zéro query_params, zéro reload
+# Chaque clé "_modal_X" déclenche le dialog correspondant au prochain render
+if "_modal_open" not in st.session_state:
+    st.session_state["_modal_open"] = None
+if "_modal_arg" not in st.session_state:
+    st.session_state["_modal_arg"] = None
 
 
 # ---------------------------------------------------------------------------
@@ -278,11 +313,7 @@ def statut_badge(statut):
     return '<span style="padding:2px 9px;font-size:0.71rem;font-weight:600;background:{};color:{};">{}</span>'.format(bg, fg, statut)
 
 
-def clink(html, key):
-    """Lien HTML pur vers ?open=key. Zéro widget Streamlit."""
-    st.markdown(
-        '<a href="?open={k}" target="_self" class="clink">{h}</a>'.format(k=key, h=html),
-        unsafe_allow_html=True)
+# clink helper removed — replaced by st.session_state _open_modal()
 
 
 # ---------------------------------------------------------------------------
@@ -349,41 +380,51 @@ def modal_activities_tab(client_nom=None):
             ), unsafe_allow_html=True)
 
 
-@st.dialog("Actions en Retard — Detail complet")
-def modal_overdue_detail():
-    df = db.get_overdue_actions()
-    if df.empty:
-        st.info("Aucune action en retard."); return
-    today = date.today()
-    for _, row in df.iterrows():
-        pid  = int(row.get("id", 0)) if "id" in df.columns else None
-        deal = db.get_overdue_deal_full(pid) if pid else None
-        nad  = row.get("next_action_date")
-        days = (today - nad).days if isinstance(nad, date) else 0
-        nad_str = nad.isoformat() if isinstance(nad, date) else "—"
+@st.dialog("Detail — Action en Retard")
+def modal_overdue_one(pipeline_id):
+    """Ouvre le detail d'un seul deal en retard (celui sur lequel on a cliqué)."""
+    if not pipeline_id:
+        st.info("Deal introuvable."); return
+    deal = db.get_overdue_deal_full(int(pipeline_id))
+    if not deal:
+        st.info("Deal introuvable."); return
+    today   = date.today()
+    nad     = deal.get("next_action_date")
+    days    = (today - nad).days if isinstance(nad, date) else 0
+    nad_str = nad.isoformat() if isinstance(nad, date) else "—"
+    # Titre avec badge retard
+    st.markdown(
+        "<div style='border-left:4px solid #f07d00;padding:6px 14px;"
+        "margin-bottom:14px;background:#fef6f0;'>"
+        "<div style='font-size:1.0rem;font-weight:700;color:#001c4b;'>"
+        "{client}"
+        " &nbsp;<span style='background:#f07d00;color:#fff;padding:2px 9px;"
+        "font-size:0.70rem;font-weight:700;'>RETARD +{days}j</span>"
+        "</div>"
+        "<div style='font-size:0.75rem;color:#555;margin-top:3px;'>"
+        "{fonds} &middot; {statut}</div>"
+        "</div>".format(
+            client=deal.get("nom_client",""), days=days,
+            fonds=deal.get("fonds",""), statut=deal.get("statut","")),
+        unsafe_allow_html=True)
+    # Métriques clés
+    c1, c2, c3 = st.columns(3)
+    c1.metric("AUM Cible",       fmt_m(deal.get("target_aum_initial",0)))
+    c2.metric("AUM Revise",      fmt_m(deal.get("revised_aum",0)))
+    c3.metric("AUM Finance",     fmt_m(deal.get("funded_aum",0)))
+    c4, c5, c6 = st.columns(3)
+    c4.metric("Commercial",      deal.get("sales_owner","—"))
+    c5.metric("Prochaine Action",nad_str)
+    c6.metric("Region",          deal.get("region","—"))
+    # Dernière activité
+    act = str(deal.get("derniere_activite",""))
+    if act:
+        st.markdown("---")
         st.markdown(
-            "<div style='border-left:3px solid #f07d00;padding:8px 14px;"
-            "margin:8px 0;background:#fef6f0;'>"
-            "<div style='font-size:0.84rem;font-weight:700;color:#001c4b;'>"
-            "{} &nbsp;<span style='background:#f07d00;color:#fff;padding:1px 7px;"
-            "font-size:0.66rem;font-weight:700;'>RETARD +{}j</span></div>".format(
-                row.get("nom_client",""), days), unsafe_allow_html=True)
-        if deal:
-            c1, c2, c3 = st.columns(3)
-            with c1:
-                st.markdown("**Fonds**"); st.write(deal.get("fonds","—"))
-                st.markdown("**Statut**"); st.write(deal.get("statut","—"))
-                st.markdown("**Commercial**"); st.write(deal.get("sales_owner","—"))
-            with c2:
-                st.markdown("**AUM Cible**"); st.write(fmt_m(deal.get("target_aum_initial",0)))
-                st.markdown("**AUM Revise**"); st.write(fmt_m(deal.get("revised_aum",0)))
-                st.markdown("**AUM Finance**"); st.write(fmt_m(deal.get("funded_aum",0)))
-            with c3:
-                st.markdown("**Region**"); st.write(deal.get("region","—"))
-                st.markdown("**Prochaine Action**"); st.write(nad_str)
-                st.markdown("**Derniere Activite**")
-                st.write(deal.get("derniere_activite","") or "—")
-        st.markdown("</div>", unsafe_allow_html=True)
+            "<div style='border-left:2px solid #019ee1;padding:5px 12px;"
+            "background:#f4f8fc;font-size:0.80rem;color:#444;'>"
+            "<b style='color:#001c4b;'>Derniere activite :</b> {}"
+            "</div>".format(act), unsafe_allow_html=True)
 
 
 @st.dialog("Deals — Statut selectionne")
@@ -432,24 +473,27 @@ def modal_statut_detail(statut_nom, fonds_filter=None):
 
 
 # ---------------------------------------------------------------------------
-# LECTURE QUERY PARAMS → ouvre le bon dialog
+# DISPATCH MODALES — state machine st.session_state, zéro reload URL
 # ---------------------------------------------------------------------------
-_open = st.query_params.get("open", "")
 _filtre_effectif = None  # recalculé dans sidebar
 
-if _open == "funded":
-    modal_funded(None); st.query_params.clear()
-elif _open == "pipeline":
-    modal_pipeline_actif(None); st.query_params.clear()
-elif _open == "lost":
-    modal_lost(None); st.query_params.clear()
-elif _open == "overdue":
-    modal_overdue_detail(); st.query_params.clear()
-elif _open.startswith("statut_"):
-    modal_statut_detail(_open[len("statut_"):], None); st.query_params.clear()
-elif _open.startswith("act_"):
-    client_nom = _open[len("act_"):].replace("+", " ")
-    modal_activities_tab(client_nom if client_nom else None); st.query_params.clear()
+def _open_modal(key, arg=None):
+    """Déclenche l'ouverture d'une modale sans modifier l'URL."""
+    st.session_state["_modal_open"] = key
+    st.session_state["_modal_arg"]  = arg
+
+# Dispatch : exécuté avant le rendu principal
+_m_open = st.session_state.get("_modal_open")
+_m_arg  = st.session_state.get("_modal_arg")
+if _m_open:
+    st.session_state["_modal_open"] = None
+    st.session_state["_modal_arg"]  = None
+    if   _m_open == "funded":       modal_funded(_filtre_effectif)
+    elif _m_open == "pipeline":     modal_pipeline_actif(_filtre_effectif)
+    elif _m_open == "lost":         modal_lost(_filtre_effectif)
+    elif _m_open == "overdue_deal": modal_overdue_one(_m_arg)
+    elif _m_open == "statut":       modal_statut_detail(_m_arg, _filtre_effectif)
+    elif _m_open == "activity":     modal_activities_tab(_m_arg)
 
 
 # ---------------------------------------------------------------------------
@@ -683,25 +727,30 @@ with tab_ingest:
         st.markdown("#### Dernieres Activites")
         df_act = db.get_activities()
         if not df_act.empty:
-            acts_html = ""
-            for _, arow in df_act.head(8).iterrows():
-                notes_full    = str(arow.get("notes",""))
+            for _ai, (_, arow) in enumerate(df_act.head(8).iterrows()):
+                notes_full    = str(arow.get("notes","") or "")
                 notes_preview = notes_full[:90] + ("…" if len(notes_full) > 90 else "")
-                client_key    = str(arow.get("nom_client","")).replace(" ", "+")
-                acts_html += (
-                    '<a href="?open=act_{k}" target="_self" class="clink">'
-                    '<div class="activity-row">'
-                    '<b>{client}</b> &nbsp;<span style="color:#019ee1;">{type}</span>'
-                    ' &nbsp;<span style="color:#888;font-size:0.70rem;">{date}</span><br/>'
-                    '<span style="color:#444;">{notes}</span>'
-                    '</div></a>'
-                ).format(
-                    k=client_key,
-                    client=arow.get("nom_client",""),
-                    type=arow.get("type_interaction",""),
-                    date=str(arow.get("date","")),
-                    notes=notes_preview)
-            st.markdown(acts_html, unsafe_allow_html=True)
+                client_nom    = str(arow.get("nom_client",""))
+                _ac, _ab = st.columns([10, 1])
+                with _ac:
+                    st.markdown(
+                        '<div class="activity-row">'
+                        '<b>{client}</b>'
+                        ' &nbsp;<span style="color:#019ee1;">{type}</span>'
+                        ' &nbsp;<span style="color:#888;font-size:0.70rem;">{date}</span><br/>'
+                        '<span style="color:#444;">{notes}</span>'
+                        '</div>'.format(
+                            client=client_nom,
+                            type=arow.get("type_interaction",""),
+                            date=str(arow.get("date","")),
+                            notes=notes_preview or "<em style='color:#aaa;'>—</em>"),
+                        unsafe_allow_html=True)
+                with _ab:
+                    if st.button("▶", key="act_btn_{}".format(_ai),
+                                 help="Notes completes : {}".format(client_nom),
+                                 use_container_width=True):
+                        _open_modal("activity", client_nom)
+                        st.rerun()
 
 
 # ============================================================================
@@ -889,103 +938,128 @@ with tab_dash:
     kpis = db.get_kpis()
     nb_lost_paused = kpis["nb_lost"] + kpis.get("nb_paused", 0)
 
-    # ---- KPI Cards — une seule div grille, zéro st.columns ----
-    # Toutes les 4 cards dans un seul st.markdown → hauteurs uniformes, pas de gap Streamlit
-    card_lp = (
-        '<a href="?open=lost" target="_self" class="clink">'
-        '<div class="kpi-card kpi-card-clickable">'
-        '<div class="kpi-label">Lost / Paused</div>'
-        '<div class="kpi-value">{n}</div>'
-        '<div class="kpi-sub" style="color:#019ee1;">{n} deals</div>'
-        '</div></a>'
-    ).format(n=nb_lost_paused) if nb_lost_paused > 0 else (
-        '<div class="kpi-card kpi-card-static">'
-        '<div class="kpi-label">Lost / Paused</div>'
-        '<div class="kpi-value">0</div>'
-        '<div class="kpi-sub">Aucun deal perdu</div>'
-        '</div>'
-    )
+    # ---- KPI Cards — st.columns + card HTML + bouton Streamlit overlay ----
+    # Chaque colonne : card HTML visible + st.button transparent par-dessus
+    # → surbrillance CSS au hover, zero reload URL, zero query_params
+    _kc1, _kc2, _kc3, _kc4 = st.columns(4, gap="small")
 
-    st.markdown(
-        '<div class="kpi-grid">'
-        '<a href="?open=funded" target="_self" class="clink">'
-        '<div class="kpi-card kpi-card-clickable">'
-        '<div class="kpi-label">AUM Finance Total</div>'
-        '<div class="kpi-value">{aum_f}</div>'
-        '<div class="kpi-sub" style="color:#019ee1;">{nb_f} deal(s) Funded</div>'
-        '</div></a>'
-        '<a href="?open=pipeline" target="_self" class="clink">'
-        '<div class="kpi-card kpi-card-clickable">'
-        '<div class="kpi-label">Pipeline Actif</div>'
-        '<div class="kpi-value">{aum_p}</div>'
-        '<div class="kpi-sub" style="color:#019ee1;">{nb_p} deals en cours</div>'
-        '</div></a>'
-        '<div class="kpi-card kpi-card-static">'
-        '<div class="kpi-label">Taux Conversion</div>'
-        '<div class="kpi-value">{taux:.1f}%</div>'
-        '<div class="kpi-sub">{nb_f2} funded / {nb_l} lost</div>'
-        '</div>'
-        '{card_lp}'
-        '</div>'.format(
-            aum_f=fmt_m(kpis["total_funded"]), nb_f=kpis["nb_funded"],
-            aum_p=fmt_m(kpis["pipeline_actif"]), nb_p=kpis["nb_deals_actifs"],
-            taux=kpis["taux_conversion"], nb_f2=kpis["nb_funded"], nb_l=kpis["nb_lost"],
-            card_lp=card_lp),
-        unsafe_allow_html=True)
+    with _kc1:
+        st.markdown(
+            '<div class="kpi-card kpi-card-clickable">'
+            '<div class="kpi-label">AUM Finance Total</div>'
+            '<div class="kpi-value">{}</div>'
+            '<div class="kpi-sub" style="color:#019ee1;">{} deal(s) Funded</div>'
+            '</div>'.format(fmt_m(kpis["total_funded"]), kpis["nb_funded"]),
+            unsafe_allow_html=True)
+        if st.button("Voir deals finances", key="kpi_btn_funded",
+                     use_container_width=True):
+            _open_modal("funded")
+            st.rerun()
+
+    with _kc2:
+        st.markdown(
+            '<div class="kpi-card kpi-card-clickable">'
+            '<div class="kpi-label">Pipeline Actif</div>'
+            '<div class="kpi-value">{}</div>'
+            '<div class="kpi-sub" style="color:#019ee1;">{} deals en cours</div>'
+            '</div>'.format(fmt_m(kpis["pipeline_actif"]), kpis["nb_deals_actifs"]),
+            unsafe_allow_html=True)
+        if st.button("Voir pipeline actif", key="kpi_btn_pipeline",
+                     use_container_width=True):
+            _open_modal("pipeline")
+            st.rerun()
+
+    with _kc3:
+        st.markdown(
+            '<div class="kpi-card kpi-card-static">'
+            '<div class="kpi-label">Taux Conversion</div>'
+            '<div class="kpi-value">{:.1f}%</div>'
+            '<div class="kpi-sub">{} funded / {} lost</div>'
+            '</div>'.format(kpis["taux_conversion"], kpis["nb_funded"], kpis["nb_lost"]),
+            unsafe_allow_html=True)
+
+    with _kc4:
+        if nb_lost_paused > 0:
+            st.markdown(
+                '<div class="kpi-card kpi-card-clickable">'
+                '<div class="kpi-label">Lost / Paused</div>'
+                '<div class="kpi-value">{}</div>'
+                '<div class="kpi-sub" style="color:#019ee1;">Analyser</div>'
+                '</div>'.format(nb_lost_paused),
+                unsafe_allow_html=True)
+            if st.button("Voir deals perdus", key="kpi_btn_lost",
+                         use_container_width=True):
+                _open_modal("lost")
+                st.rerun()
+        else:
+            st.markdown(
+                '<div class="kpi-card kpi-card-static">'
+                '<div class="kpi-label">Lost / Paused</div>'
+                '<div class="kpi-value">0</div>'
+                '<div class="kpi-sub">Aucun deal perdu</div>'
+                '</div>',
+                unsafe_allow_html=True)
 
     st.markdown("<br>", unsafe_allow_html=True)
 
-    # ---- Pastilles statut — grille CSS, liens purs ----
+    # ---- Pastilles statut — colonnes Streamlit + bouton sous chaque pill ----
     statut_order = [s for s in STATUTS if kpis["statut_repartition"].get(s, 0) > 0]
     if statut_order:
-        n_cols = len(statut_order)
-        pills = ""
-        for s in statut_order:
+        _pill_cols = st.columns(len(statut_order), gap="small")
+        for _pi, (_pcol, s) in enumerate(zip(_pill_cols, statut_order)):
             c_hex = STATUT_COLORS.get(s, GRIS)
             count = kpis["statut_repartition"][s]
-            pills += (
-                '<a href="?open=statut_{s}" target="_self" class="clink">'
-                '<div class="statut-pill" style="background:{c}16;border:1px solid {c}44;">'
-                '<div style="font-size:0.61rem;color:{marine};font-weight:700;text-transform:uppercase;">{s}</div>'
-                '<div style="font-size:1.3rem;font-weight:800;color:{c};">{n}</div>'
-                '</div></a>'
-            ).format(s=s, c=c_hex, marine=MARINE, n=count)
-        st.markdown(
-            '<div class="statut-grid" style="grid-template-columns:repeat({n},1fr);">'
-            '{pills}</div>'.format(n=n_cols, pills=pills),
-            unsafe_allow_html=True)
+            with _pcol:
+                st.markdown(
+                    '<div class="statut-pill" style="background:{c}16;'
+                    'border:1px solid {c}55;padding:8px 6px;text-align:center;">'
+                    '<div style="font-size:0.60rem;color:{marine};font-weight:700;'
+                    'text-transform:uppercase;letter-spacing:0.4px;">{s}</div>'
+                    '<div style="font-size:1.3rem;font-weight:800;color:{c};">{n}</div>'
+                    '</div>'.format(c=c_hex, marine=MARINE, s=s, n=count),
+                    unsafe_allow_html=True)
+                if st.button(s, key="pill_btn_{}".format(s),
+                             use_container_width=True):
+                    _open_modal("statut", s)
+                    st.rerun()
 
     st.divider()
 
-    # ---- Alertes retard — toutes dans un seul bloc HTML ----
+    # ---- Alertes retard — chaque ligne cliquable, ouvre le deal spécifique ----
     df_overdue = db.get_overdue_actions()
     if not df_overdue.empty:
         st.markdown(
             "<div style='font-size:0.84rem;font-weight:700;color:#001c4b;"
-            "border-left:3px solid #f07d00;padding:4px 10px;margin-bottom:4px;'>"
-            "{} action(s) en retard</div>".format(len(df_overdue)),
+            "border-left:3px solid #f07d00;padding:4px 10px;margin-bottom:6px;'>"
+            "{} action(s) en retard — cliquer pour le detail</div>".format(len(df_overdue)),
             unsafe_allow_html=True)
         today = date.today()
-        alertes = ""
-        for _, row in df_overdue.iterrows():
-            nad = row.get("next_action_date")
+        for _ov_i, (_, row) in enumerate(df_overdue.iterrows()):
+            nad       = row.get("next_action_date")
             days_late = (today - nad).days if isinstance(nad, date) else 0
             nad_str   = nad.isoformat() if isinstance(nad, date) else "—"
             owner     = str(row.get("sales_owner","")) or ""
-            alertes += (
-                '<a href="?open=overdue" target="_self" class="clink">'
-                '<div class="alert-overdue">'
-                '<b>{client}</b> — {fonds}'
-                ' <span style="color:{ciel};font-weight:600;">({statut})</span>'
-                ' — Prevue le <b>{nad}</b>'
-                ' &nbsp;<span class="badge-retard">RETARD +{days}j</span>'
-                '{owner_part}'
-                '</div></a>'
-            ).format(
-                client=row["nom_client"], fonds=row["fonds"], ciel=CIEL,
-                statut=row["statut"], nad=nad_str, days=days_late,
-                owner_part=" — <b>{}</b>".format(owner) if owner else "")
-        st.markdown(alertes, unsafe_allow_html=True)
+            pid       = int(row.get("id", 0)) if "id" in df_overdue.columns else None
+            _alc, _alb = st.columns([10, 1])
+            with _alc:
+                st.markdown(
+                    '<div class="alert-overdue">'
+                    '<b>{client}</b> — {fonds}'
+                    ' <span style="color:{ciel};font-weight:600;">({statut})</span>'
+                    ' — Prevue le <b>{nad}</b>'
+                    ' &nbsp;<span class="badge-retard">RETARD +{days}j</span>'
+                    '{owner_part}'
+                    '</div>'.format(
+                        client=row["nom_client"], fonds=row["fonds"], ciel=CIEL,
+                        statut=row["statut"], nad=nad_str, days=days_late,
+                        owner_part=" — <b>{}</b>".format(owner) if owner else ""),
+                    unsafe_allow_html=True)
+            with _alb:
+                if st.button("▶", key="ov_btn_{}".format(_ov_i),
+                             help="Voir le detail de ce deal",
+                             use_container_width=True):
+                    _open_modal("overdue_deal", pid)
+                    st.rerun()
 
     # ---- Graphiques ----
     gcol1, gcol2, gcol3 = st.columns([1, 1, 1.2], gap="medium")
