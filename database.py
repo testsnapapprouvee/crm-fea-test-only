@@ -118,20 +118,29 @@ def init_db():
     """)
     c.execute("""
         CREATE TABLE IF NOT EXISTS pipeline (
-            id                 INTEGER PRIMARY KEY AUTOINCREMENT,
-            client_id          INTEGER NOT NULL,
-            fonds              TEXT NOT NULL CHECK(fonds IN ('Global Value','International Fund','Income Builder','Resilient Equity','Private Debt','Active ETFs')),
-            statut             TEXT NOT NULL DEFAULT 'Prospect' CHECK(statut IN ('Prospect','Initial Pitch','Due Diligence','Soft Commit','Funded','Paused','Lost','Redeemed')),
-            target_aum_initial REAL DEFAULT 0,
-            revised_aum        REAL DEFAULT 0,
-            funded_aum         REAL DEFAULT 0,
-            raison_perte       TEXT,
-            concurrent_choisi  TEXT,
-            next_action_date   DATE,
-            sales_owner        TEXT NOT NULL DEFAULT 'Non assigne',
-            created_at         DATETIME DEFAULT CURRENT_TIMESTAMP,
-            updated_at         DATETIME DEFAULT CURRENT_TIMESTAMP,
+            id                   INTEGER PRIMARY KEY AUTOINCREMENT,
+            client_id            INTEGER NOT NULL,
+            fonds                TEXT NOT NULL CHECK(fonds IN ('Global Value','International Fund','Income Builder','Resilient Equity','Private Debt','Active ETFs')),
+            statut               TEXT NOT NULL DEFAULT 'Prospect' CHECK(statut IN ('Prospect','Initial Pitch','Due Diligence','Soft Commit','Funded','Paused','Lost','Redeemed')),
+            target_aum_initial   REAL DEFAULT 0,
+            revised_aum          REAL DEFAULT 0,
+            funded_aum           REAL DEFAULT 0,
+            raison_perte         TEXT,
+            concurrent_choisi    TEXT,
+            next_action_date     DATE,
+            sales_owner          TEXT NOT NULL DEFAULT 'Non assigne',
+            closing_probability  REAL DEFAULT 50,
+            created_at           DATETIME DEFAULT CURRENT_TIMESTAMP,
+            updated_at           DATETIME DEFAULT CURRENT_TIMESTAMP,
             FOREIGN KEY (client_id) REFERENCES clients(id) ON DELETE CASCADE
+        )
+    """)
+    # Table des commerciaux avec région
+    c.execute("""
+        CREATE TABLE IF NOT EXISTS sales_team (
+            id         INTEGER PRIMARY KEY AUTOINCREMENT,
+            nom        TEXT NOT NULL UNIQUE,
+            marche     TEXT NOT NULL DEFAULT 'Global'
         )
     """)
     try:
@@ -139,6 +148,34 @@ def init_db():
         conn.commit()
     except sqlite3.OperationalError:
         pass
+    try:
+        c.execute("ALTER TABLE pipeline ADD COLUMN closing_probability REAL DEFAULT 50")
+        conn.commit()
+    except sqlite3.OperationalError:
+        pass
+    # Peupler sales_team depuis les sales_owner existants
+    c.execute("SELECT DISTINCT sales_owner FROM pipeline WHERE sales_owner != 'Non assigne'")
+    existing_owners = [r[0] for r in c.fetchall()]
+    for owner in existing_owners:
+        try:
+            # Déduire le marché depuis la région des clients associés
+            c.execute("""
+                SELECT c.region FROM pipeline p
+                JOIN clients c ON p.client_id = c.id
+                WHERE p.sales_owner = ? LIMIT 1
+            """, (owner,))
+            row = c.fetchone()
+            marche = "EMEA"
+            if row:
+                reg = str(row[0])
+                if reg in ("GCC",): marche = "GCC"
+                elif reg in ("APAC","Asia ex-Japan"): marche = "APAC"
+                elif reg in ("North America","LatAm"): marche = "Americas"
+                elif reg in ("Nordics","EMEA"): marche = "EMEA"
+            c.execute("INSERT OR IGNORE INTO sales_team (nom, marche) VALUES (?,?)", (owner, marche))
+        except Exception:
+            pass
+    conn.commit()
 
     c.execute("""
         CREATE TABLE IF NOT EXISTS activites (
@@ -240,10 +277,52 @@ def get_client_options():
 def get_sales_owners():
     conn = get_connection()
     c = conn.cursor()
-    c.execute("SELECT DISTINCT sales_owner FROM pipeline WHERE sales_owner != 'Non assigne' ORDER BY sales_owner")
-    owners = [r[0] for r in c.fetchall()]
+    # Priorité : table sales_team, fallback pipeline
+    c.execute("SELECT nom FROM sales_team ORDER BY nom")
+    rows = c.fetchall()
+    if rows:
+        owners = [r[0] for r in rows]
+    else:
+        c.execute("SELECT DISTINCT sales_owner FROM pipeline WHERE sales_owner != 'Non assigne' ORDER BY sales_owner")
+        owners = [r[0] for r in c.fetchall()]
     conn.close()
     return owners
+
+
+def get_sales_team():
+    """Retourne la liste des commerciaux avec leur marché."""
+    conn = get_connection()
+    try:
+        df = pd.read_sql_query("SELECT id, nom, marche FROM sales_team ORDER BY nom", conn)
+    except Exception:
+        df = pd.DataFrame(columns=["id","nom","marche"])
+    conn.close()
+    return df
+
+
+def add_sales_member(nom, marche):
+    """Ajoute un commercial à la table sales_team."""
+    conn = get_connection()
+    c = conn.cursor()
+    try:
+        c.execute("INSERT OR IGNORE INTO sales_team (nom, marche) VALUES (?,?)",
+                  (nom.strip(), marche.strip()))
+        conn.commit()
+        success = c.rowcount > 0
+    except Exception:
+        success = False
+    conn.close()
+    return success
+
+
+def get_sales_by_marche(marche):
+    """Retourne les commerciaux d'un marché donné."""
+    conn = get_connection()
+    c = conn.cursor()
+    c.execute("SELECT nom FROM sales_team WHERE marche = ? ORDER BY nom", (marche,))
+    names = [r[0] for r in c.fetchall()]
+    conn.close()
+    return names
 
 
 # ---------------------------------------------------------------------------
@@ -257,7 +336,8 @@ def get_pipeline_with_clients(fonds_filter=None):
     query = (
         "SELECT p.id, p.client_id, c.nom_client, c.type_client, c.region,"
         " p.fonds, p.statut, p.target_aum_initial, p.revised_aum, p.funded_aum,"
-        " p.raison_perte, p.concurrent_choisi, p.next_action_date, p.sales_owner"
+        " p.raison_perte, p.concurrent_choisi, p.next_action_date, p.sales_owner,"
+        " COALESCE(p.closing_probability, 50) AS closing_probability"
         " FROM pipeline p JOIN clients c ON c.id = p.client_id"
         " WHERE 1=1 " + fonds_sql +
         " ORDER BY p.funded_aum DESC, p.revised_aum DESC"
@@ -337,7 +417,8 @@ def get_pipeline_row_by_id(pipeline_id):
     df = pd.read_sql_query(
         "SELECT p.id, p.client_id, c.nom_client, c.type_client, c.region,"
         " p.fonds, p.statut, p.target_aum_initial, p.revised_aum, p.funded_aum,"
-        " p.raison_perte, p.concurrent_choisi, p.next_action_date, p.sales_owner"
+        " p.raison_perte, p.concurrent_choisi, p.next_action_date, p.sales_owner,"
+        " COALESCE(p.closing_probability, 50) AS closing_probability"
         " FROM pipeline p JOIN clients c ON c.id = p.client_id WHERE p.id = ?",
         conn, params=(int(pipeline_id),)
     )
@@ -595,6 +676,17 @@ def get_kpis(fonds_filter=None):
     c.execute("SELECT p.fonds, COALESCE(SUM(p.funded_aum),0) FROM pipeline p WHERE p.statut='Funded' " + fonds_sql + " GROUP BY p.fonds ORDER BY 2 DESC", fonds_params)
     aum_by_fonds = {r[0]: float(r[1]) for r in c.fetchall()}
 
+    # Weighted pipeline = somme(revised_aum * closing_probability/100) pour deals actifs
+    c.execute(
+        "SELECT SUM(p.revised_aum * COALESCE(p.closing_probability,50)/100.0)"
+        " FROM pipeline p"
+        " WHERE p.statut IN ('Prospect','Initial Pitch','Due Diligence','Soft Commit')"
+        + fonds_sql,
+        fonds_params
+    )
+    wp_row = c.fetchone()
+    weighted_pipeline = float(wp_row[0]) if (wp_row and wp_row[0] is not None) else 0.0
+
     conn.close()
     return {
         "total_funded":       total_funded,
@@ -609,6 +701,7 @@ def get_kpis(fonds_filter=None):
         "outflows":           outflows,
         "statut_repartition": statut_repartition,
         "aum_by_fonds":       aum_by_fonds,
+        "weighted_pipeline":  weighted_pipeline,
     }
 
 
@@ -656,17 +749,24 @@ def add_client(nom_client, type_client, region):
 
 def add_pipeline_entry(client_id, fonds, statut, target_aum, revised_aum,
                        funded_aum, raison_perte, concurrent_choisi,
-                       next_action_date, sales_owner="Non assigne"):
+                       next_action_date, sales_owner="Non assigne",
+                       closing_probability=50):
     conn = get_connection()
     c = conn.cursor()
+    # funded_aum auto : si statut Funded et funded_aum=0, utiliser revised_aum
+    fa = float(funded_aum or 0)
+    if statut == "Funded" and fa == 0:
+        fa = float(revised_aum or 0)
     c.execute(
         "INSERT INTO pipeline (client_id, fonds, statut, target_aum_initial, revised_aum, funded_aum,"
-        " raison_perte, concurrent_choisi, next_action_date, sales_owner) VALUES (?,?,?,?,?,?,?,?,?,?)",
+        " raison_perte, concurrent_choisi, next_action_date, sales_owner, closing_probability)"
+        " VALUES (?,?,?,?,?,?,?,?,?,?,?)",
         (int(client_id), fonds, statut,
-         float(target_aum or 0), float(revised_aum or 0), float(funded_aum or 0),
+         float(target_aum or 0), float(revised_aum or 0), fa,
          raison_perte.strip() or None if raison_perte else None,
          concurrent_choisi.strip() or None if concurrent_choisi else None,
-         next_action_date, sales_owner.strip() or "Non assigne")
+         next_action_date, sales_owner.strip() or "Non assigne",
+         float(closing_probability or 50))
     )
     conn.commit()
     new_id = c.lastrowid
@@ -727,12 +827,18 @@ def update_pipeline_row(row, modified_by="utilisateur"):
                     "INSERT INTO audit_log (pipeline_id, champ_modifie, ancienne_valeur, nouvelle_valeur, modified_by) VALUES (?,?,?,?,?)",
                     (pid, champ, str(ov), str(nv), modified_by)
                 )
+    # funded_aum auto : si Funded et funded_aum=0, utiliser revised_aum
+    if statut == "Funded" and new_funded == 0:
+        new_funded = new_revised
+
+    new_prob = float(row.get("closing_probability") or 50)
+
     c.execute(
         "UPDATE pipeline SET fonds=?, statut=?, target_aum_initial=?, revised_aum=?,"
         " funded_aum=?, raison_perte=?, concurrent_choisi=?, next_action_date=?,"
-        " sales_owner=?, updated_at=CURRENT_TIMESTAMP WHERE id=?",
+        " sales_owner=?, closing_probability=?, updated_at=CURRENT_TIMESTAMP WHERE id=?",
         (new_fonds, statut, new_target, new_revised, new_funded,
-         new_raison, new_conc, nad_str, new_sales, pid)
+         new_raison, new_conc, nad_str, new_sales, new_prob, pid)
     )
     conn.commit()
     conn.close()
