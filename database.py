@@ -1,971 +1,1563 @@
 # =============================================================================
-# database.py  —  CRM Asset Management  —  Amundi Edition
-# Priorite : STABILITE ABSOLUE — zero helper complexe, SQL plat
-# Charte : #001c4b Marine | #019ee1 Ciel | #f07d00 Orange
-# Nouveau : get_pipeline_with_last_activity() — colonne derniere_activite
-#           get_pipeline_by_statut()          — drill-down statut cliquable
-#           get_overdue_actions_full()        — ligne complete pour modal retard
+# app.py — CRM Asset Management — Amundi Edition
+# UX : zéro bouton parasite. Technique : st.query_params + liens HTML purs.
+# Fix v9.1 :
+#   - KPI cards dans une grille CSS pure → alignement parfait
+#   - Surbrillance orange au hover (box-shadow + indicateur ▸)
+#   - Pastilles statut en grille CSS → alignement uniforme
+#   - JS scroll restore via data-scroll attribute (sans apostrophes inline)
 # =============================================================================
 
-import sqlite3
-import io
+import streamlit as st
 import pandas as pd
-import numpy as np
-from datetime import date, datetime, timedelta
-from typing import Optional
+import numpy as np 
+import plotly.graph_objects as go
+from datetime import date, timedelta
+import io
+import sys
 import os
 
-DB_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)),
-                       "crm_asset_management.db")
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
-_AUM_COLS           = ["target_aum_initial", "revised_aum", "funded_aum"]
-_TEXT_NULLABLE_COLS = ["raison_perte", "concurrent_choisi"]
-_AUDIT_CHAMPS       = ["statut", "fonds", "target_aum_initial",
-                       "revised_aum", "funded_aum", "raison_perte"]
-
-FONDS_REFERENTIEL = [
-    "Global Value", "International Fund", "Income Builder",
-    "Resilient Equity", "Private Debt", "Active ETFs",
-]
-REGIONS_REFERENTIEL = [
-    "GCC", "EMEA", "APAC", "Nordics",
-    "Asia ex-Japan", "North America", "LatAm",
-]
+import database as db
+import pdf_generator as pdf_gen
 
 # ---------------------------------------------------------------------------
-# FORMATAGE FINANCIER — règle unique, jamais de chiffre brut affiché
+# CONSTANTES
 # ---------------------------------------------------------------------------
+MARINE  = "#001c4b"
+CIEL    = "#019ee1"
+ORANGE  = "#f07d00"
+BLANC   = "#ffffff"
+GRIS    = "#e8e8e8"
+GTXT    = "#444444"
+B_MID   = "#1a5e8a"
+B_PAL   = "#4a8fbd"
+B_DEP   = "#003f7a"
+PALETTE = [B_MID, MARINE, B_PAL, B_DEP, "#2c7fb8",
+           "#004f8c", "#6baed6", "#08519c", "#9ecae1", "#003060"]
 
-def format_finance(val):
-    """
-    >= 1 Md  =>  "X.X Md€"
-    sinon    =>  "X.X M€"
-    """
-    try:
-        v = float(val)
-    except (TypeError, ValueError):
-        return "—"
-    if v == 0:
-        return "0.0 M€"
-    if v >= 1_000_000_000:
-        return "{:.1f} Md€".format(v / 1_000_000_000)
-    return "{:.1f} M€".format(v / 1_000_000)
+TYPES_CLIENT      = ["IFA", "Wholesale", "Instit", "Family Office"]
+REGIONS           = db.REGIONS_REFERENTIEL
+FONDS             = db.FONDS_REFERENTIEL
+STATUTS           = ["Prospect","Initial Pitch","Due Diligence",
+                     "Soft Commit","Funded","Paused","Lost","Redeemed"]
+STATUTS_ACTIFS    = ["Prospect","Initial Pitch","Due Diligence","Soft Commit"]
+RAISONS_PERTE     = ["Pricing","Track Record","Macro","Competitor","Autre"]
+TYPES_INTERACTION = ["Call","Meeting","Email","Roadshow","Conference","Autre"]
 
+STATUT_COLORS = {
+    "Funded":        B_MID,    "Soft Commit":   "#2c7fb8",
+    "Due Diligence": "#004f8c", "Initial Pitch": B_PAL,
+    "Prospect":      "#9ecae1", "Lost":          "#aaaaaa",
+    "Paused":        "#c0c0c0", "Redeemed":      "#b8b8d0",
+}
 
-# ---------------------------------------------------------------------------
-# CONNEXION
-# ---------------------------------------------------------------------------
-
-def get_connection():
-    conn = sqlite3.connect(DB_PATH)
-    conn.row_factory = sqlite3.Row
-    conn.execute("PRAGMA foreign_keys = ON")
-    return conn
-
-
-# ---------------------------------------------------------------------------
-# HELPER — clause IN() sans crash si liste vide
-# ---------------------------------------------------------------------------
-
-def _fonds_clause(fonds_filter, alias="p"):
-    if not fonds_filter:
-        return "", []
-    placeholders = ",".join("?" * len(fonds_filter))
-    return " AND {}.fonds IN ({})".format(alias, placeholders), list(fonds_filter)
-
+fmt_m = db.format_finance
 
 # ---------------------------------------------------------------------------
-# NETTOYAGE DE TYPES
+# CONFIG
 # ---------------------------------------------------------------------------
+st.set_page_config(page_title="CRM - Asset Management",
+                   layout="wide", initial_sidebar_state="expanded")
 
-def _clean_pipeline_df(df):
-    if df.empty:
-        return df.copy()
-    df = df.copy()
-    for col in _AUM_COLS:
-        if col in df.columns:
-            df[col] = pd.to_numeric(df[col], errors="coerce").fillna(0.0).astype("float64")
-    if "next_action_date" in df.columns:
-        parsed = pd.to_datetime(df["next_action_date"], errors="coerce")
-        df["next_action_date"] = [ts.date() if pd.notna(ts) else None for ts in parsed]
-    for col in _TEXT_NULLABLE_COLS:
-        if col in df.columns:
-            df[col] = df[col].apply(
-                lambda v: "" if (v is None or (isinstance(v, float) and np.isnan(v))) else str(v)
-            )
-    for col in ["id", "client_id"]:
-        if col in df.columns:
-            df[col] = pd.to_numeric(df[col], errors="coerce").fillna(0).astype("int64")
-    return df
+# ---------------------------------------------------------------------------
+# CSS
+# ---------------------------------------------------------------------------
+st.markdown("""
+<style>
+.stApp, .main .block-container {
+    background-color: #ffffff;
+    color: #001c4b;
+    font-family: 'Segoe UI', Arial, sans-serif;
+}
+[data-testid="stSidebar"] { background-color: #001c4b; }
+[data-testid="stSidebar"] * { color: #ffffff !important; }
+[data-testid="stSidebar"] h1,
+[data-testid="stSidebar"] h2,
+[data-testid="stSidebar"] h3 { color: #019ee1 !important; }
+.crm-header {
+    background: #001c4b; padding: 16px 24px;
+    margin-bottom: 16px; border-bottom: 3px solid #019ee1;
+}
+.crm-header h1 { color:#ffffff !important; margin:0; font-size:1.4rem; font-weight:700; }
+.crm-header p  { color:#7ab8d8; margin:3px 0 0 0; font-size:0.80rem; }
+
+/* ============================================================
+   LIENS CLIQUABLES — retirer toute décoration de lien native
+   ============================================================ */
+a.clink {
+    display: block;
+    text-decoration: none !important;
+    color: inherit;
+    cursor: pointer;
+    outline: none;
+}
+a.clink:hover, a.clink:focus, a.clink:visited { text-decoration: none !important; color: inherit; }
+
+/* ============================================================
+   GRILLE KPI — CSS pur, sans div Streamlit entre les cartes
+   ============================================================ */
+.kpi-grid {
+    display: grid;
+    grid-template-columns: repeat(5, 1fr);
+    gap: 8px;
+    margin-bottom: 4px;
+}
+
+/* KPI card cliquable */
+.kpi-card {
+    background: #001c4b;
+    padding: 14px 10px 13px 10px;
+    text-align: center;
+    border: 1px solid #1a5e8a;
+    border-bottom: 2px solid #019ee1;
+    transition: background 0.15s, border-color 0.15s, box-shadow 0.15s;
+    position: relative;
+}
+/* Indicateur cliquable discret */
+.kpi-card-clickable::after {
+    content: "▸";
+    position: absolute;
+    bottom: 5px; right: 7px;
+    font-size: 0.54rem;
+    color: #4a8fbd;
+    opacity: 0.7;
+    transition: color 0.15s, opacity 0.15s;
+}
+a.clink:hover .kpi-card-clickable {
+    background: #0b3060;
+    border-color: #f07d00 !important;
+    box-shadow: 0 0 0 2px #f07d0050;
+}
+a.clink:hover .kpi-card-clickable::after {
+    color: #f07d00;
+    opacity: 1;
+}
+/* KPI card non cliquable (Taux conversion) */
+.kpi-card-static {
+    border-bottom: 2px solid #1a5e8a;
+}
+
+.kpi-label { font-size:0.64rem; color:#7ab8d8; text-transform:uppercase; letter-spacing:0.8px; margin-bottom:5px; font-weight:600; }
+.kpi-value { font-size:1.4rem; font-weight:800; color:#ffffff; }
+.kpi-sub   { font-size:0.61rem; color:#c8dde8; margin-top:3px; }
+
+/* ============================================================
+   PASTILLES STATUT — grille CSS
+   ============================================================ */
+.statut-grid {
+    display: grid;
+    gap: 6px;
+    margin-bottom: 8px;
+}
+.statut-pill {
+    padding: 8px 6px;
+    text-align: center;
+    transition: filter 0.12s, box-shadow 0.12s;
+    position: relative;
+}
+a.clink:hover .statut-pill {
+    filter: brightness(1.10);
+    box-shadow: 0 0 0 2px #f07d0055;
+}
+
+/* ============================================================
+   ALERTES RETARD
+   ============================================================ */
+.alert-overdue {
+    background: #fef6f0;
+    border-left: 3px solid #f07d00;
+    padding: 8px 12px;
+    margin: 3px 0;
+    font-size: 0.77rem;
+    color: #001c4b;
+    transition: background 0.12s, box-shadow 0.12s;
+    position: relative;
+}
+a.clink:hover .alert-overdue {
+    background: #fdebd5;
+    box-shadow: inset 3px 0 0 #f07d00;
+}
+
+/* ============================================================
+   ACTIVITÉS
+   ============================================================ */
+.activity-row {
+    border-left: 2px solid #019ee1;
+    padding: 7px 11px;
+    margin: 3px 0;
+    background: #f9fbfd;
+    font-size: 0.78rem;
+    transition: background 0.12s, border-left-color 0.12s;
+    display: block;
+}
+a.clink:hover .activity-row {
+    background: #e4f1f9;
+    border-left-color: #f07d00;
+}
+
+.badge-retard {
+    display:inline-block; background:#f07d00; color:#ffffff;
+    padding:1px 7px; font-size:0.66rem; font-weight:700; letter-spacing:0.4px;
+}
+.perimetre-badge {
+    display:inline-block; background:#019ee122; border:1px solid #019ee155;
+    padding:2px 8px; font-size:0.70rem; color:#ffffff; font-weight:600; margin:2px;
+}
+.detail-panel {
+    background:#f2f6fa; border-left:3px solid #019ee1;
+    padding:14px 16px 11px 16px; margin-top:10px;
+}
+.sales-card { background:#f4f8fc; border:1px solid #001c4b18; padding:13px; border-top:3px solid #019ee1; }
+.sales-card-name { font-size:0.87rem; font-weight:700; color:#001c4b; margin-bottom:8px; padding-bottom:5px; border-bottom:1px solid #e8e8e8; }
+.sales-metric { font-size:0.69rem; color:#666; margin-bottom:2px; }
+.sales-metric-val { font-size:0.93rem; font-weight:700; color:#001c4b; }
+.sales-metric-acc { font-size:0.93rem; font-weight:700; color:#019ee1; }
+.section-title { font-size:0.90rem; font-weight:700; color:#001c4b; border-bottom:2px solid #001c4b22; padding-bottom:4px; margin:14px 0 9px 0; }
+.pipeline-hint { background:#019ee108; border-left:2px solid #001c4b; padding:6px 11px; font-size:0.77rem; color:#001c4b; margin-bottom:8px; }
+.sidebar-kpi { background:#ffffff14; padding:8px; margin-bottom:5px; }
+
+.stTabs [data-baseweb="tab-list"] { background:#f0f4f8; border-bottom:2px solid #001c4b20; gap:0; }
+.stTabs [data-baseweb="tab"] { color:#001c4b; font-weight:600; font-size:0.81rem; padding:7px 16px; background:#f0f4f8; border-right:1px solid #d0d8e0; }
+.stTabs [aria-selected="true"] { background:#001c4b !important; color:#ffffff !important; }
+
+.stButton > button {
+    background:#019ee1; color:#ffffff; border:none; font-weight:600;
+    padding:6px 15px; font-size:0.80rem; transition:background 0.12s;
+}
+.stButton > button:hover { background:#f07d00 !important; color:#ffffff !important; }
+[data-testid="stDownloadButton"] > button { background:#019ee1 !important; color:#ffffff !important; border:none !important; font-weight:600 !important; }
+[data-testid="stDownloadButton"] > button:hover { background:#f07d00 !important; color:#ffffff !important; }
+[data-testid="stFormSubmitButton"] > button { background:#001c4b !important; color:#ffffff !important; font-weight:700 !important; }
+[data-testid="stFormSubmitButton"] > button:hover { background:#019ee1 !important; }
+.stSelectbox label, .stTextInput label, .stNumberInput label,
+.stDateInput label, .stTextArea label, .stRadio label { color:#001c4b !important; font-weight:600; font-size:0.78rem; }
+h1,h2,h3,h4 { color:#001c4b !important; }
+hr { border-color:#001c4b10; }
+code { background:#001c4b08; color:#001c4b; }
+
+/* ============================================================
+   COULEURS STATUT — badges visuels dans les tableaux et listes
+   ============================================================ */
+.statut-badge {
+    display: inline-block;
+    padding: 2px 8px;
+    font-size: 0.68rem;
+    font-weight: 700;
+    border-radius: 0;
+    letter-spacing: 0.3px;
+}
+.statut-Funded        { background:#1a5e8a22; color:#1a5e8a; border:1px solid #1a5e8a55; }
+.statut-Soft-Commit   { background:#2c7fb822; color:#2c7fb8; border:1px solid #2c7fb855; }
+.statut-Due-Diligence { background:#004f8c22; color:#004f8c; border:1px solid #004f8c55; }
+.statut-Initial-Pitch { background:#4a8fbd22; color:#4a8fbd; border:1px solid #4a8fbd55; }
+.statut-Prospect      { background:#9ecae122; color:#2c7fb8; border:1px solid #9ecae155; }
+.statut-Lost          { background:#88888822; color:#555;    border:1px solid #aaaaaa55; }
+.statut-Paused        { background:#c0c0c022; color:#666;    border:1px solid #c0c0c055; }
+.statut-Redeemed      { background:#b8b8d022; color:#555;    border:1px solid #b8b8d055; }
+</style>
+""", unsafe_allow_html=True)
+
+
 
 
 # ---------------------------------------------------------------------------
 # INIT DB
 # ---------------------------------------------------------------------------
-
-def init_db():
-    conn = get_connection()
-    c = conn.cursor()
-
-    c.execute("""
-        CREATE TABLE IF NOT EXISTS clients (
-            id          INTEGER PRIMARY KEY AUTOINCREMENT,
-            nom_client  TEXT NOT NULL UNIQUE,
-            type_client TEXT NOT NULL CHECK(type_client IN ('IFA','Wholesale','Instit','Family Office')),
-            region      TEXT NOT NULL CHECK(region IN ('GCC','EMEA','APAC','Nordics','Asia ex-Japan','North America','LatAm')),
-            created_at  DATETIME DEFAULT CURRENT_TIMESTAMP
-        )
-    """)
-    c.execute("""
-        CREATE TABLE IF NOT EXISTS pipeline (
-            id                   INTEGER PRIMARY KEY AUTOINCREMENT,
-            client_id            INTEGER NOT NULL,
-            fonds                TEXT NOT NULL CHECK(fonds IN ('Global Value','International Fund','Income Builder','Resilient Equity','Private Debt','Active ETFs')),
-            statut               TEXT NOT NULL DEFAULT 'Prospect' CHECK(statut IN ('Prospect','Initial Pitch','Due Diligence','Soft Commit','Funded','Paused','Lost','Redeemed')),
-            target_aum_initial   REAL DEFAULT 0,
-            revised_aum          REAL DEFAULT 0,
-            funded_aum           REAL DEFAULT 0,
-            raison_perte         TEXT,
-            concurrent_choisi    TEXT,
-            next_action_date     DATE,
-            sales_owner          TEXT NOT NULL DEFAULT 'Non assigne',
-            closing_probability  REAL DEFAULT 50,
-            created_at           DATETIME DEFAULT CURRENT_TIMESTAMP,
-            updated_at           DATETIME DEFAULT CURRENT_TIMESTAMP,
-            FOREIGN KEY (client_id) REFERENCES clients(id) ON DELETE CASCADE
-        )
-    """)
-    # Table des commerciaux avec région
-    c.execute("""
-        CREATE TABLE IF NOT EXISTS sales_team (
-            id         INTEGER PRIMARY KEY AUTOINCREMENT,
-            nom        TEXT NOT NULL UNIQUE,
-            marche     TEXT NOT NULL DEFAULT 'Global'
-        )
-    """)
-    try:
-        c.execute("ALTER TABLE pipeline ADD COLUMN sales_owner TEXT NOT NULL DEFAULT 'Non assigne'")
-        conn.commit()
-    except sqlite3.OperationalError:
-        pass
-    try:
-        c.execute("ALTER TABLE pipeline ADD COLUMN closing_probability REAL DEFAULT 50")
-        conn.commit()
-    except sqlite3.OperationalError:
-        pass
-    # Peupler sales_team depuis les sales_owner existants
-    c.execute("SELECT DISTINCT sales_owner FROM pipeline WHERE sales_owner != 'Non assigne'")
-    existing_owners = [r[0] for r in c.fetchall()]
-    for owner in existing_owners:
-        try:
-            # Déduire le marché depuis la région des clients associés
-            c.execute("""
-                SELECT c.region FROM pipeline p
-                JOIN clients c ON p.client_id = c.id
-                WHERE p.sales_owner = ? LIMIT 1
-            """, (owner,))
-            row = c.fetchone()
-            marche = "EMEA"
-            if row:
-                reg = str(row[0])
-                if reg in ("GCC",): marche = "GCC"
-                elif reg in ("APAC","Asia ex-Japan"): marche = "APAC"
-                elif reg in ("North America","LatAm"): marche = "Americas"
-                elif reg in ("Nordics","EMEA"): marche = "EMEA"
-            c.execute("INSERT OR IGNORE INTO sales_team (nom, marche) VALUES (?,?)", (owner, marche))
-        except Exception:
-            pass
-    conn.commit()
-
-    c.execute("""
-        CREATE TABLE IF NOT EXISTS activites (
-            id               INTEGER PRIMARY KEY AUTOINCREMENT,
-            client_id        INTEGER NOT NULL,
-            date             DATE NOT NULL,
-            notes            TEXT,
-            type_interaction TEXT,
-            created_at       DATETIME DEFAULT CURRENT_TIMESTAMP,
-            FOREIGN KEY (client_id) REFERENCES clients(id) ON DELETE CASCADE
-        )
-    """)
-    c.execute("""
-        CREATE TABLE IF NOT EXISTS audit_log (
-            id                INTEGER PRIMARY KEY AUTOINCREMENT,
-            pipeline_id       INTEGER NOT NULL,
-            champ_modifie     TEXT NOT NULL,
-            ancienne_valeur   TEXT,
-            nouvelle_valeur   TEXT,
-            modified_by       TEXT NOT NULL DEFAULT 'system',
-            date_modification DATETIME DEFAULT CURRENT_TIMESTAMP,
-            FOREIGN KEY (pipeline_id) REFERENCES pipeline(id) ON DELETE CASCADE
-        )
-    """)
-    conn.commit()
-
-    c.execute("SELECT COUNT(*) FROM clients")
-    if c.fetchone()[0] == 0:
-        _insert_demo_data(conn)
-    conn.close()
+@st.cache_resource
+def _init():
+    db.init_db()
+    return True
+_init()
 
 
-def _insert_demo_data(conn):
-    c = conn.cursor()
+# ---------------------------------------------------------------------------
+# HELPERS
+# ---------------------------------------------------------------------------
+def statut_badge(statut):
+    """Badge coloré — utilise les classes CSS .statut-* définies dans le CSS."""
+    css = "statut-" + statut.replace(" ", "-")
+    return '<span class="statut-badge {}">{}</span>'.format(css, statut)
+
+
+def statut_dot(statut):
+    """Point coloré compact."""
+    dot_colors = {
+        "Funded":"#1a5e8a","Soft Commit":"#2c7fb8","Due Diligence":"#004f8c",
+        "Initial Pitch":"#4a8fbd","Prospect":"#9ecae1","Lost":"#aaaaaa",
+        "Paused":"#c0c0c0","Redeemed":"#b8b8d0",
+    }
+    c = dot_colors.get(statut, "#888")
+    return ('<span style="display:inline-block;width:8px;height:8px;border-radius:50%;'
+            'background:{};margin-right:5px;vertical-align:middle;"></span>').format(c)
+
+
+
+def _content_funded(fonds_filter=None):
+    df = db.get_funded_deals_detail(fonds_filter)
+    if df.empty:
+        st.info("Aucun deal Funded."); return
+    df2 = df.copy()
+    for col in ["AUM_Finance","AUM_Cible"]:
+        if col in df2.columns: df2[col] = df2[col].apply(fmt_m)
+    st.dataframe(df2, use_container_width=True, hide_index=True,
+                 height=min(380, 46 + len(df2) * 36))
+
+
+def _content_pipeline(fonds_filter=None):
+    df = db.get_active_deals_detail(fonds_filter)
+    if df.empty:
+        st.info("Aucun deal actif."); return
+    df2 = df.copy()
+    for col in ["AUM_Revise","AUM_Cible"]:
+        if col in df2.columns: df2[col] = df2[col].apply(fmt_m)
+    if "Prochaine_Action" in df2.columns:
+        df2["Prochaine_Action"] = df2["Prochaine_Action"].apply(
+            lambda d: d.isoformat() if isinstance(d, date) else str(d or "—"))
+    st.dataframe(df2, use_container_width=True, hide_index=True,
+                 height=min(380, 46 + len(df2) * 36))
+
+
+def _content_lost(fonds_filter=None):
+    df = db.get_lost_deals_detail(fonds_filter)
+    if df.empty:
+        st.info("Aucun deal Lost/Paused."); return
+    df2 = df.copy()
+    if "AUM_Cible" in df2.columns: df2["AUM_Cible"] = df2["AUM_Cible"].apply(fmt_m)
+    st.dataframe(df2, use_container_width=True, hide_index=True,
+                 height=min(380, 46 + len(df2) * 36))
+
+
+def _content_activities(client_nom=None):
+    df = db.get_activities()
+    if not df.empty and client_nom:
+        df = df[df["nom_client"] == client_nom]
+    if df.empty:
+        st.info("Aucune activite enregistree."); return
+    for _, row in df.iterrows():
+        st.markdown(
+            "<div style='border-left:2px solid #019ee1;padding:6px 12px;"
+            "margin:4px 0;background:#f4f8fc;'>"
+            "<div style='font-size:0.78rem;font-weight:700;color:#001c4b;'>"
+            "{client} &nbsp;<span style='color:#019ee1;'>{type}</span>"
+            "&nbsp;<span style='color:#888;font-size:0.70rem;'>{date}</span></div>"
+            "<div style='font-size:0.80rem;color:#444;margin-top:3px;'>{notes}</div>"
+            "</div>".format(
+                client=row.get("nom_client",""), type=row.get("type_interaction",""),
+                date=str(row.get("date","")),
+                notes=str(row.get("notes","")) or "<em style='color:#aaa;'>Aucune note</em>",
+            ), unsafe_allow_html=True)
+
+
+def _content_overdue():
+    df = db.get_overdue_actions()
+    if df.empty:
+        st.info("Aucune action en retard."); return
     today = date.today()
-    clients = [
-        ("Al Rajhi Capital",              "IFA",           "GCC"),
-        ("Emirates NBD AM",               "Wholesale",     "GCC"),
-        ("Norges Bank Investment Mgmt",   "Instit",        "Nordics"),
-        ("GIC Singapore",                 "Instit",        "APAC"),
-        ("Rothschild & Co Family Office", "Family Office", "EMEA"),
-        ("BlackRock APAC Division",       "Wholesale",     "Asia ex-Japan"),
-        ("JP Morgan Asset Management",    "Instit",        "North America"),
-        ("ADIA Abu Dhabi",                "Instit",        "GCC"),
-        ("Lombard Odier FO Geneva",       "Family Office", "EMEA"),
-        ("BTG Pactual Wealth",            "Wholesale",     "LatAm"),
-    ]
-    c.executemany("INSERT INTO clients (nom_client, type_client, region) VALUES (?,?,?)", clients)
-    pipeline = [
-        (1,  "Global Value",       "Funded",        50_000_000,  45_000_000, 42_000_000, None,     None,       (today + timedelta(days=15)).isoformat(), "Sophie Laurent"),
-        (2,  "Income Builder",     "Soft Commit",   30_000_000,  28_000_000, 0,           None,     None,       (today - timedelta(days=3)).isoformat(),  "Marc Dupont"),
-        (3,  "Private Debt",       "Due Diligence", 100_000_000, 100_000_000,0,           None,     None,       (today + timedelta(days=7)).isoformat(),  "Sophie Laurent"),
-        (4,  "Resilient Equity",   "Funded",        75_000_000,  80_000_000, 78_000_000, None,     None,       (today + timedelta(days=30)).isoformat(), "Karim Belhadj"),
-        (5,  "International Fund", "Initial Pitch", 20_000_000,  20_000_000, 0,           None,     None,       (today - timedelta(days=10)).isoformat(), "Marc Dupont"),
-        (6,  "Active ETFs",        "Lost",          40_000_000,  35_000_000, 0,           "Pricing","Vanguard", (today + timedelta(days=60)).isoformat(), "Karim Belhadj"),
-        (7,  "Global Value",       "Funded",        120_000_000, 115_000_000,110_000_000, None,     None,       (today + timedelta(days=20)).isoformat(), "Sophie Laurent"),
-        (8,  "Private Debt",       "Soft Commit",   200_000_000, 180_000_000,0,           None,     None,       (today - timedelta(days=1)).isoformat(),  "Karim Belhadj"),
-        (9,  "Income Builder",     "Paused",        15_000_000,  12_000_000, 0,           "Macro",  "Internal", (today + timedelta(days=90)).isoformat(), "Marc Dupont"),
-        (10, "Resilient Equity",   "Due Diligence", 60_000_000,  60_000_000, 0,           None,     None,       (today + timedelta(days=5)).isoformat(),  "Sophie Laurent"),
-    ]
-    c.executemany(
-        "INSERT INTO pipeline (client_id, fonds, statut, target_aum_initial, revised_aum, funded_aum,"
-        " raison_perte, concurrent_choisi, next_action_date, sales_owner) VALUES (?,?,?,?,?,?,?,?,?,?)",
-        pipeline
-    )
-    activites = [
-        (1,  (today - timedelta(days=5)).isoformat(),  "Suivi post-investissement Q1",       "Call"),
-        (2,  (today - timedelta(days=2)).isoformat(),  "Envoi term sheet revise",             "Email"),
-        (3,  (today - timedelta(days=1)).isoformat(),  "Due Diligence equipe risk",           "Meeting"),
-        (4,  (today - timedelta(days=8)).isoformat(),  "Confirmation investissement",         "Email"),
-        (7,  (today - timedelta(days=3)).isoformat(),  "Review trimestrielle performance",    "Meeting"),
-        (8,  (today - timedelta(days=1)).isoformat(),  "Negociation conditions LP — validees","Call"),
-        (5,  (today - timedelta(days=6)).isoformat(),  "Presentation initiale du fonds",      "Meeting"),
-        (10, (today - timedelta(days=4)).isoformat(),  "Envoi DDQ complete",                  "Email"),
-    ]
-    c.executemany(
-        "INSERT INTO activites (client_id, date, notes, type_interaction) VALUES (?,?,?,?)",
-        activites
-    )
-    conn.commit()
+    for _, row in df.iterrows():
+        pid  = int(row.get("id", 0)) if "id" in df.columns else None
+        deal = db.get_overdue_deal_full(pid) if pid else None
+        nad  = row.get("next_action_date")
+        days = (today - nad).days if isinstance(nad, date) else 0
+        nad_str = nad.isoformat() if isinstance(nad, date) else "—"
+        st.markdown(
+            "<div style='border-left:3px solid #f07d00;padding:8px 14px;"
+            "margin:8px 0;background:#fef6f0;'>"
+            "<div style='font-size:0.84rem;font-weight:700;color:#001c4b;'>"
+            "{} &nbsp;<span style='background:#f07d00;color:#fff;padding:1px 7px;"
+            "font-size:0.66rem;font-weight:700;'>RETARD +{}j</span></div>".format(
+                row.get("nom_client",""), days), unsafe_allow_html=True)
+        if deal:
+            c1, c2, c3 = st.columns(3)
+            with c1:
+                st.markdown("**Fonds**"); st.write(deal.get("fonds","—"))
+                st.markdown("**Statut**"); st.write(deal.get("statut","—"))
+                st.markdown("**Commercial**"); st.write(deal.get("sales_owner","—"))
+            with c2:
+                st.markdown("**AUM Cible**"); st.write(fmt_m(deal.get("target_aum_initial",0)))
+                st.markdown("**AUM Revise**"); st.write(fmt_m(deal.get("revised_aum",0)))
+                st.markdown("**AUM Finance**"); st.write(fmt_m(deal.get("funded_aum",0)))
+            with c3:
+                st.markdown("**Region**"); st.write(deal.get("region","—"))
+                st.markdown("**Prochaine Action**"); st.write(nad_str)
+                st.markdown("**Derniere Activite**")
+                st.write(deal.get("derniere_activite","") or "—")
+        st.markdown("</div>", unsafe_allow_html=True)
 
 
-# ---------------------------------------------------------------------------
-# LECTURES — CLIENTS
-# ---------------------------------------------------------------------------
-
-def get_all_clients():
-    conn = get_connection()
-    df = pd.read_sql_query("SELECT id, nom_client, type_client, region FROM clients ORDER BY nom_client", conn)
-    conn.close()
-    return df
-
-
-def get_client_options():
-    df = get_all_clients()
-    return {str(n): int(i) for n, i in zip(df["nom_client"], df["id"])}
-
-
-def get_sales_owners():
-    conn = get_connection()
-    c = conn.cursor()
-    # Priorité : table sales_team, fallback pipeline
-    c.execute("SELECT nom FROM sales_team ORDER BY nom")
-    rows = c.fetchall()
-    if rows:
-        owners = [r[0] for r in rows]
-    else:
-        c.execute("SELECT DISTINCT sales_owner FROM pipeline WHERE sales_owner != 'Non assigne' ORDER BY sales_owner")
-        owners = [r[0] for r in c.fetchall()]
-    conn.close()
-    return owners
-
-
-def get_sales_team():
-    """Retourne la liste des commerciaux avec leur marché."""
-    conn = get_connection()
-    try:
-        df = pd.read_sql_query("SELECT id, nom, marche FROM sales_team ORDER BY nom", conn)
-    except Exception:
-        df = pd.DataFrame(columns=["id","nom","marche"])
-    conn.close()
-    return df
-
-
-def add_sales_member(nom, marche):
-    """Ajoute un commercial à la table sales_team."""
-    conn = get_connection()
-    c = conn.cursor()
-    try:
-        c.execute("INSERT OR IGNORE INTO sales_team (nom, marche) VALUES (?,?)",
-                  (nom.strip(), marche.strip()))
-        conn.commit()
-        success = c.rowcount > 0
-    except Exception:
-        success = False
-    conn.close()
-    return success
-
-
-def get_sales_by_marche(marche):
-    """Retourne les commerciaux d'un marché donné."""
-    conn = get_connection()
-    c = conn.cursor()
-    c.execute("SELECT nom FROM sales_team WHERE marche = ? ORDER BY nom", (marche,))
-    names = [r[0] for r in c.fetchall()]
-    conn.close()
-    return names
-
-
-# ---------------------------------------------------------------------------
-# LECTURES — PIPELINE (avec derniere activite en colonne)
-# ---------------------------------------------------------------------------
-
-def get_pipeline_with_clients(fonds_filter=None):
-    """Pipeline complet sans colonne activite (leger, pour les tableaux)."""
-    fonds_sql, fonds_params = _fonds_clause(fonds_filter, "p")
-    conn = get_connection()
-    query = (
-        "SELECT p.id, p.client_id, c.nom_client, c.type_client, c.region,"
-        " p.fonds, p.statut, p.target_aum_initial, p.revised_aum, p.funded_aum,"
-        " p.raison_perte, p.concurrent_choisi, p.next_action_date, p.sales_owner,"
-        " COALESCE(p.closing_probability, 50) AS closing_probability"
-        " FROM pipeline p JOIN clients c ON c.id = p.client_id"
-        " WHERE 1=1 " + fonds_sql +
-        " ORDER BY p.funded_aum DESC, p.revised_aum DESC"
-    )
-    df = pd.read_sql_query(query, conn, params=fonds_params if fonds_params else None)
-    conn.close()
-    return _clean_pipeline_df(df)
-
-
-def get_pipeline_with_last_activity(fonds_filter=None):
-    """
-    Pipeline enrichi avec la derniere activite de chaque client.
-    Colonne supplementaire : derniere_activite (str, peut etre vide).
-    Utilise une sous-requete correlee SQLite — zero jointure cartesienne.
-    """
-    fonds_sql, fonds_params = _fonds_clause(fonds_filter, "p")
-    conn = get_connection()
-    query = (
-        "SELECT p.id, p.client_id, c.nom_client, c.type_client, c.region,"
-        " p.fonds, p.statut, p.target_aum_initial, p.revised_aum, p.funded_aum,"
-        " p.raison_perte, p.concurrent_choisi, p.next_action_date, p.sales_owner,"
-        " ("
-        "   SELECT '[' || a.type_interaction || '] ' || a.notes"
-        "   FROM activites a"
-        "   WHERE a.client_id = p.client_id"
-        "   ORDER BY a.date DESC, a.id DESC LIMIT 1"
-        " ) AS derniere_activite"
-        " FROM pipeline p JOIN clients c ON c.id = p.client_id"
-        " WHERE 1=1 " + fonds_sql +
-        " ORDER BY p.funded_aum DESC, p.revised_aum DESC"
-    )
-    df = pd.read_sql_query(query, conn, params=fonds_params if fonds_params else None)
-    conn.close()
-    df = _clean_pipeline_df(df)
-    if "derniere_activite" in df.columns:
-        df["derniere_activite"] = df["derniere_activite"].apply(
-            lambda v: "" if (v is None or (isinstance(v, float) and np.isnan(v))) else str(v)
-        )
-    return df
-
-
-def get_pipeline_by_statut(statut, fonds_filter=None):
-    """
-    Retourne tous les deals d'un statut donne, enrichis de la derniere activite.
-    Utilise pour les modals drill-down des pastilles de statut.
-    """
-    fonds_sql, fonds_params = _fonds_clause(fonds_filter, "p")
-    conn = get_connection()
-    query = (
-        "SELECT p.id, c.nom_client, c.type_client, c.region,"
-        " p.fonds, p.statut,"
-        " p.target_aum_initial, p.revised_aum, p.funded_aum,"
-        " p.raison_perte, p.concurrent_choisi,"
-        " p.next_action_date, p.sales_owner,"
-        " ("
-        "   SELECT '[' || a.type_interaction || '] ' || a.notes"
-        "   FROM activites a WHERE a.client_id = p.client_id"
-        "   ORDER BY a.date DESC, a.id DESC LIMIT 1"
-        " ) AS derniere_activite"
-        " FROM pipeline p JOIN clients c ON c.id = p.client_id"
-        " WHERE p.statut = ? " + fonds_sql +
-        " ORDER BY p.revised_aum DESC, p.funded_aum DESC"
-    )
-    params = [statut] + fonds_params
-    df = pd.read_sql_query(query, conn, params=params)
-    conn.close()
-    df = _clean_pipeline_df(df)
-    if "derniere_activite" in df.columns:
-        df["derniere_activite"] = df["derniere_activite"].apply(
-            lambda v: "" if (v is None or (isinstance(v, float) and np.isnan(v))) else str(v)
-        )
-    return df
-
-
-def get_pipeline_row_by_id(pipeline_id):
-    conn = get_connection()
-    df = pd.read_sql_query(
-        "SELECT p.id, p.client_id, c.nom_client, c.type_client, c.region,"
-        " p.fonds, p.statut, p.target_aum_initial, p.revised_aum, p.funded_aum,"
-        " p.raison_perte, p.concurrent_choisi, p.next_action_date, p.sales_owner,"
-        " COALESCE(p.closing_probability, 50) AS closing_probability"
-        " FROM pipeline p JOIN clients c ON c.id = p.client_id WHERE p.id = ?",
-        conn, params=(int(pipeline_id),)
-    )
-    conn.close()
+def _content_statut(statut_nom, fonds_filter=None):
+    df = db.get_pipeline_by_statut(statut_nom, fonds_filter)
     if df.empty:
-        return None
-    df = _clean_pipeline_df(df)
-    row = df.iloc[0].to_dict()
-    for col in _AUM_COLS:
-        row[col] = float(row.get(col) or 0.0)
-    row["id"]          = int(row["id"])
-    row["client_id"]   = int(row["client_id"])
-    row["sales_owner"] = str(row.get("sales_owner") or "Non assigne")
-    for col in _TEXT_NULLABLE_COLS:
-        row[col] = str(row.get(col) or "")
-    nad = row.get("next_action_date")
-    if not isinstance(nad, date):
-        row["next_action_date"] = date.today() + timedelta(days=14)
-    return row
-
-
-def get_overdue_actions(fonds_filter=None):
-    """Liste legere des actions en retard (pour les alertes en-tete)."""
-    today_str = date.today().isoformat()
-    fonds_sql, fonds_params = _fonds_clause(fonds_filter, "p")
-    conn = get_connection()
-    query = (
-        "SELECT p.id, c.nom_client, c.type_client, p.fonds, p.statut,"
-        " p.next_action_date, p.sales_owner"
-        " FROM pipeline p JOIN clients c ON c.id = p.client_id"
-        " WHERE p.next_action_date < ? AND p.statut NOT IN ('Lost','Redeemed','Funded')"
-        " " + fonds_sql +
-        " ORDER BY p.next_action_date ASC"
-    )
-    df = pd.read_sql_query(query, conn, params=[today_str] + fonds_params)
-    conn.close()
-    return _clean_pipeline_df(df)
-
-
-def get_overdue_deal_full(pipeline_id):
-    """
-    Retourne la ligne complete d'un deal en retard pour le modal de detail.
-    Inclut la derniere activite.
-    """
-    conn = get_connection()
-    df = pd.read_sql_query(
-        "SELECT p.id, c.nom_client, c.type_client, c.region,"
-        " p.fonds, p.statut, p.target_aum_initial, p.revised_aum, p.funded_aum,"
-        " p.raison_perte, p.concurrent_choisi, p.next_action_date, p.sales_owner,"
-        " ("
-        "   SELECT '[' || a.type_interaction || '] ' || a.notes"
-        "   FROM activites a WHERE a.client_id = p.client_id"
-        "   ORDER BY a.date DESC, a.id DESC LIMIT 1"
-        " ) AS derniere_activite"
-        " FROM pipeline p JOIN clients c ON c.id = p.client_id WHERE p.id = ?",
-        conn, params=(int(pipeline_id),)
-    )
-    conn.close()
-    if df.empty:
-        return None
-    df = _clean_pipeline_df(df)
-    row = df.iloc[0].to_dict()
-    for col in _AUM_COLS:
-        row[col] = float(row.get(col) or 0.0)
-    row["id"] = int(row["id"])
-    row["derniere_activite"] = str(row.get("derniere_activite") or "")
-    nad = row.get("next_action_date")
-    if not isinstance(nad, date):
-        row["next_action_date"] = None
-    return row
+        st.info("Aucun deal en statut {}.".format(statut_nom)); return
+    today = date.today()
+    for _, row in df.iterrows():
+        nad = row.get("next_action_date")
+        if isinstance(nad, date):
+            delta = (nad - today).days
+            nad_str = nad.isoformat()
+            timing_html = (
+                "<span class='badge-retard'>RETARD +{}j</span>".format(abs(delta)) if delta < 0
+                else "<span style='color:#019ee1;font-weight:700;'>Aujourd'hui</span>" if delta == 0
+                else "<span style='color:#444;'>Dans {}j</span>".format(delta))
+        else:
+            nad_str = "—"; timing_html = "—"
+        act = str(row.get("derniere_activite",""))
+        st.markdown(
+            "<div style='border-left:3px solid {ciel};padding:8px 14px;"
+            "margin:6px 0;background:#f4f8fc;'>"
+            "<div style='font-size:0.85rem;font-weight:700;color:{marine};'>{client}</div>"
+            "<div style='font-size:0.76rem;color:#555;margin:2px 0;'>"
+            "{fonds} &middot; {type} &middot; {region}</div>"
+            "<div style='display:grid;grid-template-columns:1fr 1fr 1fr;gap:8px;margin-top:6px;'>"
+            "<div><div style='font-size:0.67rem;color:#888;'>AUM Revise</div>"
+            "<div style='font-weight:700;color:{marine};font-size:0.82rem;'>{aum}</div></div>"
+            "<div><div style='font-size:0.67rem;color:#888;'>Prochaine Action</div>"
+            "<div style='font-size:0.78rem;'>{nad}&nbsp;{timing}</div></div>"
+            "<div><div style='font-size:0.67rem;color:#888;'>Commercial</div>"
+            "<div style='font-size:0.78rem;color:#444;'>{owner}</div></div>"
+            "</div>"
+            "{act_block}</div>".format(
+                ciel=CIEL, marine=MARINE, client=row.get("nom_client",""),
+                fonds=row.get("fonds",""), type=row.get("type_client",""),
+                region=row.get("region",""),
+                aum=fmt_m(float(row.get("revised_aum",0) or 0)),
+                nad=nad_str, timing=timing_html, owner=row.get("sales_owner",""),
+                act_block=(
+                    "<div style='margin-top:5px;font-size:0.73rem;color:#666;"
+                    "border-top:1px solid #e8e8e8;padding-top:4px;'>"
+                    "<b>Derniere activite :</b> {}</div>".format(act)
+                ) if act else ""), unsafe_allow_html=True)
 
 
 # ---------------------------------------------------------------------------
-# LECTURES — DRILL-DOWN modales (funded / actifs / lost)
+# Pas de query_params — les expanders remplacent les modales
 # ---------------------------------------------------------------------------
-
-def get_funded_deals_detail(fonds_filter=None):
-    fonds_sql, fonds_params = _fonds_clause(fonds_filter, "p")
-    conn = get_connection()
-    query = (
-        "SELECT c.nom_client AS Client, p.fonds AS Fonds, c.type_client AS Type,"
-        " c.region AS Region, p.funded_aum AS AUM_Finance,"
-        " p.target_aum_initial AS AUM_Cible, p.sales_owner AS Commercial,"
-        " p.next_action_date AS Prochaine_Action"
-        " FROM pipeline p JOIN clients c ON c.id = p.client_id"
-        " WHERE p.statut = 'Funded'" + fonds_sql +
-        " ORDER BY p.funded_aum DESC"
-    )
-    df = pd.read_sql_query(query, conn, params=fonds_params if fonds_params else None)
-    conn.close()
-    if "AUM_Finance" in df.columns:
-        df["AUM_Finance"] = pd.to_numeric(df["AUM_Finance"], errors="coerce").fillna(0.0)
-    if "AUM_Cible" in df.columns:
-        df["AUM_Cible"] = pd.to_numeric(df["AUM_Cible"], errors="coerce").fillna(0.0)
-    return df
-
-
-def get_active_deals_detail(fonds_filter=None):
-    fonds_sql, fonds_params = _fonds_clause(fonds_filter, "p")
-    conn = get_connection()
-    query = (
-        "SELECT c.nom_client AS Client, p.fonds AS Fonds, p.statut AS Statut,"
-        " c.type_client AS Type, c.region AS Region,"
-        " p.revised_aum AS AUM_Revise, p.target_aum_initial AS AUM_Cible,"
-        " p.next_action_date AS Prochaine_Action, p.sales_owner AS Commercial"
-        " FROM pipeline p JOIN clients c ON c.id = p.client_id"
-        " WHERE p.statut IN ('Prospect','Initial Pitch','Due Diligence','Soft Commit')"
-        " " + fonds_sql +
-        " ORDER BY p.revised_aum DESC"
-    )
-    df = pd.read_sql_query(query, conn, params=fonds_params if fonds_params else None)
-    conn.close()
-    for col in ["AUM_Revise", "AUM_Cible"]:
-        if col in df.columns:
-            df[col] = pd.to_numeric(df[col], errors="coerce").fillna(0.0)
-    if "Prochaine_Action" in df.columns:
-        parsed = pd.to_datetime(df["Prochaine_Action"], errors="coerce")
-        df["Prochaine_Action"] = [ts.date() if pd.notna(ts) else None for ts in parsed]
-    return df
-
-
-def get_lost_deals_detail(fonds_filter=None):
-    fonds_sql, fonds_params = _fonds_clause(fonds_filter, "p")
-    conn = get_connection()
-    query = (
-        "SELECT c.nom_client AS Client, p.fonds AS Fonds, p.statut AS Statut,"
-        " p.target_aum_initial AS AUM_Cible, p.raison_perte AS Raison,"
-        " p.concurrent_choisi AS Concurrent, p.sales_owner AS Commercial"
-        " FROM pipeline p JOIN clients c ON c.id = p.client_id"
-        " WHERE p.statut IN ('Lost','Paused')" + fonds_sql +
-        " ORDER BY p.target_aum_initial DESC"
-    )
-    df = pd.read_sql_query(query, conn, params=fonds_params if fonds_params else None)
-    conn.close()
-    if "AUM_Cible" in df.columns:
-        df["AUM_Cible"] = pd.to_numeric(df["AUM_Cible"], errors="coerce").fillna(0.0)
-    for col in ["Raison", "Concurrent"]:
-        if col in df.columns:
-            df[col] = df[col].fillna("—").apply(
-                lambda v: "—" if str(v).strip() in ("", "nan") else str(v)
-            )
-    return df
-
+_filtre_effectif = None  # recalculé dans sidebar
 
 # ---------------------------------------------------------------------------
-# LECTURES — AUDIT
+# SIDEBAR
+# SIDEBAR
 # ---------------------------------------------------------------------------
+with st.sidebar:
+    st.markdown(
+        '<div style="text-align:center;padding:6px 0 14px 0;">'
+        '<div style="font-size:0.91rem;font-weight:800;color:#ffffff;">CRM Asset Management</div>'
+        '<div style="font-size:0.65rem;color:#e8e8e8;margin-top:3px;">'
+        + date.today().strftime("%d %B %Y") + '</div></div>',
+        unsafe_allow_html=True)
+    st.divider()
 
-def get_audit_log(pipeline_id):
-    conn = get_connection()
-    df = pd.read_sql_query(
-        "SELECT champ_modifie AS Champ, ancienne_valeur AS Avant,"
-        " nouvelle_valeur AS Apres, modified_by AS Par, date_modification AS Date"
-        " FROM audit_log WHERE pipeline_id = ? ORDER BY date_modification DESC",
-        conn, params=(int(pipeline_id),)
-    )
-    conn.close()
-    return df
+    kpis_global = db.get_kpis()
+    st.markdown('<div style="color:#4a8fbd;font-size:0.67rem;font-weight:700;'
+                'text-transform:uppercase;letter-spacing:1px;margin-bottom:5px;">Apercu Global</div>',
+                unsafe_allow_html=True)
+    for lbl, val in [("AUM Finance Total", fmt_m(kpis_global["total_funded"])),
+                     ("Pipeline Actif",    fmt_m(kpis_global["pipeline_actif"]))]:
+        st.markdown('<div class="sidebar-kpi">'
+                    '<div style="font-size:0.62rem;color:#c8dde8;">{}</div>'
+                    '<div style="font-size:1.06rem;font-weight:800;color:#ffffff;">{}</div>'
+                    '</div>'.format(lbl, val), unsafe_allow_html=True)
 
+    st.divider()
+    st.markdown('<div style="color:#4a8fbd;font-size:0.67rem;font-weight:700;'
+                'text-transform:uppercase;letter-spacing:1px;margin-bottom:5px;">Backup</div>',
+                unsafe_allow_html=True)
+    try:
+        excel_bytes = db.get_excel_backup()
+        st.download_button("Exporter Backup Excel", data=excel_bytes,
+                           file_name="backup_crm_{}.xlsx".format(date.today().isoformat()),
+                           mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                           use_container_width=True)
+    except Exception as e_xl:
+        st.error("Backup Excel : {}".format(e_xl))
 
-# ---------------------------------------------------------------------------
-# LECTURES — SALES
-# ---------------------------------------------------------------------------
+    st.divider()
+    st.markdown('<div style="color:#4a8fbd;font-size:0.67rem;font-weight:700;'
+                'text-transform:uppercase;letter-spacing:1px;margin-bottom:5px;">Export PDF</div>',
+                unsafe_allow_html=True)
 
-def get_sales_metrics(fonds_filter=None):
-    fonds_sql, fonds_params = _fonds_clause(fonds_filter, "p")
-    conn = get_connection()
-    query = (
-        "SELECT p.sales_owner AS Commercial,"
-        " COUNT(*) AS Nb_Deals,"
-        " SUM(CASE WHEN p.statut='Funded' THEN 1 ELSE 0 END) AS Funded,"
-        " SUM(CASE WHEN p.statut='Lost'   THEN 1 ELSE 0 END) AS Perdus,"
-        " SUM(CASE WHEN p.statut IN ('Prospect','Initial Pitch','Due Diligence','Soft Commit')"
-        "     THEN 1 ELSE 0 END) AS Actifs,"
-        " COALESCE(SUM(CASE WHEN p.statut='Funded' THEN p.funded_aum ELSE 0 END),0) AS AUM_Finance,"
-        " COALESCE(SUM(CASE WHEN p.statut IN ('Prospect','Initial Pitch','Due Diligence','Soft Commit')"
-        "     THEN p.revised_aum ELSE 0 END),0) AS Pipeline_Actif,"
-        " SUM(CASE WHEN p.next_action_date < DATE('now')"
-        "     AND p.statut NOT IN ('Lost','Redeemed','Funded') THEN 1 ELSE 0 END) AS Retards"
-        " FROM pipeline p WHERE 1=1 " + fonds_sql +
-        " GROUP BY p.sales_owner ORDER BY AUM_Finance DESC"
-    )
-    df = pd.read_sql_query(query, conn, params=fonds_params if fonds_params else None)
-    conn.close()
-    for col in ["AUM_Finance", "Pipeline_Actif"]:
-        if col in df.columns:
-            df[col] = pd.to_numeric(df[col], errors="coerce").fillna(0.0)
-    for col in ["Nb_Deals", "Funded", "Perdus", "Actifs", "Retards"]:
-        if col in df.columns:
-            df[col] = pd.to_numeric(df[col], errors="coerce").fillna(0).astype(int)
-    return df
+    fonds_perimetre = st.multiselect("Perimetre de l'export", options=FONDS, default=FONDS,
+                                     key="fonds_perimetre_select")
+    _filtre_effectif = (fonds_perimetre
+                        if (fonds_perimetre and len(fonds_perimetre) < len(FONDS))
+                        else None)
+    mode_comex = st.toggle("Mode Comex — Anonymisation", value=False)
 
+    st.markdown('<div style="color:#8ab8d8;font-size:0.64rem;font-weight:600;'
+                'text-transform:uppercase;letter-spacing:0.8px;margin:8px 0 4px 0;">Sections</div>',
+                unsafe_allow_html=True)
+    include_top10    = st.checkbox("Top 10 Inflows", value=True)
+    include_outflows = st.checkbox("Top 10 Outflows (Redeemed)", value=False,
+                                   disabled=not include_top10)
+    include_perf_pdf = st.checkbox("Performance NAV", value=True)
 
-def get_next_actions_by_sales(days_ahead=30, fonds_filter=None):
-    today_str = date.today().isoformat()
-    limit_str = (date.today() + timedelta(days=days_ahead)).isoformat()
-    fonds_sql, fonds_params = _fonds_clause(fonds_filter, "p")
-    conn = get_connection()
-    query = (
-        "SELECT c.nom_client, p.fonds, p.statut, p.next_action_date,"
-        " p.sales_owner, p.revised_aum"
-        " FROM pipeline p JOIN clients c ON c.id = p.client_id"
-        " WHERE p.next_action_date BETWEEN ? AND ?"
-        " AND p.statut NOT IN ('Lost','Redeemed','Funded')"
-        " " + fonds_sql +
-        " ORDER BY p.next_action_date ASC"
-    )
-    df = pd.read_sql_query(query, conn, params=[today_str, limit_str] + fonds_params)
-    conn.close()
-    return _clean_pipeline_df(df)
+    if fonds_perimetre and len(fonds_perimetre) < len(FONDS):
+        st.markdown("<div>{}</div>".format(" ".join(
+            '<span class="perimetre-badge">{}</span>'.format(f) for f in fonds_perimetre)),
+            unsafe_allow_html=True)
+    elif not fonds_perimetre:
+        st.warning("Selectionnez au moins un fonds.")
+
+    perf_data_pdf   = st.session_state.get("perf_data",   None)
+    nav_base100_pdf = st.session_state.get("nav_base100", None)
+    if perf_data_pdf is not None:
+        st.caption("NAV chargee : {} fonds.".format(len(perf_data_pdf)))
+
+    if not fonds_perimetre:
+        st.button("Generer le rapport PDF", disabled=True, use_container_width=True)
+    elif st.button("Generer le rapport PDF", use_container_width=True):
+        with st.spinner("Generation en cours..."):
+            try:
+                pipeline_pdf   = db.get_pipeline_with_clients(fonds_filter=_filtre_effectif)
+                kpis_pdf       = db.get_kpis(fonds_filter=_filtre_effectif)
+                aum_region_pdf = db.get_aum_by_region(fonds_filter=_filtre_effectif)
+                pf_pdf = perf_data_pdf
+                nb_pdf = nav_base100_pdf
+                if pf_pdf is not None and _filtre_effectif and "Fonds" in pf_pdf.columns:
+                    pf_pdf = pf_pdf[pf_pdf["Fonds"].isin(_filtre_effectif)]
+                if nb_pdf is not None and _filtre_effectif and hasattr(nb_pdf,"columns"):
+                    cols_k = [c for c in nb_pdf.columns if c in _filtre_effectif]
+                    nb_pdf = nb_pdf[cols_k] if cols_k else None
+                _include_perf = (include_perf_pdf and pf_pdf is not None
+                                 and hasattr(pf_pdf,"empty") and not pf_pdf.empty)
+                pdf_bytes = pdf_gen.generate_pdf(
+                    pipeline_df=pipeline_pdf, kpis=kpis_pdf,
+                    aum_by_region=aum_region_pdf, mode_comex=mode_comex,
+                    perf_data=pf_pdf, nav_base100_df=nb_pdf,
+                    fonds_perimetre=fonds_perimetre,
+                    include_top10=include_top10, include_outflows=include_outflows,
+                    include_perf=_include_perf)
+                fname = "report{}_{}.pdf".format(
+                    "_comex" if mode_comex else "", date.today().isoformat())
+                st.download_button("Telecharger le rapport", data=pdf_bytes,
+                                   file_name=fname, mime="application/pdf",
+                                   use_container_width=True)
+                st.success("Rapport genere.")
+            except Exception as e:
+                st.error("Erreur : {}".format(e))
+
+    st.divider()
+    st.caption("Version 9.1 — Amundi Edition")
 
 
 # ---------------------------------------------------------------------------
-# LECTURES — KPIs
+# EN-TETE
 # ---------------------------------------------------------------------------
+st.markdown(
+    '<div class="crm-header"><h1>CRM &amp; Reporting — Asset Management</h1>'
+    '<p>Pipeline commercial &middot; Suivi des mandats &middot; '
+    'Reporting executif &middot; Performance NAV</p></div>',
+    unsafe_allow_html=True)
 
-def get_kpis(fonds_filter=None):
-    fonds_sql, fonds_params = _fonds_clause(fonds_filter, "p")
-    conn = get_connection()
-    c = conn.cursor()
-
-    c.execute("SELECT COALESCE(SUM(p.funded_aum),0) FROM pipeline p WHERE p.statut='Funded' " + fonds_sql, fonds_params)
-    total_funded = float(c.fetchone()[0])
-
-    c.execute("SELECT COALESCE(SUM(p.revised_aum),0) FROM pipeline p WHERE p.statut IN ('Prospect','Initial Pitch','Due Diligence','Soft Commit') " + fonds_sql, fonds_params)
-    pipeline_actif = float(c.fetchone()[0])
-
-    c.execute("SELECT COUNT(*) FROM pipeline p WHERE p.statut='Funded' " + fonds_sql, fonds_params)
-    nb_funded = int(c.fetchone()[0])
-
-    c.execute("SELECT COUNT(*) FROM pipeline p WHERE p.statut='Lost' " + fonds_sql, fonds_params)
-    nb_lost = int(c.fetchone()[0])
-
-    c.execute("SELECT COUNT(*) FROM pipeline p WHERE p.statut='Paused' " + fonds_sql, fonds_params)
-    nb_paused = int(c.fetchone()[0])
-
-    c.execute("SELECT COUNT(*) FROM pipeline p WHERE p.statut IN ('Prospect','Initial Pitch','Due Diligence','Soft Commit') " + fonds_sql, fonds_params)
-    nb_actifs = int(c.fetchone()[0])
-
-    taux = nb_funded / (nb_funded + nb_lost) * 100 if (nb_funded + nb_lost) > 0 else 0.0
-
-    c.execute("SELECT c2.type_client, COALESCE(SUM(p.funded_aum),0) FROM pipeline p JOIN clients c2 ON c2.id=p.client_id WHERE p.statut='Funded' " + fonds_sql + " GROUP BY c2.type_client", fonds_params)
-    aum_by_type = {r[0]: float(r[1]) for r in c.fetchall()}
-
-    c.execute("SELECT c2.nom_client, c2.type_client, c2.region, p.fonds, p.funded_aum, p.sales_owner FROM pipeline p JOIN clients c2 ON c2.id=p.client_id WHERE p.statut='Funded' AND p.funded_aum > 0 " + fonds_sql + " ORDER BY p.funded_aum DESC LIMIT 10", fonds_params)
-    top_deals = [{k: (float(v) if k == "funded_aum" else str(v)) for k, v in dict(r).items()} for r in c.fetchall()]
-
-    # Outflows = Redeemed (AUM qui sort)
-    c.execute("SELECT c2.nom_client, c2.type_client, c2.region, p.fonds, p.funded_aum, p.sales_owner FROM pipeline p JOIN clients c2 ON c2.id=p.client_id WHERE p.statut='Redeemed' AND p.funded_aum > 0 " + fonds_sql + " ORDER BY p.funded_aum DESC LIMIT 10", fonds_params)
-    outflows = [{k: (float(v) if k == "funded_aum" else str(v)) for k, v in dict(r).items()} for r in c.fetchall()]
-
-    c.execute("SELECT p.statut, COUNT(*) FROM pipeline p WHERE 1=1 " + fonds_sql + " GROUP BY p.statut", fonds_params)
-    statut_repartition = {r[0]: int(r[1]) for r in c.fetchall()}
-
-    c.execute("SELECT p.fonds, COALESCE(SUM(p.funded_aum),0) FROM pipeline p WHERE p.statut='Funded' " + fonds_sql + " GROUP BY p.fonds ORDER BY 2 DESC", fonds_params)
-    aum_by_fonds = {r[0]: float(r[1]) for r in c.fetchall()}
-
-    # Weighted pipeline = somme(revised_aum * closing_probability/100) pour deals actifs
-    c.execute(
-        "SELECT SUM(p.revised_aum * COALESCE(p.closing_probability,50)/100.0)"
-        " FROM pipeline p"
-        " WHERE p.statut IN ('Prospect','Initial Pitch','Due Diligence','Soft Commit')"
-        + fonds_sql,
-        fonds_params
-    )
-    wp_row = c.fetchone()
-    weighted_pipeline = float(wp_row[0]) if (wp_row and wp_row[0] is not None) else 0.0
-
-    conn.close()
-    return {
-        "total_funded":       total_funded,
-        "pipeline_actif":     pipeline_actif,
-        "taux_conversion":    round(taux, 1),
-        "nb_deals_actifs":    nb_actifs,
-        "nb_funded":          nb_funded,
-        "nb_lost":            nb_lost,
-        "nb_paused":          nb_paused,
-        "aum_by_type":        aum_by_type,
-        "top_deals":          top_deals,
-        "outflows":           outflows,
-        "statut_repartition": statut_repartition,
-        "aum_by_fonds":       aum_by_fonds,
-        "weighted_pipeline":  weighted_pipeline,
-    }
+tab_ingest, tab_pipeline, tab_dash, tab_sales, tab_activites, tab_perf = st.tabs([
+    "Data Ingestion", "Pipeline Management", "Executive Dashboard",
+    "Sales Tracking", "Activités", "Performance & NAV"])
 
 
-def get_aum_by_region(fonds_filter=None):
-    fonds_sql, fonds_params = _fonds_clause(fonds_filter, "p")
-    conn = get_connection()
-    c = conn.cursor()
-    c.execute("SELECT c2.region, COALESCE(SUM(p.funded_aum),0) AS aum FROM pipeline p JOIN clients c2 ON c2.id=p.client_id WHERE p.statut='Funded' " + fonds_sql + " GROUP BY c2.region ORDER BY aum DESC", fonds_params)
-    result = {r[0]: float(r[1]) for r in c.fetchall() if float(r[1]) > 0}
-    conn.close()
-    return result
+# ============================================================================
+# ONGLET 1 — DATA INGESTION
+# ============================================================================
+with tab_ingest:
+    st.markdown('<div class="section-title">Saisie et Import de Donnees</div>',
+                unsafe_allow_html=True)
+    col_form, col_import = st.columns([1, 1], gap="large")
 
+    with col_form:
+        with st.expander("Ajouter un Client", expanded=True):
+            with st.form("form_client", clear_on_submit=True):
+                c1, c2 = st.columns(2)
+                with c1:
+                    nom_client  = st.text_input("Nom du Client")
+                    type_client = st.selectbox("Type Client", TYPES_CLIENT)
+                with c2:
+                    region = st.selectbox("Region", REGIONS)
+                sub_c = st.form_submit_button("Enregistrer", use_container_width=True)
+            if sub_c:
+                if not nom_client.strip():
+                    st.error("Nom du client obligatoire.")
+                else:
+                    try:
+                        db.add_client(nom_client.strip(), type_client, region)
+                        st.success("Client {} ajoute.".format(nom_client))
+                    except Exception as e:
+                        st.warning("Ce client existe deja." if "UNIQUE" in str(e)
+                                   else "Erreur : {}".format(e))
 
-# ---------------------------------------------------------------------------
-# LECTURES — ACTIVITES
-# ---------------------------------------------------------------------------
-
-def get_activities(client_id=None):
-    conn = get_connection()
-    query = "SELECT a.id, c.nom_client, a.date, a.type_interaction, a.notes FROM activites a JOIN clients c ON c.id = a.client_id"
-    params = None
-    if client_id:
-        query += " WHERE a.client_id = ?"
-        params = (int(client_id),)
-    query += " ORDER BY a.date DESC LIMIT 50"
-    df = pd.read_sql_query(query, conn, params=params)
-    conn.close()
-    return df
-
-
-# ---------------------------------------------------------------------------
-# ECRITURE
-# ---------------------------------------------------------------------------
-
-def add_client(nom_client, type_client, region):
-    conn = get_connection()
-    c = conn.cursor()
-    c.execute("INSERT INTO clients (nom_client, type_client, region) VALUES (?,?,?)",
-              (nom_client.strip(), type_client, region))
-    conn.commit()
-    new_id = c.lastrowid
-    conn.close()
-    return new_id
-
-
-def add_pipeline_entry(client_id, fonds, statut, target_aum, revised_aum,
-                       funded_aum, raison_perte, concurrent_choisi,
-                       next_action_date, sales_owner="Non assigne",
-                       closing_probability=50):
-    conn = get_connection()
-    c = conn.cursor()
-    # funded_aum auto : si statut Funded et funded_aum=0, utiliser revised_aum
-    fa = float(funded_aum or 0)
-    if statut == "Funded" and fa == 0:
-        fa = float(revised_aum or 0)
-    c.execute(
-        "INSERT INTO pipeline (client_id, fonds, statut, target_aum_initial, revised_aum, funded_aum,"
-        " raison_perte, concurrent_choisi, next_action_date, sales_owner, closing_probability)"
-        " VALUES (?,?,?,?,?,?,?,?,?,?,?)",
-        (int(client_id), fonds, statut,
-         float(target_aum or 0), float(revised_aum or 0), fa,
-         raison_perte.strip() or None if raison_perte else None,
-         concurrent_choisi.strip() or None if concurrent_choisi else None,
-         next_action_date, sales_owner.strip() or "Non assigne",
-         float(closing_probability or 50))
-    )
-    conn.commit()
-    new_id = c.lastrowid
-    conn.close()
-    return new_id
-
-
-def update_pipeline_row(row, modified_by="utilisateur"):
-    statut       = str(row.get("statut", ""))
-    raison_perte = str(row.get("raison_perte") or "").strip()
-    if statut in ("Lost", "Paused") and not raison_perte:
-        return False, "Raison obligatoire pour le statut {}.".format(statut)
-
-    nad = row.get("next_action_date")
-    if isinstance(nad, (date, datetime)):
-        nad_str = nad.strftime("%Y-%m-%d")
-    elif isinstance(nad, str) and nad.strip():
-        nad_str = nad.strip()
-    else:
-        nad_str = None
-
-    pid         = int(row["id"])
-    new_fonds   = str(row["fonds"])
-    new_target  = float(row.get("target_aum_initial") or 0)
-    new_revised = float(row.get("revised_aum") or 0)
-    new_funded  = float(row.get("funded_aum") or 0)
-    new_raison  = raison_perte or None
-    new_conc    = str(row.get("concurrent_choisi") or "").strip() or None
-    new_sales   = str(row.get("sales_owner") or "Non assigne").strip()
-
-    conn = get_connection()
-    c = conn.cursor()
-    c.execute("SELECT fonds, statut, target_aum_initial, revised_aum, funded_aum, raison_perte FROM pipeline WHERE id = ?", (pid,))
-    old_row = c.fetchone()
-    if old_row:
-        old_vals = {
-            "fonds":              str(old_row["fonds"] or ""),
-            "statut":             str(old_row["statut"] or ""),
-            "target_aum_initial": float(old_row["target_aum_initial"] or 0),
-            "revised_aum":        float(old_row["revised_aum"] or 0),
-            "funded_aum":         float(old_row["funded_aum"] or 0),
-            "raison_perte":       str(old_row["raison_perte"] or ""),
-        }
-        new_vals = {
-            "fonds":              new_fonds, "statut": statut,
-            "target_aum_initial": new_target, "revised_aum": new_revised,
-            "funded_aum":         new_funded, "raison_perte": str(new_raison or ""),
-        }
-        for champ in _AUDIT_CHAMPS:
-            ov = old_vals.get(champ)
-            nv = new_vals.get(champ)
-            if champ in ("target_aum_initial", "revised_aum", "funded_aum"):
-                changed = abs(float(ov or 0) - float(nv or 0)) > 0.01
+        with st.expander("Ajouter un Deal Pipeline", expanded=True):
+            clients_dict = db.get_client_options()
+            sales_team_df = db.get_sales_team()
+            MARCHÉS = sorted(sales_team_df["marche"].unique().tolist()) if not sales_team_df.empty else ["Global"]
+            if not clients_dict:
+                st.info("Ajoutez d'abord un client.")
             else:
-                changed = str(ov) != str(nv)
-            if changed:
-                c.execute(
-                    "INSERT INTO audit_log (pipeline_id, champ_modifie, ancienne_valeur, nouvelle_valeur, modified_by) VALUES (?,?,?,?,?)",
-                    (pid, champ, str(ov), str(nv), modified_by)
-                )
-    # funded_aum auto : si Funded et funded_aum=0, utiliser revised_aum
-    if statut == "Funded" and new_funded == 0:
-        new_funded = new_revised
+                with st.form("form_deal", clear_on_submit=True):
+                    ca, cb = st.columns(2)
+                    with ca:
+                        client_sel  = st.selectbox("Client", list(clients_dict.keys()))
+                        fonds_sel   = st.selectbox("Fonds", FONDS)
+                        statut_sel  = st.selectbox("Statut", STATUTS)
+                        # Commercial : marché → filtre les commerciaux
+                        marche_sel  = st.selectbox("Marché", ["Tous"] + MARCHÉS)
+                        if marche_sel == "Tous":
+                            owners_filtered = sales_team_df["nom"].tolist() if not sales_team_df.empty else ["Non assigne"]
+                        else:
+                            owners_filtered = sales_team_df[sales_team_df["marche"]==marche_sel]["nom"].tolist()
+                        if not owners_filtered:
+                            owners_filtered = ["Non assigne"]
+                        owner_sel = st.selectbox("Commercial", owners_filtered)
+                    with cb:
+                        target_aum   = st.number_input("AUM Cible (EUR)", min_value=0, step=1_000_000)
+                        revised_aum  = st.number_input("AUM Revise (EUR)", min_value=0, step=1_000_000)
+                        funded_aum   = st.number_input("AUM Finance (EUR)", min_value=0, step=1_000_000,
+                                                        help="Laisser à 0 si Funded → utilise l'AUM Révisé automatiquement")
+                        closing_prob = st.slider("Probabilité de closing (%)", 0, 100, 50, 5)
+                    raison_perte, concurrent = "", ""
+                    if statut_sel in ("Lost","Paused"):
+                        cc, cd = st.columns(2)
+                        with cc: raison_perte = st.selectbox("Raison", RAISONS_PERTE)
+                        with cd: concurrent   = st.text_input("Concurrent")
+                    next_action = st.date_input("Prochaine Action",
+                                               value=date.today() + timedelta(days=14))
+                    sub_d = st.form_submit_button("Enregistrer le Deal", use_container_width=True)
+                if sub_d:
+                    if statut_sel in ("Lost","Paused") and not raison_perte:
+                        st.error("Raison obligatoire.")
+                    else:
+                        db.add_pipeline_entry(
+                            clients_dict[client_sel], fonds_sel, statut_sel,
+                            float(target_aum), float(revised_aum), float(funded_aum),
+                            raison_perte, concurrent, next_action.isoformat(),
+                            owner_sel, closing_prob)
+                        st.success("Deal {} / {} enregistre.".format(fonds_sel, client_sel))
 
-    new_prob = float(row.get("closing_probability") or 50)
+        with st.expander("Gérer les Commerciaux"):
+            st_team = db.get_sales_team()
+            if not st_team.empty:
+                st.dataframe(st_team[["nom","marche"]], hide_index=True, use_container_width=True)
+            st.markdown("**Ajouter un commercial**")
+            nc1, nc2, nc3 = st.columns([2, 2, 1])
+            with nc1: new_sales_nom    = st.text_input("Nom", key="new_sales_nom")
+            with nc2: new_sales_marche = st.selectbox("Marché", ["GCC","EMEA","APAC","Americas","Nordics","Global"], key="new_sales_marche")
+            with nc3:
+                st.markdown("<br>", unsafe_allow_html=True)
+                if st.button("Ajouter", key="btn_add_sales"):
+                    if new_sales_nom.strip():
+                        ok = db.add_sales_member(new_sales_nom.strip(), new_sales_marche)
+                        st.success("Commercial ajouté." if ok else "Nom déjà existant.")
+                        st.rerun()
 
-    c.execute(
-        "UPDATE pipeline SET fonds=?, statut=?, target_aum_initial=?, revised_aum=?,"
-        " funded_aum=?, raison_perte=?, concurrent_choisi=?, next_action_date=?,"
-        " sales_owner=?, closing_probability=?, updated_at=CURRENT_TIMESTAMP WHERE id=?",
-        (new_fonds, statut, new_target, new_revised, new_funded,
-         new_raison, new_conc, nad_str, new_sales, new_prob, pid)
-    )
-    conn.commit()
-    conn.close()
-    return True, None
+        with st.expander("Enregistrer une Activite"):
+            clients_dict2 = db.get_client_options()
+            if clients_dict2:
+                with st.form("form_act", clear_on_submit=True):
+                    ce, cf = st.columns(2)
+                    with ce:
+                        act_client = st.selectbox("Client", list(clients_dict2.keys()))
+                        act_type   = st.selectbox("Type", TYPES_INTERACTION)
+                    with cf:
+                        act_date  = st.date_input("Date", value=date.today())
+                        act_notes = st.text_area("Notes", height=68)
+                    sub_a = st.form_submit_button("Enregistrer", use_container_width=True)
+                if sub_a:
+                    db.add_activity(clients_dict2[act_client], act_date.isoformat(),
+                                    act_notes, act_type)
+                    st.success("Activite enregistree pour {}.".format(act_client))
 
-
-def add_activity(client_id, date_str, notes, type_interaction):
-    conn = get_connection()
-    conn.execute(
-        "INSERT INTO activites (client_id, date, notes, type_interaction) VALUES (?,?,?,?)",
-        (int(client_id), date_str, notes, type_interaction)
-    )
-    conn.commit()
-    conn.close()
-
-
-def upsert_clients_from_df(df):
-    inserted, updated = 0, 0
-    conn = get_connection()
-    c = conn.cursor()
-    df.columns = [col.lower().strip() for col in df.columns]
-    for _, row in df.iterrows():
-        nom = str(row.get("nom_client", "")).strip()
-        if not nom:
-            continue
-        c.execute("SELECT id FROM clients WHERE nom_client=?", (nom,))
-        if c.fetchone():
-            c.execute("UPDATE clients SET type_client=?, region=? WHERE nom_client=?",
-                      (str(row.get("type_client", "")), str(row.get("region", "")), nom))
-            updated += 1
+    with col_import:
+        st.markdown("#### Import CSV / Excel — Upsert")
+        import_type   = st.radio("Table cible", ["Clients","Pipeline"], horizontal=True)
+        uploaded_file = st.file_uploader("Fichier CSV ou Excel (.xlsx)",
+                                         type=["csv","xlsx","xls"])
+        if import_type == "Clients":
+            st.info("Colonnes : nom_client, type_client, region")
         else:
-            c.execute("INSERT INTO clients (nom_client, type_client, region) VALUES (?,?,?)",
-                      (nom, str(row.get("type_client", "")), str(row.get("region", ""))))
-            inserted += 1
-    conn.commit()
-    conn.close()
-    return inserted, updated
+            st.info("Colonnes : nom_client, fonds, statut, target_aum_initial, "
+                    "revised_aum, funded_aum, raison_perte, concurrent_choisi, "
+                    "next_action_date, sales_owner")
+        if uploaded_file:
+            try:
+                df_imp = (pd.read_csv(uploaded_file) if uploaded_file.name.endswith(".csv")
+                          else pd.read_excel(uploaded_file))
+                st.dataframe(df_imp.head(5), use_container_width=True, height=145)
+                st.caption("{} ligne(s)".format(len(df_imp)))
+                if st.button("Lancer l'import", use_container_width=True):
+                    fn = (db.upsert_clients_from_df if import_type == "Clients"
+                          else db.upsert_pipeline_from_df)
+                    ins, upd = fn(df_imp)
+                    st.success("Import : {} cree(s), {} mis a jour.".format(ins, upd))
+            except Exception as e:
+                st.error("Erreur : {}".format(e))
+
+        st.divider()
+        st.info("📋 Les activités sont gérées dans l'onglet **Activités** dédié.")
 
 
-def upsert_pipeline_from_df(df):
-    inserted, updated = 0, 0
-    conn = get_connection()
-    c = conn.cursor()
-    df.columns = [col.lower().strip() for col in df.columns]
-    for _, row in df.iterrows():
-        client_id = None
-        if "client_id" in df.columns and pd.notna(row.get("client_id")):
-            client_id = int(row["client_id"])
-        elif "nom_client" in df.columns:
-            nom = str(row.get("nom_client", "")).strip()
-            c.execute("SELECT id FROM clients WHERE nom_client=?", (nom,))
-            res = c.fetchone()
-            if res:
-                client_id = res["id"]
-        if client_id is None:
-            continue
-        fonds = str(row.get("fonds", "")).strip()
-        if not fonds:
-            continue
-        statut  = str(row.get("statut", "Prospect"))
-        raison  = str(row.get("raison_perte", "") or "").strip() or None
-        conc    = str(row.get("concurrent_choisi", "") or "").strip() or None
-        next_a  = str(row.get("next_action_date", "") or "").strip() or None
-        t_aum   = float(row.get("target_aum_initial", 0) or 0)
-        r_aum   = float(row.get("revised_aum", 0) or 0)
-        f_aum   = float(row.get("funded_aum", 0) or 0)
-        sales   = str(row.get("sales_owner", "Non assigne") or "Non assigne")
-        c.execute("SELECT id FROM pipeline WHERE client_id=? AND fonds=?", (client_id, fonds))
-        existing = c.fetchone()
-        if existing:
-            c.execute(
-                "UPDATE pipeline SET statut=?, target_aum_initial=?, revised_aum=?, funded_aum=?,"
-                " raison_perte=?, concurrent_choisi=?, next_action_date=?, sales_owner=?,"
-                " updated_at=CURRENT_TIMESTAMP WHERE id=?",
-                (statut, t_aum, r_aum, f_aum, raison, conc, next_a, sales, existing["id"])
-            )
-            updated += 1
+# ============================================================================
+# ONGLET 2 — PIPELINE MANAGEMENT
+# ============================================================================
+with tab_pipeline:
+    st.markdown('<div class="section-title">Pipeline Management</div>',
+                unsafe_allow_html=True)
+
+    with st.expander("Filtres", expanded=False):
+        fc1, fc2, fc3 = st.columns(3)
+        with fc1: filt_statuts = st.multiselect("Statuts", STATUTS, default=STATUTS_ACTIFS)
+        with fc2: filt_fonds   = st.multiselect("Fonds", FONDS)
+        with fc3: filt_regions = st.multiselect("Regions", REGIONS)
+
+    df_pipe_full = db.get_pipeline_with_last_activity()
+    df_view      = df_pipe_full.copy()
+    if filt_statuts:  df_view = df_view[df_view["statut"].isin(filt_statuts)]
+    if filt_fonds:    df_view = df_view[df_view["fonds"].isin(filt_fonds)]
+    if filt_regions:  df_view = df_view[df_view["region"].isin(filt_regions)]
+
+    st.markdown('<div class="pipeline-hint">Selectionnez une ligne pour modifier'
+                ' — <b>{} deal(s)</b> affiches</div>'.format(len(df_view)),
+                unsafe_allow_html=True)
+
+    df_display = df_view.copy()
+    df_display["next_action_date"] = df_display["next_action_date"].apply(
+        lambda d: d.isoformat() if isinstance(d, date) else "")
+    for col in ["target_aum_initial","revised_aum","funded_aum"]:
+        if col in df_display.columns:
+            df_display[col] = df_display[col].apply(fmt_m)
+    if "closing_probability" in df_display.columns:
+        df_display["closing_probability"] = df_display["closing_probability"].fillna(50)
+
+    cols_show = ["id","nom_client","type_client","region","fonds","statut",
+                 "target_aum_initial","revised_aum","funded_aum",
+                 "closing_probability","raison_perte","next_action_date","sales_owner","derniere_activite"]
+
+    event = st.dataframe(
+        df_display[cols_show], use_container_width=True, height=400, hide_index=True,
+        on_select="rerun", selection_mode="single-row",
+        column_config={
+            "id":                 st.column_config.NumberColumn("ID", width="small"),
+            "nom_client":         st.column_config.TextColumn("Client"),
+            "type_client":        st.column_config.TextColumn("Type", width="small"),
+            "region":             st.column_config.TextColumn("Region", width="small"),
+            "fonds":              st.column_config.TextColumn("Fonds"),
+            "statut":             st.column_config.TextColumn("Statut"),
+            "target_aum_initial": st.column_config.TextColumn("AUM Cible"),
+            "revised_aum":        st.column_config.TextColumn("AUM Revise"),
+            "funded_aum":         st.column_config.TextColumn("AUM Finance"),
+            "raison_perte":       st.column_config.TextColumn("Raison"),
+            "next_action_date":   st.column_config.TextColumn("Next Action"),
+            "sales_owner":        st.column_config.TextColumn("Commercial"),
+            "closing_probability": st.column_config.NumberColumn("Proba %", format="%.0f%%", width="small"),
+            "derniere_activite":  st.column_config.TextColumn("Derniere Activite"),
+        }, key="pipeline_ro")
+
+    selected_rows = event.selection.rows if event.selection else []
+    pipeline_id   = None
+    if len(selected_rows) > 0 and selected_rows[0] < len(df_view):
+        pipeline_id = int(df_view.iloc[selected_rows[0]]["id"])
+
+    if pipeline_id is not None:
+        row_data = db.get_pipeline_row_by_id(pipeline_id)
+        if row_data:
+            client_name    = str(row_data.get("nom_client",""))
+            current_statut = str(row_data.get("statut","Prospect"))
+            st.markdown(
+                '<div class="detail-panel"><div style="font-size:0.88rem;font-weight:700;color:{marine};">'
+                'Modification — <span style="color:{ciel};">{name}</span>'
+                '&nbsp;{badge}&nbsp;<span style="font-size:0.68rem;color:#888;font-weight:400;">'
+                'ID #{pid}</span></div></div>'.format(
+                    marine=MARINE, ciel=B_MID, name=client_name,
+                    badge=statut_badge(current_statut), pid=pipeline_id),
+                unsafe_allow_html=True)
+            with st.container():
+                _st_team = db.get_sales_team()
+                _marchés_edit = sorted(_st_team["marche"].unique().tolist()) if not _st_team.empty else ["Global"]
+                with st.form(key="edit_{}".format(pipeline_id)):
+                    r1c1, r1c2 = st.columns(2)
+                    with r1c1:
+                        fi = FONDS.index(row_data["fonds"]) if row_data["fonds"] in FONDS else 0
+                        new_fonds  = st.selectbox("Fonds", FONDS, index=fi)
+                        # Commercial : sélection par marché
+                        cur_owner  = str(row_data.get("sales_owner") or "Non assigne")
+                        cur_marche = "Tous"
+                        if not _st_team.empty:
+                            rows_m = _st_team[_st_team["nom"] == cur_owner]
+                            if not rows_m.empty:
+                                cur_marche = rows_m.iloc[0]["marche"]
+                        marche_edit = st.selectbox("Marché commercial",
+                            ["Tous"] + _marchés_edit,
+                            index=(["Tous"] + _marchés_edit).index(cur_marche)
+                                  if cur_marche in (["Tous"] + _marchés_edit) else 0,
+                            key="marche_edit_{}".format(pipeline_id))
+                        if marche_edit == "Tous":
+                            _owners_edit = _st_team["nom"].tolist() if not _st_team.empty else ["Non assigne"]
+                        else:
+                            _owners_edit = _st_team[_st_team["marche"]==marche_edit]["nom"].tolist()
+                        if not _owners_edit:
+                            _owners_edit = ["Non assigne"]
+                        oi = _owners_edit.index(cur_owner) if cur_owner in _owners_edit else 0
+                        new_sales = st.selectbox("Commercial", _owners_edit, index=oi,
+                                                 key="owner_edit_{}".format(pipeline_id))
+                    with r1c2:
+                        si = STATUTS.index(current_statut) if current_statut in STATUTS else 0
+                        new_statut   = st.selectbox("Statut", STATUTS, index=si)
+                        cur_prob     = float(row_data.get("closing_probability") or 50)
+                        new_prob     = st.slider("Probabilité de closing (%)", 0, 100,
+                                                 int(cur_prob), 5,
+                                                 key="prob_edit_{}".format(pipeline_id))
+                    r2c1, r2c2, r2c3 = st.columns(3)
+                    with r2c1:
+                        new_target = st.number_input("AUM Cible (EUR)",
+                            value=float(row_data.get("target_aum_initial",0.0)),
+                            min_value=0.0, step=1_000_000.0, format="%.0f")
+                    with r2c2:
+                        new_revised = st.number_input("AUM Revise (EUR)",
+                            value=float(row_data.get("revised_aum",0.0)),
+                            min_value=0.0, step=1_000_000.0, format="%.0f")
+                    with r2c3:
+                        new_funded = st.number_input("AUM Finance (EUR)",
+                            value=float(row_data.get("funded_aum",0.0)),
+                            min_value=0.0, step=1_000_000.0, format="%.0f",
+                            help="Laisser à 0 si Funded → utilise l'AUM Révisé automatiquement")
+                    r3c1, r3c2, r3c3 = st.columns(3)
+                    with r3c1:
+                        ropts = [""] + RAISONS_PERTE
+                        cur_r = str(row_data.get("raison_perte") or "")
+                        ri    = ropts.index(cur_r) if cur_r in ropts else 0
+                        lbl_r = "Raison (obligatoire)" if new_statut in ("Lost","Paused") else "Raison"
+                        new_raison = st.selectbox(lbl_r, ropts, index=ri)
+                    with r3c2:
+                        new_conc = st.text_input("Concurrent",
+                            value=str(row_data.get("concurrent_choisi") or ""))
+                    with r3c3:
+                        nad = row_data.get("next_action_date")
+                        if not isinstance(nad, date): nad = date.today() + timedelta(days=14)
+                        new_nad = st.date_input("Prochaine Action", value=nad)
+                    sub = st.form_submit_button("Sauvegarder", use_container_width=True)
+                if sub:
+                    ok, msg = db.update_pipeline_row({
+                        "id": pipeline_id, "fonds": new_fonds, "statut": new_statut,
+                        "target_aum_initial": new_target, "revised_aum": new_revised,
+                        "funded_aum": new_funded, "raison_perte": new_raison,
+                        "concurrent_choisi": new_conc, "next_action_date": new_nad,
+                        "sales_owner": new_sales, "closing_probability": new_prob})
+                    if ok:
+                        st.success("Deal mis a jour — {} / {}".format(new_statut, fmt_m(new_funded)))
+                        st.rerun()
+                    else:
+                        st.error(msg)
+            df_audit = db.get_audit_log(pipeline_id)
+            if not df_audit.empty:
+                with st.expander("Historique modifications — Deal #{}".format(pipeline_id)):
+                    st.dataframe(df_audit, use_container_width=True, hide_index=True,
+                                 height=min(220, 46 + len(df_audit) * 36))
+    else:
+        st.markdown(
+            '<div style="background:#001c4b04;border:1px dashed #001c4b20;'
+            'padding:20px;text-align:center;margin-top:10px;">'
+            '<div style="color:{};font-weight:600;font-size:0.85rem;">Selectionnez un deal dans le tableau</div>'
+            '<div style="color:#888;font-size:0.75rem;margin-top:2px;">'
+            "Le formulaire d'edition s'affichera ici</div>"
+            '</div>'.format(MARINE), unsafe_allow_html=True)
+
+    st.divider()
+    st.markdown("#### Comparaison AUM par Deal Actif")
+    df_viz = db.get_pipeline_with_clients()
+    df_viz = df_viz[
+        (df_viz["target_aum_initial"] > 0) &
+        (df_viz["statut"].isin(["Funded","Soft Commit","Due Diligence","Initial Pitch"]))
+    ].head(10)
+    if not df_viz.empty:
+        fig_viz = go.Figure()
+        for label, col, color in [
+            ("AUM Cible",  "target_aum_initial", GRIS),
+            ("AUM Revise", "revised_aum",         B_MID),
+            ("AUM Finance","funded_aum",           MARINE)]:
+            fig_viz.add_trace(go.Bar(name=label, x=df_viz["nom_client"].str[:18].tolist(),
+                                     y=df_viz[col].tolist(), marker_color=color,
+                                     marker_line_color=BLANC, marker_line_width=0.5))
+        fig_viz.update_layout(
+            height=320, paper_bgcolor=BLANC, plot_bgcolor=BLANC,
+            font_color=MARINE, barmode="group", bargap=0.22, bargroupgap=0.06,
+            legend_bgcolor=BLANC, legend_font_size=10,
+            xaxis_tickangle=-20, xaxis_showgrid=False,
+            yaxis_showgrid=True, yaxis_gridcolor=GRIS,
+            margin=dict(l=10, r=10, t=20, b=10))
+        st.plotly_chart(fig_viz, use_container_width=True, config={"displayModeBar": False})
+
+    df_lp = db.get_pipeline_with_clients()
+    df_lp = df_lp[df_lp["statut"].isin(["Lost","Paused"])].copy()
+    if not df_lp.empty:
+        st.divider()
+        st.markdown("#### Deals Perdus / En Pause")
+        df_lp2 = df_lp[["nom_client","fonds","statut","target_aum_initial",
+                         "raison_perte","concurrent_choisi","sales_owner"]].copy()
+        df_lp2["target_aum_initial"] = df_lp2["target_aum_initial"].apply(fmt_m)
+        st.dataframe(df_lp2, use_container_width=True, hide_index=True)
+
+
+# ============================================================================
+# ONGLET 3 — EXECUTIVE DASHBOARD
+# KPI grid CSS pur → alignement parfait
+# Surbrillance orange au hover + indicateur ▸
+# ============================================================================
+with tab_dash:
+    st.markdown('<div class="section-title">Executive Dashboard</div>',
+                unsafe_allow_html=True)
+
+    kpis = db.get_kpis()
+    nb_lost_paused = kpis["nb_lost"] + kpis.get("nb_paused", 0)
+
+    # ---- KPI Cards — grille CSS 5 colonnes ----
+    # Les 3 cards cliquables s'ouvrent via expanders juste en dessous
+    st.markdown(
+        '<div style="display:grid;grid-template-columns:repeat(5,1fr);gap:8px;margin-bottom:4px;">'
+        '<div class="kpi-card kpi-card-clickable" style="cursor:default;">'
+        '<div class="kpi-label">AUM Finance Total</div>'
+        '<div class="kpi-value">{aum_f}</div>'
+        '<div class="kpi-sub" style="color:#019ee1;">{nb_f} deal(s) Funded ▾</div>'
+        '</div>'
+        '<div class="kpi-card kpi-card-clickable" style="cursor:default;">'
+        '<div class="kpi-label">Pipeline Actif</div>'
+        '<div class="kpi-value">{aum_p}</div>'
+        '<div class="kpi-sub" style="color:#019ee1;">{nb_p} deals en cours ▾</div>'
+        '</div>'
+        '<div class="kpi-card kpi-card-static">'
+        '<div class="kpi-label">Taux Conversion</div>'
+        '<div class="kpi-value">{taux:.1f}%</div>'
+        '<div class="kpi-sub">{nb_f2} funded / {nb_l} lost</div>'
+        '</div>'
+        '<div class="kpi-card kpi-card-static">'
+        '<div class="kpi-label">Weighted Pipeline</div>'
+        '<div class="kpi-value">{wp}</div>'
+        '<div class="kpi-sub">proba pondérée</div>'
+        '</div>'
+        '{card_lp}'
+        '</div>'.format(
+            aum_f=fmt_m(kpis["total_funded"]), nb_f=kpis["nb_funded"],
+            aum_p=fmt_m(kpis["pipeline_actif"]), nb_p=kpis["nb_deals_actifs"],
+            taux=kpis["taux_conversion"], nb_f2=kpis["nb_funded"], nb_l=kpis["nb_lost"],
+            wp=fmt_m(kpis.get("weighted_pipeline", 0)),
+            card_lp=(
+                '<div class="kpi-card kpi-card-clickable" style="cursor:default;">'
+                '<div class="kpi-label">Lost / Paused</div>'
+                '<div class="kpi-value">{}</div>'
+                '<div class="kpi-sub" style="color:#019ee1;">{} deals ▾</div>'
+                '</div>'.format(nb_lost_paused, nb_lost_paused)
+                if nb_lost_paused > 0 else
+                '<div class="kpi-card kpi-card-static">'
+                '<div class="kpi-label">Lost / Paused</div>'
+                '<div class="kpi-value">0</div>'
+                '<div class="kpi-sub">Aucun deal perdu</div>'
+                '</div>'
+            )),
+        unsafe_allow_html=True)
+
+    # Expanders sous les KPIs (identiques aux tiroirs Ajouter un Client etc.)
+    with st.expander("Deals Finances (Funded) — detail", expanded=False):
+        _content_funded(_filtre_effectif)
+    with st.expander("Pipeline Actif — detail", expanded=False):
+        _content_pipeline(_filtre_effectif)
+    if nb_lost_paused > 0:
+        with st.expander("Deals Perdus et En Pause — detail", expanded=False):
+            _content_lost(_filtre_effectif)
+
+    st.markdown("<br>", unsafe_allow_html=True)
+
+    # ---- Pastilles statut — grille CSS + expanders ----
+    statut_order = [s for s in STATUTS if kpis["statut_repartition"].get(s, 0) > 0]
+    if statut_order:
+        n_cols = len(statut_order)
+        pills = ""
+        for s in statut_order:
+            c_hex = STATUT_COLORS.get(s, GRIS)
+            count = kpis["statut_repartition"][s]
+            pills += (
+                '<div class="statut-pill" style="background:{c}16;border:1px solid {c}44;">'
+                '<div style="font-size:0.61rem;color:{marine};font-weight:700;text-transform:uppercase;">{s}</div>'
+                '<div style="font-size:1.3rem;font-weight:800;color:{c};">{n}</div>'
+                '</div>'
+            ).format(s=s, c=c_hex, marine=MARINE, n=count)
+        st.markdown(
+            '<div class="statut-grid" style="grid-template-columns:repeat({n},1fr);">'
+            '{pills}</div>'.format(n=n_cols, pills=pills),
+            unsafe_allow_html=True)
+        # Expanders par statut
+        for s in statut_order:
+            c_hex = STATUT_COLORS.get(s, GRIS)
+            count = kpis["statut_repartition"][s]
+            with st.expander("{} — {} deal(s)".format(s, count), expanded=False):
+                _content_statut(s, _filtre_effectif)
+
+    st.divider()
+
+    # ---- Alertes retard — expanders identiques aux tiroirs ----
+    df_overdue = db.get_overdue_actions()
+    if not df_overdue.empty:
+        today = date.today()
+        # Afficher les alertes comme résumé visuel
+        alertes_html = ""
+        for _, row in df_overdue.iterrows():
+            nad = row.get("next_action_date")
+            days_late = (today - nad).days if isinstance(nad, date) else 0
+            nad_str   = nad.isoformat() if isinstance(nad, date) else "—"
+            owner     = str(row.get("sales_owner","")) or ""
+            alertes_html += (
+                '<div class="alert-overdue">'
+                '<b>{client}</b> — {fonds}'
+                ' <span style="color:{ciel};font-weight:600;">({statut})</span>'
+                ' — Prevue le <b>{nad}</b>'
+                ' &nbsp;<span class="badge-retard">RETARD +{days}j</span>'
+                '{owner_part}'
+                '</div>'
+            ).format(
+                client=row["nom_client"], fonds=row["fonds"], ciel=CIEL,
+                statut=row["statut"], nad=nad_str, days=days_late,
+                owner_part=" — <b>{}</b>".format(owner) if owner else "")
+        st.markdown(alertes_html, unsafe_allow_html=True)
+        with st.expander("{} action(s) en retard — voir le detail complet".format(len(df_overdue)), expanded=False):
+            _content_overdue()
+
+    # ---- Graphiques ----
+    gcol1, gcol2, gcol3 = st.columns([1, 1, 1.2], gap="medium")
+
+    with gcol1:
+        st.markdown("#### Par Type Client")
+        abt = kpis.get("aum_by_type", {})
+        if abt:
+            fig_type = go.Figure(go.Pie(
+                labels=list(abt.keys()), values=list(abt.values()), hole=0.52,
+                marker_colors=PALETTE[:len(abt)], marker_line_color=BLANC, marker_line_width=2,
+                textinfo="percent", textfont_size=10, textfont_color=BLANC))
+            fig_type.add_annotation(text=fmt_m(sum(abt.values())),
+                                    x=0.5, y=0.55, font_size=11, font_color=MARINE, showarrow=False)
+            fig_type.add_annotation(text="Finance",
+                                    x=0.5, y=0.42, font_size=8, font_color=GTXT, showarrow=False)
+            fig_type.update_layout(height=300, paper_bgcolor=BLANC, plot_bgcolor=BLANC,
+                                   font_color=MARINE, showlegend=True,
+                                   legend_x=1.02, legend_y=0.5, legend_font_size=9,
+                                   margin=dict(l=0, r=80, t=36, b=10))
+            st.plotly_chart(fig_type, use_container_width=True, config={"displayModeBar": False})
+
+    with gcol2:
+        st.markdown("#### Par Region")
+        aum_reg_dash = db.get_aum_by_region()
+        if aum_reg_dash:
+            fig_reg = go.Figure(go.Pie(
+                labels=list(aum_reg_dash.keys()), values=list(aum_reg_dash.values()), hole=0.52,
+                marker_colors=PALETTE[:len(aum_reg_dash)], marker_line_color=BLANC, marker_line_width=2,
+                textinfo="percent", textfont_size=10, textfont_color=BLANC))
+            fig_reg.add_annotation(text=fmt_m(sum(aum_reg_dash.values())),
+                                   x=0.5, y=0.55, font_size=11, font_color=MARINE, showarrow=False)
+            fig_reg.add_annotation(text="Finance",
+                                   x=0.5, y=0.42, font_size=8, font_color=GTXT, showarrow=False)
+            fig_reg.update_layout(height=300, paper_bgcolor=BLANC, plot_bgcolor=BLANC,
+                                  font_color=MARINE, showlegend=True,
+                                  legend_x=1.02, legend_y=0.5, legend_font_size=9,
+                                  margin=dict(l=0, r=80, t=36, b=10))
+            st.plotly_chart(fig_reg, use_container_width=True, config={"displayModeBar": False})
+
+    with gcol3:
+        st.markdown("#### AUM par Fonds")
+        abf = kpis.get("aum_by_fonds", {})
+        if abf:
+            fs = sorted(abf.items(), key=lambda x: x[1], reverse=True)
+            fig_fonds = go.Figure(go.Bar(
+                x=[v for _, v in fs], y=[k for k, _ in fs], orientation="h",
+                marker_color=PALETTE[:len(fs)], marker_line_color=BLANC, marker_line_width=0.5,
+                text=[fmt_m(v) for _, v in fs], textposition="outside",
+                textfont_size=9, textfont_color=MARINE))
+            fig_fonds.update_layout(height=300, paper_bgcolor=BLANC, plot_bgcolor=BLANC,
+                                    font_color=MARINE, xaxis_showgrid=True, xaxis_gridcolor=GRIS,
+                                    yaxis_autorange="reversed",
+                                    margin=dict(l=10, r=60, t=36, b=10))
+            st.plotly_chart(fig_fonds, use_container_width=True, config={"displayModeBar": False})
+
+    st.divider()
+    st.markdown("#### Top Deals — AUM Finance")
+    df_funded_top = (db.get_pipeline_with_clients()
+                     .query("statut == 'Funded'")
+                     .sort_values("funded_aum", ascending=False)
+                     .head(10))
+    if not df_funded_top.empty:
+        max_f = float(df_funded_top["funded_aum"].max())
+        for i, (_, row) in enumerate(df_funded_top.iterrows()):
+            val  = float(row["funded_aum"])
+            pct  = val / max_f * 100 if max_f > 0 else 0
+            bar_c = MARINE if i == 0 else B_MID if i < 3 else B_PAL
+            st.markdown(
+                '<div style="display:flex;align-items:center;gap:10px;'
+                'margin:4px 0;padding:7px 12px;border-bottom:1px solid #e8e8e8;">'
+                '<div style="font-size:0.72rem;font-weight:700;color:{ciel};min-width:26px;">No.{rank}</div>'
+                '<div style="flex:1;">'
+                '<div style="font-size:0.80rem;font-weight:700;color:{marine};">{client}</div>'
+                '<div style="font-size:0.67rem;color:#777;">{fonds} &middot; {type} &middot; {region}</div>'
+                '<div style="background:{gris};height:3px;margin-top:4px;overflow:hidden;">'
+                '<div style="background:{barc};width:{pct:.0f}%;height:100%;"></div></div></div>'
+                '<div style="text-align:right;min-width:72px;">'
+                '<div style="font-size:0.86rem;font-weight:800;color:{marine};">{aum}</div>'
+                '<div style="font-size:0.61rem;color:#999;">finance</div>'
+                '</div></div>'.format(
+                    rank=i+1, ciel=CIEL, marine=MARINE, gris=GRIS,
+                    client=row["nom_client"], fonds=row["fonds"],
+                    type=row["type_client"], region=row["region"],
+                    barc=bar_c, pct=pct, aum=fmt_m(val)), unsafe_allow_html=True)
+
+
+# ============================================================================
+# ONGLET 4 — SALES TRACKING
+# ============================================================================
+with tab_sales:
+    st.markdown('<div class="section-title">Sales Tracking — Suivi par Commercial</div>',
+                unsafe_allow_html=True)
+    df_sm = db.get_sales_metrics()
+    df_na = db.get_next_actions_by_sales(days_ahead=30)
+
+    if df_sm.empty:
+        st.info("Aucune donnee de pipeline disponible.")
+    else:
+        n_own  = len(df_sm)
+        n_cols = min(n_own, 3)
+        s_cols = st.columns(n_cols, gap="medium")
+        for i, (_, row) in enumerate(df_sm.iterrows()):
+            retard_val  = int(row.get("Retards",0))
+            retard_html = (
+                '<span class="badge-retard">RETARD : {}</span>'.format(retard_val)
+                if retard_val > 0
+                else '<span style="color:{};font-size:0.74rem;font-weight:600;">A jour</span>'.format(CIEL))
+            with s_cols[i % n_cols]:
+                st.markdown(
+                    '<div class="sales-card">'
+                    '<div class="sales-card-name">{name}</div>'
+                    '<div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;">'
+                    '<div><div class="sales-metric">Total Deals</div><div class="sales-metric-val">{nb}</div></div>'
+                    '<div><div class="sales-metric">Funded</div><div class="sales-metric-val">{funded}</div></div>'
+                    '<div><div class="sales-metric">AUM Finance</div><div class="sales-metric-acc">{aum}</div></div>'
+                    '<div><div class="sales-metric">Pipeline Actif</div><div class="sales-metric-val">{pipe}</div></div>'
+                    '<div><div class="sales-metric">Actifs / Perdus</div><div class="sales-metric-val">{actifs} / {perdus}</div></div>'
+                    '<div><div class="sales-metric">Alertes</div><div style="margin-top:2px;">{retard}</div></div>'
+                    '</div></div><br>'.format(
+                        name=row["Commercial"], nb=int(row["Nb_Deals"]), funded=int(row["Funded"]),
+                        aum=fmt_m(float(row["AUM_Finance"])), pipe=fmt_m(float(row["Pipeline_Actif"])),
+                        actifs=int(row["Actifs"]), perdus=int(row["Perdus"]), retard=retard_html),
+                    unsafe_allow_html=True)
+
+        st.divider()
+        st.markdown("#### AUM Finance vs Pipeline par Commercial")
+        if df_sm["AUM_Finance"].sum() > 0:
+            fig_sales = go.Figure()
+            for lbl, col_key, color in [
+                ("AUM Finance",    "AUM_Finance",   MARINE),
+                ("Pipeline Actif", "Pipeline_Actif", B_MID)]:
+                fig_sales.add_trace(go.Bar(name=lbl, x=df_sm["Commercial"].tolist(),
+                                           y=df_sm[col_key].tolist(), marker_color=color,
+                                           marker_line_color=BLANC, marker_line_width=0.5))
+            fig_sales.update_layout(
+                height=300, paper_bgcolor=BLANC, plot_bgcolor=BLANC,
+                font_color=MARINE, barmode="group", bargap=0.25,
+                legend_bgcolor=BLANC, legend_bordercolor=GRIS, legend_borderwidth=1,
+                xaxis_showgrid=False, yaxis_showgrid=True, yaxis_gridcolor=GRIS,
+                margin=dict(l=10, r=10, t=20, b=10))
+            st.plotly_chart(fig_sales, use_container_width=True, config={"displayModeBar": False})
+
+        st.divider()
+        st.markdown("#### Prochaines Actions — 30 jours")
+        if df_na.empty:
+            st.info("Aucune action planifiee dans les 30 prochains jours.")
         else:
-            c.execute(
-                "INSERT INTO pipeline (client_id, fonds, statut, target_aum_initial, revised_aum,"
-                " funded_aum, raison_perte, concurrent_choisi, next_action_date, sales_owner)"
-                " VALUES (?,?,?,?,?,?,?,?,?,?)",
-                (client_id, fonds, statut, t_aum, r_aum, f_aum, raison, conc, next_a, sales)
-            )
-            inserted += 1
-    conn.commit()
-    conn.close()
-    return inserted, updated
+            owners_na    = ["Tous"] + sorted(df_na["sales_owner"].unique().tolist())
+            filter_owner = st.selectbox("Filtrer par commercial", owners_na)
+            df_nav = df_na if filter_owner == "Tous" else df_na[df_na["sales_owner"] == filter_owner]
+            today  = date.today()
+            for _, row in df_nav.iterrows():
+                nad = row.get("next_action_date")
+                if isinstance(nad, date):
+                    delta  = (nad - today).days
+                    timing = "Dans {}j".format(delta) if delta >= 0 else "RETARD +{}j".format(abs(delta))
+                    dot    = CIEL if delta >= 0 else ORANGE
+                    nad_s  = nad.isoformat()
+                else:
+                    timing = "—"; dot = GRIS; nad_s = "—"
+                st.markdown(
+                    '<div style="display:flex;align-items:center;gap:11px;padding:7px 11px;'
+                    'margin:3px 0;background:#f8fafd;border-left:3px solid {dot};">'
+                    '<div style="min-width:100px;font-size:0.73rem;color:{dot};font-weight:700;">{timing}</div>'
+                    '<div style="flex:1;"><span style="font-weight:600;color:{marine};font-size:0.82rem;">{client}</span>'
+                    '&nbsp;<span style="color:#888;font-size:0.73rem;">{fonds} &middot; {statut}</span></div>'
+                    '<div style="font-size:0.78rem;color:{ciel};font-weight:600;min-width:68px;text-align:right;">{aum}</div>'
+                    '<div style="font-size:0.73rem;color:#888;min-width:85px;text-align:right;">{owner}</div>'
+                    '</div>'.format(
+                        dot=dot, timing=timing, marine=MARINE, ciel=CIEL,
+                        client=row.get("nom_client",""), fonds=row.get("fonds",""),
+                        statut=row.get("statut",""), aum=fmt_m(float(row.get("revised_aum",0) or 0)),
+                        owner=row.get("sales_owner","")), unsafe_allow_html=True)
 
 
-# ---------------------------------------------------------------------------
-# BACKUP EXCEL
-# ---------------------------------------------------------------------------
+# ============================================================================
+# ONGLET 5 — ACTIVITÉS
+# ============================================================================
+with tab_activites:
+    st.markdown('<div class="section-title">Journal des Activites</div>',
+                unsafe_allow_html=True)
 
-def get_excel_backup(fonds_filter=None):
-    buf = io.BytesIO()
-    df_p = get_pipeline_with_last_activity(fonds_filter).copy()
-    for col in ["target_aum_initial", "revised_aum", "funded_aum"]:
-        if col in df_p.columns:
-            df_p[col] = (df_p[col] / 1_000_000).round(2)
-    rename_p = {
-        "id": "ID", "nom_client": "Client", "type_client": "Type", "region": "Region",
-        "fonds": "Fonds", "statut": "Statut",
-        "target_aum_initial": "AUM_Cible_M_EUR", "revised_aum": "AUM_Revise_M_EUR",
-        "funded_aum": "AUM_Finance_M_EUR", "raison_perte": "Raison",
-        "concurrent_choisi": "Concurrent", "next_action_date": "Prochaine_Action",
-        "sales_owner": "Commercial", "derniere_activite": "Derniere_Activite",
-    }
-    df_p = df_p.rename(columns={k: v for k, v in rename_p.items() if k in df_p.columns})
-    if "Prochaine_Action" in df_p.columns:
-        df_p["Prochaine_Action"] = df_p["Prochaine_Action"].apply(
-            lambda d: d.isoformat() if isinstance(d, date) else str(d or "")
-        )
-    conn = get_connection()
-    df_a = pd.read_sql_query(
-        "SELECT a.id, a.pipeline_id, c.nom_client, p.fonds,"
-        " a.champ_modifie, a.ancienne_valeur, a.nouvelle_valeur,"
-        " a.modified_by, a.date_modification"
-        " FROM audit_log a JOIN pipeline p ON p.id = a.pipeline_id"
-        " JOIN clients c ON c.id = p.client_id"
-        " ORDER BY a.date_modification DESC LIMIT 200",
-        conn
-    )
-    conn.close()
-    df_c = get_all_clients()
-    with pd.ExcelWriter(buf, engine="openpyxl") as writer:
-        df_p.to_excel(writer, sheet_name="Pipeline_Actif",      index=False)
-        df_a.to_excel(writer, sheet_name="Historique_Audit",    index=False)
-        df_c.to_excel(writer, sheet_name="Referentiel_Clients", index=False)
-    return buf.getvalue()
+    df_all_act = db.get_activities()
+
+    # ---- Filtres ----
+    fa1, fa2, fa3 = st.columns([2, 2, 3])
+    with fa1:
+        clients_for_filter = ["Tous"] + (sorted(df_all_act["nom_client"].unique().tolist()) if not df_all_act.empty else [])
+        filt_client = st.selectbox("Client", clients_for_filter, key="filt_act_client")
+    with fa2:
+        filt_type = st.multiselect("Type d'interaction", TYPES_INTERACTION, key="filt_act_type")
+    with fa3:
+        filt_search = st.text_input("Recherche dans les notes", placeholder="mot-clé…", key="filt_act_search")
+
+    # Appliquer filtres
+    df_act_filtered = df_all_act.copy() if not df_all_act.empty else df_all_act
+    if not df_act_filtered.empty:
+        if filt_client != "Tous":
+            df_act_filtered = df_act_filtered[df_act_filtered["nom_client"] == filt_client]
+        if filt_type:
+            df_act_filtered = df_act_filtered[df_act_filtered["type_interaction"].isin(filt_type)]
+        if filt_search.strip():
+            df_act_filtered = df_act_filtered[
+                df_act_filtered["notes"].str.contains(filt_search.strip(), case=False, na=False)]
+
+    # ---- KPIs activités ----
+    if not df_all_act.empty:
+        sc1, sc2, sc3, sc4 = st.columns(4)
+        nb_mois = len(df_all_act[df_all_act["date"].apply(
+            lambda d: str(d)[:7] == date.today().strftime("%Y-%m") if d else False)])
+        top_type = df_all_act["type_interaction"].value_counts()
+        top_type_str = top_type.index[0] if not top_type.empty else "—"
+        for col, label, val in [
+            (sc1, "Total activités",    str(len(df_all_act))),
+            (sc2, "Ce mois",            str(nb_mois)),
+            (sc3, "Type le + fréquent", top_type_str),
+            (sc4, "Clients touchés",    str(df_all_act["nom_client"].nunique())),
+        ]:
+            with col:
+                st.markdown(
+                    '<div class="kpi-card kpi-card-static" style="padding:10px;">'
+                    '<div class="kpi-label">{}</div>'
+                    '<div class="kpi-value" style="font-size:1.15rem;">{}</div>'
+                    '</div>'.format(label, val), unsafe_allow_html=True)
+
+    st.markdown("<br>", unsafe_allow_html=True)
+
+    # ---- Ajout rapide ----
+    with st.expander("Enregistrer une Activite", expanded=False):
+        clients_dict_act = db.get_client_options()
+        if clients_dict_act:
+            with st.form("form_act_tab", clear_on_submit=True):
+                qa1, qa2 = st.columns(2)
+                with qa1:
+                    qa_client = st.selectbox("Client", list(clients_dict_act.keys()), key="qa_client")
+                    qa_type   = st.selectbox("Type", TYPES_INTERACTION, key="qa_type")
+                with qa2:
+                    qa_date  = st.date_input("Date", value=date.today(), key="qa_date")
+                    qa_notes = st.text_area("Notes", height=80, key="qa_notes")
+                if st.form_submit_button("Enregistrer", use_container_width=True):
+                    db.add_activity(clients_dict_act[qa_client], qa_date.isoformat(), qa_notes, qa_type)
+                    st.success("Activite enregistree pour {}.".format(qa_client))
+                    st.rerun()
+
+    st.divider()
+
+    # ---- Timeline ----
+    if df_act_filtered.empty:
+        st.info("Aucune activite trouvee.")
+    else:
+        nb_total = len(df_all_act)
+        nb_filtre = len(df_act_filtered)
+        st.markdown(
+            "<div style='font-size:0.78rem;color:#888;margin-bottom:8px;'>"
+            "<b>{}</b> activite(s){}".format(
+                nb_filtre,
+                " sur {} au total".format(nb_total) if nb_filtre < nb_total else ""
+            ) + "</div>", unsafe_allow_html=True)
+
+        TYPE_ICONS  = {"Call":"📞","Meeting":"🤝","Email":"📧","Roadshow":"🗺","Conference":"🎤","Autre":"📌"}
+        TYPE_COLORS = {"Call":CIEL,"Meeting":B_MID,"Email":B_PAL,"Roadshow":"#2c7fb8","Conference":"#004f8c","Autre":"#888"}
+
+        df_sorted = df_act_filtered.copy()
+        df_sorted["_date_str"] = df_sorted["date"].apply(lambda d: str(d) if d else "")
+        df_sorted = df_sorted.sort_values("_date_str", ascending=False)
+
+        current_date_label = None
+        for _, row in df_sorted.iterrows():
+            date_str = str(row.get("date",""))
+            typ      = str(row.get("type_interaction","Autre"))
+            client   = str(row.get("nom_client",""))
+            notes    = str(row.get("notes","")) or "—"
+            color    = TYPE_COLORS.get(typ, "#888")
+            icon     = TYPE_ICONS.get(typ, "📌")
+
+            # Séparateur de date
+            if date_str != current_date_label:
+                current_date_label = date_str
+                try:
+                    d_obj = date.fromisoformat(date_str)
+                    delta = (date.today() - d_obj).days
+                    label_d = d_obj.strftime("%A %d %B %Y").capitalize()
+                    if   delta == 0: suffix = " — <b style='color:#019ee1;'>Aujourd'hui</b>"
+                    elif delta == 1: suffix = " — <span style='color:#888;'>Hier</span>"
+                    elif delta <= 7: suffix = " — <span style='color:#888;'>Il y a {} jours</span>".format(delta)
+                    else:            suffix = ""
+                except Exception:
+                    label_d = date_str; suffix = ""
+                st.markdown(
+                    "<div style='font-size:0.72rem;font-weight:700;color:#7ab8d8;"
+                    "text-transform:uppercase;letter-spacing:0.8px;"
+                    "padding:10px 0 4px 0;border-bottom:1px solid #e8e8e8;margin-bottom:4px;'>"
+                    "{}{}</div>".format(label_d, suffix), unsafe_allow_html=True)
+
+            # Carte activité
+            st.markdown(
+                "<div style='display:flex;gap:12px;align-items:flex-start;"
+                "padding:9px 14px;margin:3px 0;background:#f9fbfd;"
+                "border-left:3px solid {color};'>"
+                "<div style='font-size:1rem;padding-top:1px;'>{icon}</div>"
+                "<div style='flex:1;'>"
+                "<div style='font-size:0.82rem;font-weight:700;color:#001c4b;'>"
+                "{client}&nbsp;"
+                "<span style='font-size:0.69rem;font-weight:600;color:{color};"
+                "background:{color}18;padding:1px 8px;'>{typ}</span></div>"
+                "<div style='font-size:0.78rem;color:#444;margin-top:4px;line-height:1.55;'>{notes}</div>"
+                "</div></div>".format(
+                    color=color, icon=icon, client=client, typ=typ, notes=notes),
+                unsafe_allow_html=True)
+
+
+# ============================================================================
+# ONGLET 6 — PERFORMANCE & NAV
+# ============================================================================
+with tab_perf:
+    st.markdown('<div class="section-title">Performance et NAV</div>', unsafe_allow_html=True)
+
+    col_up, col_info = st.columns([1.2, 1], gap="large")
+
+    with col_info:
+        st.markdown(
+            '<div style="background:#001c4b07;border:1px solid #001c4b14;padding:15px 17px;">'
+            '<div style="font-weight:700;color:#001c4b;font-size:0.90rem;margin-bottom:9px;">Format attendu</div>'
+            '<div style="font-size:0.79rem;color:#444;line-height:1.75;">'
+            '<b>Colonnes obligatoires</b><br>'
+            '&bull; <code>Date</code> — YYYY-MM-DD ou DD/MM/YYYY<br>'
+            '&bull; <code>Fonds</code> — Nom du fonds<br>'
+            '&bull; <code>NAV</code> — Valeur liquidative numerique<br><br>'
+            '<b>Calculs produits</b><br>'
+            '&bull; Base 100 normalisee &bull; Perf 1M &bull; Perf YTD<br><br>'
+            '<b>Export PDF</b><br>'
+            'Les donnees NAV sont integrees dans le PDF si cochees.'
+            '</div></div>', unsafe_allow_html=True)
+        st.markdown("#### Demonstration")
+        if st.button("Generer un fichier NAV de demonstration", use_container_width=True):
+            demo_dates = pd.date_range("{}-01-01".format(date.today().year - 1),
+                                       date.today(), freq="B")
+            rng  = np.random.default_rng(42)
+            navs = {f: 100.0 for f in FONDS}
+            rows = []
+            for d in demo_dates:
+                for fonds, nav in navs.items():
+                    nav *= (1 + rng.normal(0.0003, 0.006))
+                    navs[fonds] = nav
+                    rows.append({"Date": d.date().isoformat(), "Fonds": fonds, "NAV": round(nav, 4)})
+            buf_demo = io.BytesIO()
+            pd.DataFrame(rows).to_excel(buf_demo, index=False)
+            buf_demo.seek(0)
+            st.download_button("Telecharger nav_demo.xlsx", data=buf_demo,
+                               file_name="nav_demo.xlsx", mime="application/vnd.ms-excel",
+                               use_container_width=True)
+
+    with col_up:
+        nav_file = st.file_uploader("Charger l'historique NAV (Excel ou CSV)",
+                                    type=["xlsx","xls","csv"])
+
+    if nav_file is not None:
+        try:
+            df_nav = (pd.read_csv(nav_file) if nav_file.name.endswith(".csv")
+                      else pd.read_excel(nav_file))
+            df_nav.columns = [c.strip() for c in df_nav.columns]
+            missing = [c for c in ["Date","Fonds","NAV"] if c not in df_nav.columns]
+            if missing:
+                st.error("Colonnes manquantes : {}".format(missing)); st.stop()
+            df_nav["Date"] = pd.to_datetime(df_nav["Date"], format="mixed", dayfirst=True, errors="coerce")
+            df_nav = df_nav.dropna(subset=["Date"])
+            df_nav["NAV"]   = pd.to_numeric(df_nav["NAV"], errors="coerce")
+            df_nav = df_nav.dropna(subset=["NAV"])
+            df_nav["Fonds"] = df_nav["Fonds"].astype(str).str.strip()
+            df_nav = df_nav.sort_values("Date").reset_index(drop=True)
+            if df_nav.empty:
+                st.error("Aucune donnee valide."); st.stop()
+
+            fonds_list = sorted(df_nav["Fonds"].unique().tolist())
+            d_min = df_nav["Date"].min(); d_max = df_nav["Date"].max()
+            st.markdown(
+                '<div style="background:#019ee114;border-left:3px solid #019ee1;'
+                'padding:8px 14px;margin:9px 0;">'
+                '{:,} points &mdash; {} fonds &mdash; {} au {}</div>'.format(
+                    len(df_nav), len(fonds_list),
+                    d_min.strftime('%d/%m/%Y'), d_max.strftime('%d/%m/%Y')),
+                unsafe_allow_html=True)
+
+            st.markdown("---")
+            ff1, ff2, ff3 = st.columns([2, 1, 1])
+            with ff1:
+                fonds_sel_nav = st.multiselect("Fonds a afficher", fonds_list,
+                                               default=fonds_list[:min(5, len(fonds_list))])
+            with ff2: d_debut = st.date_input("Depuis", value=d_min.date())
+            with ff3: d_fin   = st.date_input("Jusqu'au", value=d_max.date())
+
+            if not fonds_sel_nav:
+                st.warning("Selectionnez au moins un fonds."); st.stop()
+
+            mask = (df_nav["Fonds"].isin(fonds_sel_nav) &
+                    (df_nav["Date"].dt.date >= d_debut) &
+                    (df_nav["Date"].dt.date <= d_fin))
+            df_fn = df_nav[mask].copy()
+            if df_fn.empty:
+                st.warning("Aucune donnee pour la periode."); st.stop()
+
+            pivot = (df_fn.pivot_table(index="Date", columns="Fonds", values="NAV", aggfunc="last")
+                     .sort_index().ffill())
+            pivot = pivot[[f for f in fonds_sel_nav if f in pivot.columns]]
+
+            base100 = pivot.copy() * np.nan
+            for fonds in pivot.columns:
+                s = pivot[fonds].dropna()
+                if s.empty: continue
+                first_val = float(s.iloc[0])
+                if first_val != 0 and not np.isnan(first_val):
+                    base100[fonds] = pivot[fonds] / first_val * 100
+
+            st.session_state["nav_base100"] = base100
+            st.session_state["perf_fonds"]  = fonds_sel_nav
+
+            st.markdown("#### Evolution NAV — Base 100")
+            NAV_COLORS = [MARINE, CIEL, B_MID, B_PAL, B_DEP, "#2c7fb8","#004f8c","#6baed6"]
+            fig_nav = go.Figure()
+            for i, fonds in enumerate(pivot.columns):
+                series = base100[fonds].dropna()
+                if series.empty: continue
+                fig_nav.add_trace(go.Scatter(
+                    x=series.index.tolist(), y=series.values.tolist(),
+                    mode="lines", name=fonds,
+                    line=dict(color=NAV_COLORS[i % len(NAV_COLORS)], width=2),
+                    hovertemplate="<b>{}</b><br>%{{y:.2f}}<extra></extra>".format(fonds)))
+            fig_nav.add_hline(y=100, line_dash="dot", line_color=GRIS, line_width=1)
+            fig_nav.update_layout(
+                title_text="Performance NAV — Base 100", title_font_size=13,
+                title_font_color=MARINE, height=380,
+                paper_bgcolor=BLANC, plot_bgcolor=BLANC, font_color=MARINE,
+                legend_bgcolor=BLANC, legend_bordercolor=GRIS, legend_borderwidth=1,
+                legend_font_size=10, xaxis_showgrid=False,
+                yaxis_showgrid=True, yaxis_gridcolor=GRIS,
+                margin=dict(l=10, r=10, t=40, b=10))
+            st.plotly_chart(fig_nav, use_container_width=True, config={"displayModeBar": True})
+
+            today_ts  = pd.Timestamp(date.today())
+            one_m_ago = today_ts - pd.DateOffset(months=1)
+            jan_1     = pd.Timestamp("{}-01-01".format(date.today().year))
+
+            perf_rows = []
+            for fonds in pivot.columns:
+                series = pivot[fonds].dropna()
+                if series.empty: continue
+                nav_last = float(series.iloc[-1]); nav_first = float(series.iloc[0])
+                s_1m  = series[series.index >= one_m_ago]
+                p1m   = ((nav_last / float(s_1m.iloc[0]) - 1) * 100
+                         if len(s_1m) > 0 and float(s_1m.iloc[0]) != 0 else float("nan"))
+                s_ytd = series[series.index >= jan_1]
+                pytd  = ((nav_last / float(s_ytd.iloc[0]) - 1) * 100
+                         if len(s_ytd) > 0 and float(s_ytd.iloc[0]) != 0 else float("nan"))
+                pp    = ((nav_last / nav_first - 1) * 100 if nav_first != 0 else float("nan"))
+                b100s = base100[fonds].dropna()
+                nb100 = float(b100s.iloc[-1]) if not b100s.empty else float("nan")
+                perf_rows.append({
+                    "Fonds": fonds, "NAV Derniere": round(nav_last, 4),
+                    "Base 100 Actuel": round(nb100, 2) if not np.isnan(nb100) else None,
+                    "Perf 1M (%)":    round(p1m,  2) if not np.isnan(p1m)  else None,
+                    "Perf YTD (%)":   round(pytd, 2) if not np.isnan(pytd) else None,
+                    "Perf Periode (%)": round(pp, 2) if not np.isnan(pp)   else None})
+
+            if perf_rows:
+                df_pt = pd.DataFrame(perf_rows)
+                st.session_state["perf_data"] = df_pt
+                st.markdown("#### Tableau des Performances")
+
+                def _fp(val):
+                    if val is None or (isinstance(val, float) and np.isnan(val)):
+                        return '<span style="color:#999;">n.d.</span>'
+                    c = CIEL if val >= 0 else "#8b2020"
+                    s = "+" if val > 0 else ""
+                    return '<span style="color:{};font-weight:700;">{}{:.2f}%</span>'.format(c,s,val)
+
+                tbl_h = (
+                    '<table style="width:100%;border-collapse:collapse;font-size:0.82rem;">'
+                    '<thead><tr style="background:{marine};color:white;">'
+                    '<th style="padding:8px 12px;text-align:left;">Fonds</th>'
+                    '<th style="padding:8px 12px;text-align:right;">NAV</th>'
+                    '<th style="padding:8px 12px;text-align:right;">Base 100</th>'
+                    '<th style="padding:8px 12px;text-align:right;">Perf 1M</th>'
+                    '<th style="padding:8px 12px;text-align:right;">Perf YTD</th>'
+                    '<th style="padding:8px 12px;text-align:right;">Perf Periode</th>'
+                    '</tr></thead><tbody>').format(marine=MARINE)
+                for i, r in enumerate(perf_rows):
+                    bg = "#f0f5fa" if i % 2 == 0 else BLANC
+                    tbl_h += (
+                        '<tr style="background:{bg};border-bottom:1px solid {gris};">'
+                        '<td style="padding:7px 12px;font-weight:600;color:{marine};">{fonds}</td>'
+                        '<td style="padding:7px 12px;text-align:right;color:{marine};">{nav}</td>'
+                        '<td style="padding:7px 12px;text-align:right;color:{marine};">{b100}</td>'
+                        '<td style="padding:7px 12px;text-align:right;">{p1m}</td>'
+                        '<td style="padding:7px 12px;text-align:right;">{pytd}</td>'
+                        '<td style="padding:7px 12px;text-align:right;">{pp}</td>'
+                        '</tr>').format(
+                        bg=bg, gris=GRIS, marine=MARINE, fonds=r["Fonds"],
+                        nav="{:.4f}".format(r["NAV Derniere"]),
+                        b100="{:.2f}".format(r["Base 100 Actuel"]) if r["Base 100 Actuel"] else "n.d.",
+                        p1m=_fp(r["Perf 1M (%)"]), pytd=_fp(r["Perf YTD (%)"]),
+                        pp=_fp(r["Perf Periode (%)"]))
+                tbl_h += "</tbody></table>"
+                st.markdown(tbl_h, unsafe_allow_html=True)
+                st.markdown("<br>", unsafe_allow_html=True)
+                st.download_button("Exporter le tableau en CSV",
+                                   data=df_pt.to_csv(index=False).encode("utf-8"),
+                                   file_name="performances_{}.csv".format(date.today().isoformat()),
+                                   mime="text/csv")
+
+                ytd_data = [r for r in perf_rows if r["Perf YTD (%)"] is not None]
+                if ytd_data:
+                    ytd_data.sort(key=lambda r: r["Perf YTD (%)"], reverse=True)
+                    st.markdown("#### Comparaison Performances YTD")
+                    fig_ytd = go.Figure(go.Bar(
+                        x=[r["Fonds"] for r in ytd_data],
+                        y=[r["Perf YTD (%)"] for r in ytd_data],
+                        marker_color=[CIEL if v >= 0 else GRIS
+                                      for v in [r["Perf YTD (%)"] for r in ytd_data]],
+                        marker_line_color=BLANC, marker_line_width=0.4,
+                        text=["{:+.2f}%".format(r["Perf YTD (%)"]) for r in ytd_data],
+                        textposition="outside", textfont_size=9, textfont_color=MARINE))
+                    fig_ytd.add_hline(y=0, line_color=MARINE, line_width=0.8)
+                    fig_ytd.update_layout(height=300, paper_bgcolor=BLANC, plot_bgcolor=BLANC,
+                                          font_color=MARINE, xaxis_tickangle=-15,
+                                          xaxis_showgrid=False, yaxis_showgrid=True,
+                                          yaxis_gridcolor=GRIS, margin=dict(l=10,r=10,t=36,b=10))
+                    st.plotly_chart(fig_ytd, use_container_width=True,
+                                    config={"displayModeBar": False})
+
+        except Exception as e:
+            st.error("Erreur traitement NAV : {}".format(e))
+            import traceback
+            with st.expander("Details"):
+                st.code(traceback.format_exc())
+    else:
+        st.markdown(
+            '<div style="background:#001c4b04;border:2px dashed #001c4b1e;'
+            'padding:44px;text-align:center;margin-top:12px;">'
+            '<div style="font-size:0.96rem;font-weight:700;color:#001c4b;margin-bottom:5px;">'
+            'Module Performance et NAV</div>'
+            '<div style="color:#777;font-size:0.81rem;max-width:380px;margin:0 auto;line-height:1.65;">'
+            'Chargez un fichier Excel ou CSV avec les colonnes '
+            '<code>Date</code>, <code>Fonds</code>, <code>NAV</code>.<br><br>'
+            'Utilisez le bouton <b>Generer un fichier NAV de demonstration</b>.'
+            '</div></div>', unsafe_allow_html=True)
