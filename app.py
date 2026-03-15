@@ -636,12 +636,11 @@ with tab_ingest:
             if not st_team.empty:
                 st.dataframe(st_team[["nom","marche"]], hide_index=True, use_container_width=True)
             st.markdown("**Ajouter un commercial**")
-            nc1, nc2, nc3 = st.columns([2, 2, 1])
-            with nc1: new_sales_nom    = st.text_input("Nom", key="new_sales_nom")
-            with nc2: new_sales_marche = st.selectbox("Marché", ["GCC","EMEA","APAC","Americas","Nordics","Global"], key="new_sales_marche")
-            with nc3:
-                st.markdown("<br>", unsafe_allow_html=True)
-                if st.button("Ajouter", key="btn_add_sales"):
+            with st.form("form_add_sales", clear_on_submit=True):
+                nc1, nc2 = st.columns(2)
+                with nc1: new_sales_nom    = st.text_input("Nom", key="new_sales_nom")
+                with nc2: new_sales_marche = st.selectbox("Marché", ["GCC","EMEA","APAC","Americas","Nordics","Global"], key="new_sales_marche")
+                if st.form_submit_button("Ajouter le commercial", use_container_width=True):
                     if new_sales_nom.strip():
                         ok = db.add_sales_member(new_sales_nom.strip(), new_sales_marche)
                         st.success("Commercial ajouté." if ok else "Nom déjà existant.")
@@ -690,7 +689,7 @@ with tab_ingest:
                 st.error("Erreur : {}".format(e))
 
         st.divider()
-        st.info("📋 Les activités sont gérées dans l'onglet **Activités** dédié.")
+        st.info(" Les activités sont gérées dans l'onglet **Activités** dédié.")
 
 
 # ============================================================================
@@ -906,66 +905,56 @@ with tab_dash:
     kpis = db.get_kpis()
     nb_lost_paused = kpis["nb_lost"] + kpis.get("nb_paused", 0)
 
-    # ---- KPI Cards — grille CSS 5 colonnes ----
-    # Les 3 cards cliquables s'ouvrent via expanders juste en dessous
+    # ---- KPI Cards ----
+    card_lp = (
+        '<div class="kpi-card kpi-card-static">'
+        '<div class="kpi-label">Lost / Paused</div>'
+        '<div class="kpi-value">{n}</div>'
+        '<div class="kpi-sub">{n} deals</div>'
+        '</div>'
+    ).format(n=nb_lost_paused) if nb_lost_paused > 0 else (
+        '<div class="kpi-card kpi-card-static">'
+        '<div class="kpi-label">Lost / Paused</div>'
+        '<div class="kpi-value">0</div>'
+        '<div class="kpi-sub">&nbsp;</div>'
+        '</div>'
+    )
     st.markdown(
-        '<div style="display:grid;grid-template-columns:repeat(5,1fr);gap:8px;margin-bottom:4px;">'
-        '<div class="kpi-card kpi-card-clickable" style="cursor:default;">'
+        '<div class="kpi-grid">'
+        '<div class="kpi-card kpi-card-static">'
         '<div class="kpi-label">AUM Finance Total</div>'
         '<div class="kpi-value">{aum_f}</div>'
-        '<div class="kpi-sub" style="color:#019ee1;">{nb_f} deal(s) Funded ▾</div>'
+        '<div class="kpi-sub">{nb_f} deal(s) Funded</div>'
         '</div>'
-        '<div class="kpi-card kpi-card-clickable" style="cursor:default;">'
+        '<div class="kpi-card kpi-card-static">'
         '<div class="kpi-label">Pipeline Actif</div>'
         '<div class="kpi-value">{aum_p}</div>'
-        '<div class="kpi-sub" style="color:#019ee1;">{nb_p} deals en cours ▾</div>'
+        '<div class="kpi-sub">{nb_p} deals en cours</div>'
+        '</div>'
+        '<div class="kpi-card kpi-card-static">'
+        '<div class="kpi-label">Weighted Pipeline</div>'
+        '<div class="kpi-value">{wp}</div>'
+        '<div class="kpi-sub">proba ponderee</div>'
         '</div>'
         '<div class="kpi-card kpi-card-static">'
         '<div class="kpi-label">Taux Conversion</div>'
         '<div class="kpi-value">{taux:.1f}%</div>'
         '<div class="kpi-sub">{nb_f2} funded / {nb_l} lost</div>'
         '</div>'
-        '<div class="kpi-card kpi-card-static">'
-        '<div class="kpi-label">Weighted Pipeline</div>'
-        '<div class="kpi-value">{wp}</div>'
-        '<div class="kpi-sub">proba pondérée</div>'
-        '</div>'
         '{card_lp}'
         '</div>'.format(
             aum_f=fmt_m(kpis["total_funded"]), nb_f=kpis["nb_funded"],
             aum_p=fmt_m(kpis["pipeline_actif"]), nb_p=kpis["nb_deals_actifs"],
-            taux=kpis["taux_conversion"], nb_f2=kpis["nb_funded"], nb_l=kpis["nb_lost"],
             wp=fmt_m(kpis.get("weighted_pipeline", 0)),
-            card_lp=(
-                '<div class="kpi-card kpi-card-clickable" style="cursor:default;">'
-                '<div class="kpi-label">Lost / Paused</div>'
-                '<div class="kpi-value">{}</div>'
-                '<div class="kpi-sub" style="color:#019ee1;">{} deals ▾</div>'
-                '</div>'.format(nb_lost_paused, nb_lost_paused)
-                if nb_lost_paused > 0 else
-                '<div class="kpi-card kpi-card-static">'
-                '<div class="kpi-label">Lost / Paused</div>'
-                '<div class="kpi-value">0</div>'
-                '<div class="kpi-sub">Aucun deal perdu</div>'
-                '</div>'
-            )),
+            taux=kpis["taux_conversion"], nb_f2=kpis["nb_funded"], nb_l=kpis["nb_lost"],
+            card_lp=card_lp),
         unsafe_allow_html=True)
-
-    # Expanders sous les KPIs (identiques aux tiroirs Ajouter un Client etc.)
-    with st.expander("Deals Finances (Funded) — detail", expanded=False):
-        _content_funded(_filtre_effectif)
-    with st.expander("Pipeline Actif — detail", expanded=False):
-        _content_pipeline(_filtre_effectif)
-    if nb_lost_paused > 0:
-        with st.expander("Deals Perdus et En Pause — detail", expanded=False):
-            _content_lost(_filtre_effectif)
 
     st.markdown("<br>", unsafe_allow_html=True)
 
-    # ---- Pastilles statut — grille CSS + expanders ----
+    # ---- Pastilles statut — grille compacte, UN seul expander "Voir les deals" ----
     statut_order = [s for s in STATUTS if kpis["statut_repartition"].get(s, 0) > 0]
     if statut_order:
-        n_cols = len(statut_order)
         pills = ""
         for s in statut_order:
             c_hex = STATUT_COLORS.get(s, GRIS)
@@ -978,22 +967,21 @@ with tab_dash:
             ).format(s=s, c=c_hex, marine=MARINE, n=count)
         st.markdown(
             '<div class="statut-grid" style="grid-template-columns:repeat({n},1fr);">'
-            '{pills}</div>'.format(n=n_cols, pills=pills),
+            '{pills}</div>'.format(n=len(statut_order), pills=pills),
             unsafe_allow_html=True)
-        # Expanders par statut
-        for s in statut_order:
-            c_hex = STATUT_COLORS.get(s, GRIS)
-            count = kpis["statut_repartition"][s]
-            with st.expander("{} — {} deal(s)".format(s, count), expanded=False):
-                _content_statut(s, _filtre_effectif)
 
-    st.divider()
+        # Un seul expander avec onglets internes par statut
+        with st.expander("Detail par statut", expanded=False):
+            tabs_statut = st.tabs(["{} ({})".format(s, kpis["statut_repartition"][s])
+                                   for s in statut_order])
+            for tab_s, s in zip(tabs_statut, statut_order):
+                with tab_s:
+                    _content_statut(s, _filtre_effectif)
 
-    # ---- Alertes retard — expanders identiques aux tiroirs ----
+    # ---- Alertes retard ----
     df_overdue = db.get_overdue_actions()
     if not df_overdue.empty:
         today = date.today()
-        # Afficher les alertes comme résumé visuel
         alertes_html = ""
         for _, row in df_overdue.iterrows():
             nad = row.get("next_action_date")
@@ -1005,16 +993,18 @@ with tab_dash:
                 '<b>{client}</b> — {fonds}'
                 ' <span style="color:{ciel};font-weight:600;">({statut})</span>'
                 ' — Prevue le <b>{nad}</b>'
-                ' &nbsp;<span class="badge-retard">RETARD +{days}j</span>'
+                ' &nbsp;<span class="badge-retard">+{days}j</span>'
                 '{owner_part}'
                 '</div>'
             ).format(
                 client=row["nom_client"], fonds=row["fonds"], ciel=CIEL,
                 statut=row["statut"], nad=nad_str, days=days_late,
-                owner_part=" — <b>{}</b>".format(owner) if owner else "")
+                owner_part=" — {}".format(owner) if owner else "")
         st.markdown(alertes_html, unsafe_allow_html=True)
-        with st.expander("{} action(s) en retard — voir le detail complet".format(len(df_overdue)), expanded=False):
+        with st.expander("{} action(s) en retard — detail".format(len(df_overdue)), expanded=False):
             _content_overdue()
+
+    st.divider()
 
     # ---- Graphiques ----
     gcol1, gcol2, gcol3 = st.columns([1, 1, 1.2], gap="medium")
@@ -1094,12 +1084,18 @@ with tab_dash:
                 '<div style="background:{barc};width:{pct:.0f}%;height:100%;"></div></div></div>'
                 '<div style="text-align:right;min-width:72px;">'
                 '<div style="font-size:0.86rem;font-weight:800;color:{marine};">{aum}</div>'
-                '<div style="font-size:0.61rem;color:#999;">finance</div>'
                 '</div></div>'.format(
                     rank=i+1, ciel=CIEL, marine=MARINE, gris=GRIS,
                     client=row["nom_client"], fonds=row["fonds"],
                     type=row["type_client"], region=row["region"],
                     barc=bar_c, pct=pct, aum=fmt_m(val)), unsafe_allow_html=True)
+
+    # Expander unique pour le detail deals (funded / pipeline / lost)
+    with st.expander("Detail des deals — Funded / Actifs / Perdus", expanded=False):
+        dt1, dt2, dt3 = st.tabs(["Funded", "Pipeline Actif", "Lost & Paused"])
+        with dt1: _content_funded(_filtre_effectif)
+        with dt2: _content_pipeline(_filtre_effectif)
+        with dt3: _content_lost(_filtre_effectif)
 
 
 # ============================================================================
@@ -1275,7 +1271,7 @@ with tab_activites:
                 " sur {} au total".format(nb_total) if nb_filtre < nb_total else ""
             ) + "</div>", unsafe_allow_html=True)
 
-        TYPE_ICONS  = {"Call":"📞","Meeting":"🤝","Email":"📧","Roadshow":"🗺","Conference":"🎤","Autre":"📌"}
+        TYPE_ICONS  = {"Call":"Call","Meeting":"Meeting","Email":"Email","Roadshow":"Roadshow","Conference":"Conference","Autre":"Autre"}
         TYPE_COLORS = {"Call":CIEL,"Meeting":B_MID,"Email":B_PAL,"Roadshow":"#2c7fb8","Conference":"#004f8c","Autre":"#888"}
 
         df_sorted = df_act_filtered.copy()
@@ -1289,7 +1285,7 @@ with tab_activites:
             client   = str(row.get("nom_client",""))
             notes    = str(row.get("notes","")) or "—"
             color    = TYPE_COLORS.get(typ, "#888")
-            icon     = TYPE_ICONS.get(typ, "📌")
+            icon     = TYPE_ICONS.get(typ, "")
 
             # Séparateur de date
             if date_str != current_date_label:
@@ -1315,7 +1311,9 @@ with tab_activites:
                 "<div style='display:flex;gap:12px;align-items:flex-start;"
                 "padding:9px 14px;margin:3px 0;background:#f9fbfd;"
                 "border-left:3px solid {color};'>"
-                "<div style='font-size:1rem;padding-top:1px;'>{icon}</div>"
+                "<div style='font-size:0.63rem;font-weight:700;color:{color};"
+                "background:{color}15;padding:2px 5px;white-space:nowrap;"
+                "margin-top:2px;'>{icon}</div>"
                 "<div style='flex:1;'>"
                 "<div style='font-size:0.82rem;font-weight:700;color:#001c4b;'>"
                 "{client}&nbsp;"
