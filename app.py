@@ -11,7 +11,7 @@
 import streamlit as st
 import streamlit.components.v1 as stc
 import pandas as pd
-import numpy as np 
+import numpy as np
 import plotly.graph_objects as go
 from datetime import date, timedelta
 import io
@@ -86,6 +86,9 @@ st.markdown("""
 
 /* ============================================================
    LIENS CLIQUABLES — retirer toute décoration de lien native
+   Fix : Streamlit ajoute un margin-top sur le 1er élément d'un
+   container, ce qui crée un espace non-hoverable au-dessus.
+   On le neutralise sur tous les wrappers Streamlit directs.
    ============================================================ */
 a.clink {
     display: block;
@@ -93,8 +96,15 @@ a.clink {
     color: inherit;
     cursor: pointer;
     outline: none;
+    margin: 0 !important;
 }
 a.clink:hover, a.clink:focus, a.clink:visited { text-decoration: none !important; color: inherit; }
+/* Neutraliser les marges Streamlit qui cassent le hover sur le 1er élément */
+div[data-testid="stMarkdown"]:has(> a.clink),
+div[data-testid="element-container"]:has(> a.clink) {
+    margin: 0 !important;
+    padding: 0 !important;
+}
 
 /* ============================================================
    GRILLE KPI — CSS pur, sans div Streamlit entre les cartes
@@ -349,41 +359,54 @@ def modal_activities_tab(client_nom=None):
             ), unsafe_allow_html=True)
 
 
-@st.dialog("Actions en Retard — Detail complet")
-def modal_overdue_detail():
-    df = db.get_overdue_actions()
-    if df.empty:
-        st.info("Aucune action en retard."); return
+@st.dialog("Action en Retard — Detail")
+def modal_overdue_deal(pipeline_id):
+    """Affiche le detail complet d'UN SEUL deal en retard."""
+    deal = db.get_overdue_deal_full(pipeline_id)
+    if not deal:
+        st.warning("Deal introuvable."); return
     today = date.today()
-    for _, row in df.iterrows():
-        pid  = int(row.get("id", 0)) if "id" in df.columns else None
-        deal = db.get_overdue_deal_full(pid) if pid else None
-        nad  = row.get("next_action_date")
-        days = (today - nad).days if isinstance(nad, date) else 0
-        nad_str = nad.isoformat() if isinstance(nad, date) else "—"
-        st.markdown(
-            "<div style='border-left:3px solid #f07d00;padding:8px 14px;"
-            "margin:8px 0;background:#fef6f0;'>"
-            "<div style='font-size:0.84rem;font-weight:700;color:#001c4b;'>"
-            "{} &nbsp;<span style='background:#f07d00;color:#fff;padding:1px 7px;"
-            "font-size:0.66rem;font-weight:700;'>RETARD +{}j</span></div>".format(
-                row.get("nom_client",""), days), unsafe_allow_html=True)
-        if deal:
-            c1, c2, c3 = st.columns(3)
-            with c1:
-                st.markdown("**Fonds**"); st.write(deal.get("fonds","—"))
-                st.markdown("**Statut**"); st.write(deal.get("statut","—"))
-                st.markdown("**Commercial**"); st.write(deal.get("sales_owner","—"))
-            with c2:
-                st.markdown("**AUM Cible**"); st.write(fmt_m(deal.get("target_aum_initial",0)))
-                st.markdown("**AUM Revise**"); st.write(fmt_m(deal.get("revised_aum",0)))
-                st.markdown("**AUM Finance**"); st.write(fmt_m(deal.get("funded_aum",0)))
-            with c3:
-                st.markdown("**Region**"); st.write(deal.get("region","—"))
-                st.markdown("**Prochaine Action**"); st.write(nad_str)
-                st.markdown("**Derniere Activite**")
-                st.write(deal.get("derniere_activite","") or "—")
-        st.markdown("</div>", unsafe_allow_html=True)
+    nad   = deal.get("next_action_date")
+    days  = (today - nad).days if isinstance(nad, date) else 0
+    nad_str = nad.isoformat() if isinstance(nad, date) else "—"
+
+    # En-tête client + badge retard
+    st.markdown(
+        "<div style='border-left:3px solid #f07d00;padding:10px 16px;"
+        "background:#fef6f0;margin-bottom:12px;'>"
+        "<div style='font-size:1rem;font-weight:700;color:#001c4b;'>"
+        "{client}</div>"
+        "<div style='font-size:0.80rem;color:#555;margin-top:3px;'>"
+        "{fonds} &middot; {type} &middot; {region}</div>"
+        "<div style='margin-top:6px;'>"
+        "<span style='background:#f07d00;color:#fff;padding:2px 10px;"
+        "font-size:0.72rem;font-weight:700;'>RETARD +{days}j</span>"
+        "&nbsp;<span style='color:#888;font-size:0.72rem;'>Prevue le {nad}</span>"
+        "</div></div>".format(
+            client=deal.get("nom_client","—"),
+            fonds=deal.get("fonds","—"),
+            type=deal.get("type_client","—"),
+            region=deal.get("region","—"),
+            days=days, nad=nad_str),
+        unsafe_allow_html=True)
+
+    # Données financières
+    c1, c2, c3 = st.columns(3)
+    with c1:
+        st.metric("AUM Cible",   fmt_m(deal.get("target_aum_initial", 0)))
+        st.metric("Statut",      deal.get("statut","—"))
+    with c2:
+        st.metric("AUM Revise",  fmt_m(deal.get("revised_aum", 0)))
+        st.metric("Commercial",  deal.get("sales_owner","—"))
+    with c3:
+        st.metric("AUM Finance", fmt_m(deal.get("funded_aum", 0)))
+        act = deal.get("derniere_activite","")
+        if act:
+            st.markdown("**Derniere activite**")
+            st.markdown(
+                "<div style='font-size:0.78rem;color:#444;background:#f4f8fc;"
+                "padding:5px 8px;border-left:2px solid #019ee1;'>{}</div>".format(act),
+                unsafe_allow_html=True)
 
 
 @st.dialog("Deals — Statut selectionne")
@@ -443,8 +466,13 @@ elif _open == "pipeline":
     modal_pipeline_actif(None); st.query_params.clear()
 elif _open == "lost":
     modal_lost(None); st.query_params.clear()
-elif _open == "overdue":
-    modal_overdue_detail(); st.query_params.clear()
+elif _open.startswith("overdue_"):
+    try:
+        pid = int(_open[len("overdue_"):])
+        modal_overdue_deal(pid)
+    except (ValueError, TypeError):
+        pass
+    st.query_params.clear()
 elif _open.startswith("statut_"):
     modal_statut_detail(_open[len("statut_"):], None); st.query_params.clear()
 elif _open.startswith("act_"):
@@ -972,8 +1000,9 @@ with tab_dash:
             days_late = (today - nad).days if isinstance(nad, date) else 0
             nad_str   = nad.isoformat() if isinstance(nad, date) else "—"
             owner     = str(row.get("sales_owner","")) or ""
+            pid       = int(row.get("id", 0))
             alertes += (
-                '<a href="?open=overdue" target="_self" class="clink">'
+                '<a href="?open=overdue_{pid}" target="_self" class="clink">'
                 '<div class="alert-overdue">'
                 '<b>{client}</b> — {fonds}'
                 ' <span style="color:{ciel};font-weight:600;">({statut})</span>'
@@ -982,6 +1011,7 @@ with tab_dash:
                 '{owner_part}'
                 '</div></a>'
             ).format(
+                pid=pid,
                 client=row["nom_client"], fonds=row["fonds"], ciel=CIEL,
                 statut=row["statut"], nad=nad_str, days=days_late,
                 owner_part=" — <b>{}</b>".format(owner) if owner else "")
