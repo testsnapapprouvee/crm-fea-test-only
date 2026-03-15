@@ -550,9 +550,9 @@ st.markdown(
     'Reporting executif &middot; Performance NAV</p></div>',
     unsafe_allow_html=True)
 
-tab_ingest, tab_pipeline, tab_dash, tab_sales, tab_perf = st.tabs([
+tab_ingest, tab_pipeline, tab_dash, tab_sales, tab_activites, tab_perf = st.tabs([
     "Data Ingestion", "Pipeline Management", "Executive Dashboard",
-    "Sales Tracking", "Performance & NAV"])
+    "Sales Tracking", "Activités", "Performance & NAV"])
 
 
 # ============================================================================
@@ -690,20 +690,7 @@ with tab_ingest:
                 st.error("Erreur : {}".format(e))
 
         st.divider()
-        st.markdown("#### Dernieres Activites")
-        df_act = db.get_activities()
-        if not df_act.empty:
-            for _, arow in df_act.head(8).iterrows():
-                notes_full    = str(arow.get("notes",""))
-                notes_preview = notes_full[:90] + ("…" if len(notes_full) > 90 else "")
-                client_nom    = str(arow.get("nom_client",""))
-                label = "{} — {} — {}".format(
-                    client_nom,
-                    arow.get("type_interaction",""),
-                    str(arow.get("date","")))
-                # Ligne de résumé cliquable identique aux autres expanders
-                with st.expander(label, expanded=False):
-                    _content_activities(client_nom)
+        st.info("📋 Les activités sont gérées dans l'onglet **Activités** dédié.")
 
 
 # ============================================================================
@@ -1205,7 +1192,143 @@ with tab_sales:
 
 
 # ============================================================================
-# ONGLET 5 — PERFORMANCE & NAV
+# ONGLET 5 — ACTIVITÉS
+# ============================================================================
+with tab_activites:
+    st.markdown('<div class="section-title">Journal des Activites</div>',
+                unsafe_allow_html=True)
+
+    df_all_act = db.get_activities()
+
+    # ---- Filtres ----
+    fa1, fa2, fa3 = st.columns([2, 2, 3])
+    with fa1:
+        clients_for_filter = ["Tous"] + (sorted(df_all_act["nom_client"].unique().tolist()) if not df_all_act.empty else [])
+        filt_client = st.selectbox("Client", clients_for_filter, key="filt_act_client")
+    with fa2:
+        filt_type = st.multiselect("Type d'interaction", TYPES_INTERACTION, key="filt_act_type")
+    with fa3:
+        filt_search = st.text_input("Recherche dans les notes", placeholder="mot-clé…", key="filt_act_search")
+
+    # Appliquer filtres
+    df_act_filtered = df_all_act.copy() if not df_all_act.empty else df_all_act
+    if not df_act_filtered.empty:
+        if filt_client != "Tous":
+            df_act_filtered = df_act_filtered[df_act_filtered["nom_client"] == filt_client]
+        if filt_type:
+            df_act_filtered = df_act_filtered[df_act_filtered["type_interaction"].isin(filt_type)]
+        if filt_search.strip():
+            df_act_filtered = df_act_filtered[
+                df_act_filtered["notes"].str.contains(filt_search.strip(), case=False, na=False)]
+
+    # ---- KPIs activités ----
+    if not df_all_act.empty:
+        sc1, sc2, sc3, sc4 = st.columns(4)
+        nb_mois = len(df_all_act[df_all_act["date"].apply(
+            lambda d: str(d)[:7] == date.today().strftime("%Y-%m") if d else False)])
+        top_type = df_all_act["type_interaction"].value_counts()
+        top_type_str = top_type.index[0] if not top_type.empty else "—"
+        for col, label, val in [
+            (sc1, "Total activités",    str(len(df_all_act))),
+            (sc2, "Ce mois",            str(nb_mois)),
+            (sc3, "Type le + fréquent", top_type_str),
+            (sc4, "Clients touchés",    str(df_all_act["nom_client"].nunique())),
+        ]:
+            with col:
+                st.markdown(
+                    '<div class="kpi-card kpi-card-static" style="padding:10px;">'
+                    '<div class="kpi-label">{}</div>'
+                    '<div class="kpi-value" style="font-size:1.15rem;">{}</div>'
+                    '</div>'.format(label, val), unsafe_allow_html=True)
+
+    st.markdown("<br>", unsafe_allow_html=True)
+
+    # ---- Ajout rapide ----
+    with st.expander("Enregistrer une Activite", expanded=False):
+        clients_dict_act = db.get_client_options()
+        if clients_dict_act:
+            with st.form("form_act_tab", clear_on_submit=True):
+                qa1, qa2 = st.columns(2)
+                with qa1:
+                    qa_client = st.selectbox("Client", list(clients_dict_act.keys()), key="qa_client")
+                    qa_type   = st.selectbox("Type", TYPES_INTERACTION, key="qa_type")
+                with qa2:
+                    qa_date  = st.date_input("Date", value=date.today(), key="qa_date")
+                    qa_notes = st.text_area("Notes", height=80, key="qa_notes")
+                if st.form_submit_button("Enregistrer", use_container_width=True):
+                    db.add_activity(clients_dict_act[qa_client], qa_date.isoformat(), qa_notes, qa_type)
+                    st.success("Activite enregistree pour {}.".format(qa_client))
+                    st.rerun()
+
+    st.divider()
+
+    # ---- Timeline ----
+    if df_act_filtered.empty:
+        st.info("Aucune activite trouvee.")
+    else:
+        nb_total = len(df_all_act)
+        nb_filtre = len(df_act_filtered)
+        st.markdown(
+            "<div style='font-size:0.78rem;color:#888;margin-bottom:8px;'>"
+            "<b>{}</b> activite(s){}".format(
+                nb_filtre,
+                " sur {} au total".format(nb_total) if nb_filtre < nb_total else ""
+            ) + "</div>", unsafe_allow_html=True)
+
+        TYPE_ICONS  = {"Call":"📞","Meeting":"🤝","Email":"📧","Roadshow":"🗺","Conference":"🎤","Autre":"📌"}
+        TYPE_COLORS = {"Call":CIEL,"Meeting":B_MID,"Email":B_PAL,"Roadshow":"#2c7fb8","Conference":"#004f8c","Autre":"#888"}
+
+        df_sorted = df_act_filtered.copy()
+        df_sorted["_date_str"] = df_sorted["date"].apply(lambda d: str(d) if d else "")
+        df_sorted = df_sorted.sort_values("_date_str", ascending=False)
+
+        current_date_label = None
+        for _, row in df_sorted.iterrows():
+            date_str = str(row.get("date",""))
+            typ      = str(row.get("type_interaction","Autre"))
+            client   = str(row.get("nom_client",""))
+            notes    = str(row.get("notes","")) or "—"
+            color    = TYPE_COLORS.get(typ, "#888")
+            icon     = TYPE_ICONS.get(typ, "📌")
+
+            # Séparateur de date
+            if date_str != current_date_label:
+                current_date_label = date_str
+                try:
+                    d_obj = date.fromisoformat(date_str)
+                    delta = (date.today() - d_obj).days
+                    label_d = d_obj.strftime("%A %d %B %Y").capitalize()
+                    if   delta == 0: suffix = " — <b style='color:#019ee1;'>Aujourd'hui</b>"
+                    elif delta == 1: suffix = " — <span style='color:#888;'>Hier</span>"
+                    elif delta <= 7: suffix = " — <span style='color:#888;'>Il y a {} jours</span>".format(delta)
+                    else:            suffix = ""
+                except Exception:
+                    label_d = date_str; suffix = ""
+                st.markdown(
+                    "<div style='font-size:0.72rem;font-weight:700;color:#7ab8d8;"
+                    "text-transform:uppercase;letter-spacing:0.8px;"
+                    "padding:10px 0 4px 0;border-bottom:1px solid #e8e8e8;margin-bottom:4px;'>"
+                    "{}{}</div>".format(label_d, suffix), unsafe_allow_html=True)
+
+            # Carte activité
+            st.markdown(
+                "<div style='display:flex;gap:12px;align-items:flex-start;"
+                "padding:9px 14px;margin:3px 0;background:#f9fbfd;"
+                "border-left:3px solid {color};'>"
+                "<div style='font-size:1rem;padding-top:1px;'>{icon}</div>"
+                "<div style='flex:1;'>"
+                "<div style='font-size:0.82rem;font-weight:700;color:#001c4b;'>"
+                "{client}&nbsp;"
+                "<span style='font-size:0.69rem;font-weight:600;color:{color};"
+                "background:{color}18;padding:1px 8px;'>{typ}</span></div>"
+                "<div style='font-size:0.78rem;color:#444;margin-top:4px;line-height:1.55;'>{notes}</div>"
+                "</div></div>".format(
+                    color=color, icon=icon, client=client, typ=typ, notes=notes),
+                unsafe_allow_html=True)
+
+
+# ============================================================================
+# ONGLET 6 — PERFORMANCE & NAV
 # ============================================================================
 with tab_perf:
     st.markdown('<div class="section-title">Performance et NAV</div>', unsafe_allow_html=True)
