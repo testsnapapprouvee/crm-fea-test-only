@@ -934,6 +934,78 @@ with tab_crm:
                         hier_html=hier_html, prods_html=prods_html),
                     unsafe_allow_html=True)
 
+                # ── Edit Company ────────────────────────────────────────────
+                if st.button("Modifier les informations du compte",
+                             key="edit_company_{}".format(sel_id),
+                             type="tertiary"):
+                    st.session_state["edit_company_id"] = sel_id
+
+                if st.session_state.get("edit_company_id") == sel_id:
+                    all_clients_edit = db.get_all_clients()
+                    parent_opts_edit = ["(Aucune — client autonome)"] + [
+                        n for n in all_clients_edit["nom_client"].tolist()
+                        if n != sel_nom
+                    ]
+                    cur_parent_nom = str(sel.get("parent_nom", "")) or "(Aucune — client autonome)"
+                    cur_country    = str(sel.get("country", ""))
+                    cur_prod       = [p.strip() for p in str(sel.get("product_interests","")).split(",") if p.strip()]
+
+                    with st.expander("Modifier le compte — {}".format(sel_nom), expanded=True):
+                        with st.form("form_edit_company_{}".format(sel_id), clear_on_submit=False):
+                            ecp1, ecp2 = st.columns(2)
+                            with ecp1:
+                                ec_nom_client  = st.text_input("Nom du compte", value=sel_nom)
+                                ec_type        = st.selectbox("Type Client", TYPES_CLIENT,
+                                    index=TYPES_CLIENT.index(sel_type) if sel_type in TYPES_CLIENT else 0)
+                                ec_region      = st.selectbox("Région", REGIONS,
+                                    index=REGIONS.index(sel_reg) if sel_reg in REGIONS else 0)
+                                ec_country     = st.selectbox("Country", COUNTRIES_LIST,
+                                    index=COUNTRIES_LIST.index(cur_country) if cur_country in COUNTRIES_LIST else 0)
+                            with ecp2:
+                                ec_tier        = st.selectbox("Tier", db.TIERS_REFERENTIEL,
+                                    index=db.TIERS_REFERENTIEL.index(sel_tier) if sel_tier in db.TIERS_REFERENTIEL else 1)
+                                ec_kyc         = st.selectbox("Statut KYC", db.KYC_STATUTS,
+                                    index=db.KYC_STATUTS.index(sel_kyc) if sel_kyc in db.KYC_STATUTS else 1)
+                                ec_parent      = st.selectbox("Maison Mère",
+                                    parent_opts_edit,
+                                    index=parent_opts_edit.index(cur_parent_nom)
+                                          if cur_parent_nom in parent_opts_edit else 0)
+                                ec_is_parent   = st.checkbox("Ce compte est une Maison Mère",
+                                    value=(sel_par == ""))
+                            ec_interests = st.multiselect("Product Interests",
+                                db.PRODUCT_INTERESTS, default=cur_prod)
+
+                            esave, ecancel = st.columns(2)
+                            with esave:
+                                if st.form_submit_button("Enregistrer les modifications",
+                                                         use_container_width=True):
+                                    _new_parent_id = None
+                                    if not ec_is_parent and ec_parent != "(Aucune — client autonome)":
+                                        _pr = all_clients_edit[all_clients_edit["nom_client"] == ec_parent]
+                                        if not _pr.empty:
+                                            _new_parent_id = int(_pr.iloc[0]["id"])
+                                    ok, err = db.update_client(
+                                        sel_id,
+                                        ec_nom_client.strip(),
+                                        ec_type,
+                                        ec_region,
+                                        country=ec_country,
+                                        parent_id=_new_parent_id,
+                                        tier=ec_tier,
+                                        kyc_status=ec_kyc,
+                                        product_interests=",".join(ec_interests))
+                                    if ok:
+                                        st.session_state.pop("edit_company_id", None)
+                                        st.success("Compte mis à jour.")
+                                        st.rerun()
+                                    else:
+                                        st.error("Erreur : {}".format(err))
+                            with ecancel:
+                                if st.form_submit_button("Annuler",
+                                                         use_container_width=True):
+                                    st.session_state.pop("edit_company_id", None)
+                                    st.rerun()
+
                 # ── Contacts ─────────────────────────────────────────────────
                 df_contacts = db.get_contacts(sel_id)
                 st.markdown(
@@ -966,7 +1038,7 @@ with tab_crm:
                             li_url = "https://" + li_url
                         li_html = (
                             '<a href="{url}" target="_blank" '
-                            'style="color:{ciel};text-decoration:none;">↗ LinkedIn</a>'
+                            'style="color:{ciel};text-decoration:none;">LinkedIn</a>'
                             .format(url=li_url, ciel=CIEL)
                         ) if linkedin else ""
 
@@ -987,7 +1059,7 @@ with tab_crm:
                             '{role}</span>'
                             '</div>'
                             '<div style="font-size:0.76rem;line-height:1.8;">'
-                            '<span style="color:#666;margin-right:16px;">📞 {tel}</span>'
+                            '<span style="color:#666;margin-right:16px;">Tél : {tel}</span>'
                             '{email}&nbsp;&nbsp;{li}'
                             '</div></div>'.format(
                                 ciel=CIEL, m=MARINE,
@@ -1000,13 +1072,13 @@ with tab_crm:
                         ct_id = int(ct.get("id", 0))
                         cb1, cb2, cb_sp = st.columns([1, 1, 10])
                         with cb1:
-                            if st.button("✏️", key="edit_ct_{}".format(ct_id),
-                                         help="Edit contact"):
+                            if st.button("Modifier", key="edit_ct_{}".format(ct_id),
+                                         type="tertiary", help="Modifier ce contact"):
                                 st.session_state["edit_ct_id"] = ct_id
                                 st.session_state["edit_ct_data"] = ct.to_dict()
                         with cb2:
-                            if st.button("🗑️", key="del_ct_{}".format(ct_id),
-                                         help="Delete contact"):
+                            if st.button("Supprimer", key="del_ct_{}".format(ct_id),
+                                         type="tertiary", help="Supprimer ce contact"):
                                 st.session_state["confirm_del_ct"] = ct_id
 
                         if st.session_state.get("confirm_del_ct") == ct_id:
@@ -1014,7 +1086,7 @@ with tab_crm:
                                 ct.get("prenom",""), ct.get("nom","")))
                             cdc1, cdc2, _ = st.columns([1, 1, 6])
                             with cdc1:
-                                if st.button("✅ Confirm",
+                                if st.button("Confirmer",
                                              key="cdc_yes_{}".format(ct_id)):
                                     ok, err = db.delete_contact(ct_id)
                                     if ok:
@@ -1023,7 +1095,7 @@ with tab_crm:
                                     else:
                                         st.error(err)
                             with cdc2:
-                                if st.button("❌ Cancel",
+                                if st.button("Annuler",
                                              key="cdc_no_{}".format(ct_id)):
                                     st.session_state.pop("confirm_del_ct", None)
                                     st.rerun()
@@ -1031,7 +1103,7 @@ with tab_crm:
                 edit_ct_id = st.session_state.get("edit_ct_id")
                 if edit_ct_id:
                     ect = st.session_state.get("edit_ct_data", {})
-                    with st.expander("✏️ Editing Contact #{}".format(edit_ct_id), expanded=True):
+                    with st.expander("Modifier le contact #{}".format(edit_ct_id), expanded=True):
                         with st.form("form_edit_ct_{}".format(edit_ct_id), clear_on_submit=True):
                             ec1, ec2 = st.columns(2)
                             with ec1:
@@ -1065,7 +1137,7 @@ with tab_crm:
                                     st.rerun()
 
                 # ── Ajouter un contact (expander discret) ────────────────────
-                with st.expander("＋ Ajouter un contact pour {}".format(sel_nom),
+                with st.expander("Ajouter un contact — {}".format(sel_nom),
                                  expanded=False):
                     with st.form("form_ct_crm_{}".format(sel_id), clear_on_submit=True):
                         fa1, fa2 = st.columns(2)
@@ -1090,7 +1162,7 @@ with tab_crm:
 
         # ── MAILING LIST GENERATOR ────────────────────────────────────────────
         st.markdown("---")
-        with st.expander("📧 Mailing List Generator", expanded=False):
+        with st.expander("Mailing List Generator", expanded=False):
             st.markdown(
                 '<div class="pipeline-hint">Filter contacts by account attributes '
                 'to build a targeted mailing list. Only contacts with an email '
@@ -1155,7 +1227,7 @@ with tab_crm:
                     "email":      "Email",
                 }).to_csv(index=False).encode("utf-8")
                 st.download_button(
-                    "⬇️ Export CSV",
+                    "Exporter CSV",
                     data=csv_bytes,
                     file_name="mailing_list_{}.csv".format(date.today().isoformat()),
                     mime="text/csv",
@@ -1342,8 +1414,9 @@ with tab_pipeline:
 
             # ── Delete deal ──────────────────────────────────────────────────
             st.markdown("---")
-            if st.button("🗑️ Delete this deal (irreversible)",
-                         key="del_deal_{}".format(pipeline_id)):
+            if st.button("Supprimer ce deal (irréversible)",
+                         key="del_deal_{}".format(pipeline_id),
+                         type="tertiary"):
                 st.session_state["confirm_del_deal"] = pipeline_id
 
             if st.session_state.get("confirm_del_deal") == pipeline_id:
@@ -1351,7 +1424,7 @@ with tab_pipeline:
                          "and its full audit trail.".format(pipeline_id))
                 dd1, dd2, _ = st.columns([1, 1, 6])
                 with dd1:
-                    if st.button("✅ Confirm Delete",
+                    if st.button("Confirmer la suppression",
                                  key="del_deal_confirm_{}".format(pipeline_id)):
                         ok, err = db.delete_pipeline_row(pipeline_id)
                         if ok:
@@ -1361,7 +1434,7 @@ with tab_pipeline:
                         else:
                             st.error(err)
                 with dd2:
-                    if st.button("❌ Cancel",
+                    if st.button("Annuler",
                                  key="del_deal_cancel_{}".format(pipeline_id)):
                         st.session_state.pop("confirm_del_deal", None)
                         st.rerun()
@@ -1956,8 +2029,8 @@ with tab_activites:
             # ── CRUD action buttons ──────────────────────────────────────────
             btn_col1, btn_col2, btn_spacer = st.columns([1, 1, 8])
             with btn_col1:
-                if st.button("✏️", key="edit_act_{}".format(act_id),
-                             help="Edit this activity"):
+                if st.button("Modifier", key="edit_act_{}".format(act_id),
+                             type="tertiary", help="Modifier cette activité"):
                     st.session_state["edit_act_id"] = act_id
                     st.session_state["edit_act_data"] = {
                         "date": str(row.get("date", "")),
@@ -1965,8 +2038,8 @@ with tab_activites:
                         "type": typ,
                     }
             with btn_col2:
-                if st.button("🗑️", key="del_act_{}".format(act_id),
-                             help="Delete this activity"):
+                if st.button("Supprimer", key="del_act_{}".format(act_id),
+                             type="tertiary", help="Supprimer cette activité"):
                     st.session_state["confirm_del_act"] = act_id
 
             # Delete confirmation
@@ -1974,7 +2047,7 @@ with tab_activites:
                 st.warning("Delete this activity? This cannot be undone.")
                 dc1, dc2, _ = st.columns([1, 1, 6])
                 with dc1:
-                    if st.button("✅ Confirm", key="confirm_yes_act_{}".format(act_id)):
+                    if st.button("Confirmer", key="confirm_yes_act_{}".format(act_id)):
                         ok, err = db.delete_activity(act_id)
                         if ok:
                             st.session_state.pop("confirm_del_act", None)
@@ -1982,14 +2055,14 @@ with tab_activites:
                         else:
                             st.error(err)
                 with dc2:
-                    if st.button("❌ Cancel", key="confirm_no_act_{}".format(act_id)):
+                    if st.button("Annuler", key="confirm_no_act_{}".format(act_id)):
                         st.session_state.pop("confirm_del_act", None)
                         st.rerun()
 
     edit_act_id = st.session_state.get("edit_act_id")
     if edit_act_id:
         edit_data = st.session_state.get("edit_act_data", {})
-        with st.expander("✏️ Editing Activity #{}".format(edit_act_id), expanded=True):
+        with st.expander("Modifier l'activité #{}".format(edit_act_id), expanded=True):
             with st.form("form_edit_act_{}".format(edit_act_id), clear_on_submit=True):
                 ea1, ea2 = st.columns(2)
                 with ea1:
