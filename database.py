@@ -1,10 +1,11 @@
 # =============================================================================
-# database.py  —  CRM Asset Management  —  Amundi Edition
+# database.py  —  CRM Asset Management  —  Amundi Edition  v9.2 CRM+
 # Priorite : STABILITE ABSOLUE — zero helper complexe, SQL plat
 # Charte : #001c4b Marine | #019ee1 Ciel | #f07d00 Orange
-# Nouveau : get_pipeline_with_last_activity() — colonne derniere_activite
-#           get_pipeline_by_statut()          — drill-down statut cliquable
-#           get_overdue_actions_full()        — ligne complete pour modal retard
+# Nouveau v9.2 :
+#   - Table clients étendue : parent_id, tier, kyc_status, product_interests
+#   - Nouvelle table contacts : annuaire CRM
+#   - add_client() enrichi, add_contact(), get_contacts(), get_client_hierarchy()
 # =============================================================================
 
 import sqlite3
@@ -30,6 +31,17 @@ FONDS_REFERENTIEL = [
 REGIONS_REFERENTIEL = [
     "GCC", "EMEA", "APAC", "Nordics",
     "Asia ex-Japan", "North America", "LatAm",
+]
+
+TIERS_REFERENTIEL   = ["Tier 1", "Tier 2", "Tier 3"]
+KYC_STATUTS         = ["Validé", "En cours", "Bloqué"]
+PRODUCT_INTERESTS   = [
+    "Global Value", "International Fund", "Income Builder",
+    "Resilient Equity", "Private Debt", "Active ETFs",
+]
+ROLES_CONTACT = [
+    "CIO", "CFO", "Gérant de portefeuille", "Analyste",
+    "Responsable investissements", "Directeur général", "Autre",
 ]
 
 # ---------------------------------------------------------------------------
@@ -107,6 +119,7 @@ def init_db():
     conn = get_connection()
     c = conn.cursor()
 
+    # --- TABLE CLIENTS (base) ---
     c.execute("""
         CREATE TABLE IF NOT EXISTS clients (
             id          INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -116,6 +129,31 @@ def init_db():
             created_at  DATETIME DEFAULT CURRENT_TIMESTAMP
         )
     """)
+
+    # --- MIGRATIONS CLIENTS — colonnes CRM avancé ---
+    _safe_alter(c, "ALTER TABLE clients ADD COLUMN parent_id INTEGER REFERENCES clients(id) ON DELETE SET NULL")
+    _safe_alter(c, "ALTER TABLE clients ADD COLUMN tier TEXT DEFAULT 'Tier 2' CHECK(tier IN ('Tier 1','Tier 2','Tier 3'))")
+    _safe_alter(c, "ALTER TABLE clients ADD COLUMN kyc_status TEXT DEFAULT 'En cours' CHECK(kyc_status IN ('Validé','En cours','Bloqué'))")
+    _safe_alter(c, "ALTER TABLE clients ADD COLUMN product_interests TEXT DEFAULT ''")
+
+    # --- TABLE CONTACTS (annuaire CRM) ---
+    c.execute("""
+        CREATE TABLE IF NOT EXISTS contacts (
+            id         INTEGER PRIMARY KEY AUTOINCREMENT,
+            client_id  INTEGER NOT NULL,
+            prenom     TEXT NOT NULL DEFAULT '',
+            nom        TEXT NOT NULL DEFAULT '',
+            role       TEXT DEFAULT '',
+            email      TEXT DEFAULT '',
+            telephone  TEXT DEFAULT '',
+            linkedin   TEXT DEFAULT '',
+            is_primary INTEGER DEFAULT 0,
+            created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+            FOREIGN KEY (client_id) REFERENCES clients(id) ON DELETE CASCADE
+        )
+    """)
+
+    # --- TABLE PIPELINE ---
     c.execute("""
         CREATE TABLE IF NOT EXISTS pipeline (
             id                   INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -135,7 +173,8 @@ def init_db():
             FOREIGN KEY (client_id) REFERENCES clients(id) ON DELETE CASCADE
         )
     """)
-    # Table des commerciaux avec région
+
+    # --- TABLE SALES TEAM ---
     c.execute("""
         CREATE TABLE IF NOT EXISTS sales_team (
             id         INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -143,22 +182,15 @@ def init_db():
             marche     TEXT NOT NULL DEFAULT 'Global'
         )
     """)
-    try:
-        c.execute("ALTER TABLE pipeline ADD COLUMN sales_owner TEXT NOT NULL DEFAULT 'Non assigne'")
-        conn.commit()
-    except sqlite3.OperationalError:
-        pass
-    try:
-        c.execute("ALTER TABLE pipeline ADD COLUMN closing_probability REAL DEFAULT 50")
-        conn.commit()
-    except sqlite3.OperationalError:
-        pass
+
+    _safe_alter(c, "ALTER TABLE pipeline ADD COLUMN sales_owner TEXT NOT NULL DEFAULT 'Non assigne'")
+    _safe_alter(c, "ALTER TABLE pipeline ADD COLUMN closing_probability REAL DEFAULT 50")
+
     # Peupler sales_team depuis les sales_owner existants
     c.execute("SELECT DISTINCT sales_owner FROM pipeline WHERE sales_owner != 'Non assigne'")
     existing_owners = [r[0] for r in c.fetchall()]
     for owner in existing_owners:
         try:
-            # Déduire le marché depuis la région des clients associés
             c.execute("""
                 SELECT c.region FROM pipeline p
                 JOIN clients c ON p.client_id = c.id
@@ -177,6 +209,7 @@ def init_db():
             pass
     conn.commit()
 
+    # --- TABLE ACTIVITES ---
     c.execute("""
         CREATE TABLE IF NOT EXISTS activites (
             id               INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -188,6 +221,8 @@ def init_db():
             FOREIGN KEY (client_id) REFERENCES clients(id) ON DELETE CASCADE
         )
     """)
+
+    # --- TABLE AUDIT LOG ---
     c.execute("""
         CREATE TABLE IF NOT EXISTS audit_log (
             id                INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -208,9 +243,18 @@ def init_db():
     conn.close()
 
 
+def _safe_alter(c, sql):
+    """Exécute un ALTER TABLE silencieusement si la colonne existe déjà."""
+    try:
+        c.execute(sql)
+    except sqlite3.OperationalError:
+        pass
+
+
 def _insert_demo_data(conn):
     c = conn.cursor()
     today = date.today()
+    # parent_id, tier, kyc_status, product_interests seront mis à jour après insertion
     clients = [
         ("Al Rajhi Capital",              "IFA",           "GCC"),
         ("Emirates NBD AM",               "Wholesale",     "GCC"),
@@ -224,6 +268,32 @@ def _insert_demo_data(conn):
         ("BTG Pactual Wealth",            "Wholesale",     "LatAm"),
     ]
     c.executemany("INSERT INTO clients (nom_client, type_client, region) VALUES (?,?,?)", clients)
+
+    # Enrichir avec données CRM avancées (tier, kyc, product_interests)
+    demo_crm = [
+        ("Al Rajhi Capital",              "Tier 1", "Validé",   "Global Value,Private Debt"),
+        ("Emirates NBD AM",               "Tier 1", "Validé",   "Income Builder,Active ETFs"),
+        ("Norges Bank Investment Mgmt",   "Tier 1", "Validé",   "Private Debt,Resilient Equity"),
+        ("GIC Singapore",                 "Tier 1", "Validé",   "Global Value,International Fund"),
+        ("Rothschild & Co Family Office", "Tier 2", "En cours", "International Fund,Income Builder"),
+        ("BlackRock APAC Division",       "Tier 2", "Validé",   "Active ETFs,Resilient Equity"),
+        ("JP Morgan Asset Management",    "Tier 1", "Validé",   "Global Value,Private Debt"),
+        ("ADIA Abu Dhabi",                "Tier 1", "En cours", "Private Debt"),
+        ("Lombard Odier FO Geneva",       "Tier 2", "Bloqué",   "Income Builder"),
+        ("BTG Pactual Wealth",            "Tier 3", "En cours", "International Fund"),
+    ]
+    for nom, tier, kyc, interests in demo_crm:
+        c.execute("UPDATE clients SET tier=?, kyc_status=?, product_interests=? WHERE nom_client=?",
+                  (tier, kyc, interests, nom))
+
+    # Hierarchie : Emirates NBD AM filiale de Al Rajhi Capital (demo)
+    c.execute("SELECT id FROM clients WHERE nom_client='Al Rajhi Capital'")
+    parent_row = c.fetchone()
+    c.execute("SELECT id FROM clients WHERE nom_client='Emirates NBD AM'")
+    child_row = c.fetchone()
+    if parent_row and child_row:
+        c.execute("UPDATE clients SET parent_id=? WHERE id=?", (parent_row[0], child_row[0]))
+
     pipeline = [
         (1,  "Global Value",       "Funded",        50_000_000,  45_000_000, 42_000_000, None,     None,       (today + timedelta(days=15)).isoformat(), "Sophie Laurent"),
         (2,  "Income Builder",     "Soft Commit",   30_000_000,  28_000_000, 0,           None,     None,       (today - timedelta(days=3)).isoformat(),  "Marc Dupont"),
@@ -241,6 +311,23 @@ def _insert_demo_data(conn):
         " raison_perte, concurrent_choisi, next_action_date, sales_owner) VALUES (?,?,?,?,?,?,?,?,?,?)",
         pipeline
     )
+
+    # Contacts de démonstration
+    contacts_demo = [
+        (1, "Khalid",    "Al-Mansouri",  "CIO",                       "k.almansouri@alrajhi.com", "+966 11 211 1111", "linkedin.com/in/khalid-almansouri", 1),
+        (1, "Fatima",    "Al-Sayed",     "Analyste",                  "f.alsayed@alrajhi.com",    "+966 11 211 1122", "",                                  0),
+        (2, "Ahmed",     "Hassan",       "Responsable investissements","a.hassan@emiratesnbd.com", "+971 4 230 7777",  "linkedin.com/in/ahmed-hassan",      1),
+        (3, "Lars",      "Eriksen",      "Gérant de portefeuille",     "l.eriksen@nbim.no",        "+47 22 31 61 00",  "linkedin.com/in/lars-eriksen",      1),
+        (4, "Wei",       "Chen",         "CIO",                        "w.chen@gic.sg",            "+65 6889 8888",    "linkedin.com/in/wei-chen-gic",      1),
+        (7, "James",     "Morgan",       "CFO",                        "j.morgan@jpmam.com",       "+1 212 270 6000",  "linkedin.com/in/james-morgan-jpm",  1),
+        (8, "Abdullah",  "Al-Falasi",    "Directeur général",          "a.alfalasi@adia.ae",       "+971 2 415 0000",  "",                                  1),
+    ]
+    c.executemany(
+        "INSERT INTO contacts (client_id, prenom, nom, role, email, telephone, linkedin, is_primary)"
+        " VALUES (?,?,?,?,?,?,?,?)",
+        contacts_demo
+    )
+
     activites = [
         (1,  (today - timedelta(days=5)).isoformat(),  "Suivi post-investissement Q1",       "Call"),
         (2,  (today - timedelta(days=2)).isoformat(),  "Envoi term sheet revise",             "Email"),
@@ -264,7 +351,15 @@ def _insert_demo_data(conn):
 
 def get_all_clients():
     conn = get_connection()
-    df = pd.read_sql_query("SELECT id, nom_client, type_client, region FROM clients ORDER BY nom_client", conn)
+    df = pd.read_sql_query(
+        "SELECT id, nom_client, type_client, region,"
+        " COALESCE(parent_id, 0) AS parent_id,"
+        " COALESCE(tier, 'Tier 2') AS tier,"
+        " COALESCE(kyc_status, 'En cours') AS kyc_status,"
+        " COALESCE(product_interests, '') AS product_interests"
+        " FROM clients ORDER BY nom_client",
+        conn
+    )
     conn.close()
     return df
 
@@ -274,10 +369,32 @@ def get_client_options():
     return {str(n): int(i) for n, i in zip(df["nom_client"], df["id"])}
 
 
+def get_client_hierarchy():
+    """
+    Retourne tous les clients avec leur maison mère (parent).
+    Colonnes : id, nom_client, type_client, region, tier, kyc_status, product_interests,
+               parent_id, parent_nom (nom de la maison mère ou '')
+    """
+    conn = get_connection()
+    df = pd.read_sql_query(
+        "SELECT c.id, c.nom_client, c.type_client, c.region,"
+        " COALESCE(c.tier, 'Tier 2') AS tier,"
+        " COALESCE(c.kyc_status, 'En cours') AS kyc_status,"
+        " COALESCE(c.product_interests, '') AS product_interests,"
+        " COALESCE(c.parent_id, 0) AS parent_id,"
+        " COALESCE(p.nom_client, '') AS parent_nom"
+        " FROM clients c"
+        " LEFT JOIN clients p ON p.id = c.parent_id"
+        " ORDER BY c.nom_client",
+        conn
+    )
+    conn.close()
+    return df
+
+
 def get_sales_owners():
     conn = get_connection()
     c = conn.cursor()
-    # Priorité : table sales_team, fallback pipeline
     c.execute("SELECT nom FROM sales_team ORDER BY nom")
     rows = c.fetchall()
     if rows:
@@ -326,6 +443,43 @@ def get_sales_by_marche(marche):
 
 
 # ---------------------------------------------------------------------------
+# CONTACTS — ANNUAIRE CRM
+# ---------------------------------------------------------------------------
+
+def get_contacts(client_id):
+    """Retourne tous les contacts d'un client."""
+    conn = get_connection()
+    df = pd.read_sql_query(
+        "SELECT id, client_id, prenom, nom, role, email, telephone, linkedin, is_primary"
+        " FROM contacts WHERE client_id = ?"
+        " ORDER BY is_primary DESC, nom ASC",
+        conn, params=(int(client_id),)
+    )
+    conn.close()
+    return df
+
+
+def add_contact(client_id, prenom, nom, role="", email="", telephone="", linkedin="", is_primary=False):
+    """Ajoute un contact à un client."""
+    conn = get_connection()
+    c = conn.cursor()
+    # Si is_primary, on dépromote les autres
+    if is_primary:
+        c.execute("UPDATE contacts SET is_primary=0 WHERE client_id=?", (int(client_id),))
+    c.execute(
+        "INSERT INTO contacts (client_id, prenom, nom, role, email, telephone, linkedin, is_primary)"
+        " VALUES (?,?,?,?,?,?,?,?)",
+        (int(client_id), prenom.strip(), nom.strip(),
+         role.strip(), email.strip(), telephone.strip(),
+         linkedin.strip(), 1 if is_primary else 0)
+    )
+    conn.commit()
+    new_id = c.lastrowid
+    conn.close()
+    return new_id
+
+
+# ---------------------------------------------------------------------------
 # LECTURES — PIPELINE (avec derniere activite en colonne)
 # ---------------------------------------------------------------------------
 
@@ -351,7 +505,6 @@ def get_pipeline_with_last_activity(fonds_filter=None):
     """
     Pipeline enrichi avec la derniere activite de chaque client.
     Colonne supplementaire : derniere_activite (str, peut etre vide).
-    Utilise une sous-requete correlee SQLite — zero jointure cartesienne.
     """
     fonds_sql, fonds_params = _fonds_clause(fonds_filter, "p")
     conn = get_connection()
@@ -360,6 +513,7 @@ def get_pipeline_with_last_activity(fonds_filter=None):
         " p.fonds, p.statut, p.target_aum_initial, p.revised_aum, p.funded_aum,"
         " p.raison_perte, p.concurrent_choisi, p.next_action_date, p.sales_owner,"
         " COALESCE(p.closing_probability, 50) AS closing_probability,"
+        " COALESCE(c.kyc_status, 'En cours') AS kyc_status,"
         " ("
         "   SELECT '[' || a.type_interaction || '] ' || a.notes"
         "   FROM activites a"
@@ -381,10 +535,6 @@ def get_pipeline_with_last_activity(fonds_filter=None):
 
 
 def get_pipeline_by_statut(statut, fonds_filter=None):
-    """
-    Retourne tous les deals d'un statut donne, enrichis de la derniere activite.
-    Utilise pour les modals drill-down des pastilles de statut.
-    """
     fonds_sql, fonds_params = _fonds_clause(fonds_filter, "p")
     conn = get_connection()
     query = (
@@ -419,7 +569,8 @@ def get_pipeline_row_by_id(pipeline_id):
         "SELECT p.id, p.client_id, c.nom_client, c.type_client, c.region,"
         " p.fonds, p.statut, p.target_aum_initial, p.revised_aum, p.funded_aum,"
         " p.raison_perte, p.concurrent_choisi, p.next_action_date, p.sales_owner,"
-        " COALESCE(p.closing_probability, 50) AS closing_probability"
+        " COALESCE(p.closing_probability, 50) AS closing_probability,"
+        " COALESCE(c.kyc_status, 'En cours') AS kyc_status"
         " FROM pipeline p JOIN clients c ON c.id = p.client_id WHERE p.id = ?",
         conn, params=(int(pipeline_id),)
     )
@@ -433,6 +584,7 @@ def get_pipeline_row_by_id(pipeline_id):
     row["id"]          = int(row["id"])
     row["client_id"]   = int(row["client_id"])
     row["sales_owner"] = str(row.get("sales_owner") or "Non assigne")
+    row["kyc_status"]  = str(row.get("kyc_status") or "En cours")
     for col in _TEXT_NULLABLE_COLS:
         row[col] = str(row.get(col) or "")
     nad = row.get("next_action_date")
@@ -460,10 +612,6 @@ def get_overdue_actions(fonds_filter=None):
 
 
 def get_overdue_deal_full(pipeline_id):
-    """
-    Retourne la ligne complete d'un deal en retard pour le modal de detail.
-    Inclut la derniere activite.
-    """
     conn = get_connection()
     df = pd.read_sql_query(
         "SELECT p.id, c.nom_client, c.type_client, c.region,"
@@ -667,7 +815,6 @@ def get_kpis(fonds_filter=None):
     c.execute("SELECT c2.nom_client, c2.type_client, c2.region, p.fonds, p.funded_aum, p.sales_owner FROM pipeline p JOIN clients c2 ON c2.id=p.client_id WHERE p.statut='Funded' AND p.funded_aum > 0 " + fonds_sql + " ORDER BY p.funded_aum DESC LIMIT 10", fonds_params)
     top_deals = [{k: (float(v) if k == "funded_aum" else str(v)) for k, v in dict(r).items()} for r in c.fetchall()]
 
-    # Outflows = Redeemed (AUM qui sort)
     c.execute("SELECT c2.nom_client, c2.type_client, c2.region, p.fonds, p.funded_aum, p.sales_owner FROM pipeline p JOIN clients c2 ON c2.id=p.client_id WHERE p.statut='Redeemed' AND p.funded_aum > 0 " + fonds_sql + " ORDER BY p.funded_aum DESC LIMIT 10", fonds_params)
     outflows = [{k: (float(v) if k == "funded_aum" else str(v)) for k, v in dict(r).items()} for r in c.fetchall()]
 
@@ -677,7 +824,6 @@ def get_kpis(fonds_filter=None):
     c.execute("SELECT p.fonds, COALESCE(SUM(p.funded_aum),0) FROM pipeline p WHERE p.statut='Funded' " + fonds_sql + " GROUP BY p.fonds ORDER BY 2 DESC", fonds_params)
     aum_by_fonds = {r[0]: float(r[1]) for r in c.fetchall()}
 
-    # Weighted pipeline = somme(revised_aum * closing_probability/100) pour deals actifs
     c.execute(
         "SELECT SUM(p.revised_aum * COALESCE(p.closing_probability,50)/100.0)"
         " FROM pipeline p"
@@ -737,11 +883,22 @@ def get_activities(client_id=None):
 # ECRITURE
 # ---------------------------------------------------------------------------
 
-def add_client(nom_client, type_client, region):
+def add_client(nom_client, type_client, region,
+               parent_id=None, tier="Tier 2",
+               kyc_status="En cours", product_interests=""):
+    """
+    Crée un client avec les nouvelles colonnes CRM avancées.
+    product_interests : str séparé par virgules (ex: "Global Value,Private Debt")
+    """
     conn = get_connection()
     c = conn.cursor()
-    c.execute("INSERT INTO clients (nom_client, type_client, region) VALUES (?,?,?)",
-              (nom_client.strip(), type_client, region))
+    pid = int(parent_id) if parent_id else None
+    interests_str = product_interests if isinstance(product_interests, str) else ",".join(product_interests)
+    c.execute(
+        "INSERT INTO clients (nom_client, type_client, region, parent_id, tier, kyc_status, product_interests)"
+        " VALUES (?,?,?,?,?,?,?)",
+        (nom_client.strip(), type_client, region, pid, tier, kyc_status, interests_str)
+    )
     conn.commit()
     new_id = c.lastrowid
     conn.close()
@@ -754,7 +911,6 @@ def add_pipeline_entry(client_id, fonds, statut, target_aum, revised_aum,
                        closing_probability=50):
     conn = get_connection()
     c = conn.cursor()
-    # funded_aum auto : si statut Funded et funded_aum=0, utiliser revised_aum
     fa = float(funded_aum or 0)
     if statut == "Funded" and fa == 0:
         fa = float(revised_aum or 0)
