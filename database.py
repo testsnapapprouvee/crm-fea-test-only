@@ -134,6 +134,7 @@ def init_db():
     _safe_alter(c, "ALTER TABLE clients ADD COLUMN tier TEXT DEFAULT 'Tier 2' CHECK(tier IN ('Tier 1','Tier 2','Tier 3'))")
     _safe_alter(c, "ALTER TABLE clients ADD COLUMN kyc_status TEXT DEFAULT 'En cours' CHECK(kyc_status IN ('Validé','En cours','Bloqué'))")
     _safe_alter(c, "ALTER TABLE clients ADD COLUMN product_interests TEXT DEFAULT ''")
+    _safe_alter(c, "ALTER TABLE clients ADD COLUMN country TEXT DEFAULT ''")
 
     # --- TABLE CONTACTS (annuaire CRM) ---
     c.execute("""
@@ -232,6 +233,7 @@ def get_all_clients():
     conn = get_connection()
     df = pd.read_sql_query(
         "SELECT id, nom_client, type_client, region,"
+        " COALESCE(country, '') AS country,"
         " COALESCE(parent_id, 0) AS parent_id,"
         " COALESCE(tier, 'Tier 2') AS tier,"
         " COALESCE(kyc_status, 'En cours') AS kyc_status,"
@@ -251,12 +253,13 @@ def get_client_options():
 def get_client_hierarchy():
     """
     Retourne tous les clients avec leur maison mère (parent).
-    Colonnes : id, nom_client, type_client, region, tier, kyc_status, product_interests,
+    Colonnes : id, nom_client, type_client, region, country, tier, kyc_status, product_interests,
                parent_id, parent_nom (nom de la maison mère ou '')
     """
     conn = get_connection()
     df = pd.read_sql_query(
         "SELECT c.id, c.nom_client, c.type_client, c.region,"
+        " COALESCE(c.country, '') AS country,"
         " COALESCE(c.tier, 'Tier 2') AS tier,"
         " COALESCE(c.kyc_status, 'En cours') AS kyc_status,"
         " COALESCE(c.product_interests, '') AS product_interests,"
@@ -793,21 +796,20 @@ def get_activities(client_id=None):
 # ECRITURE
 # ---------------------------------------------------------------------------
 
-def add_client(nom_client, type_client, region,
+def add_client(nom_client, type_client, region, country="",
                parent_id=None, tier="Tier 2",
                kyc_status="En cours", product_interests=""):
-    """
-    Crée un client avec les nouvelles colonnes CRM avancées.
-    product_interests : str séparé par virgules (ex: "Global Value,Private Debt")
-    """
+    """Creates a client with all CRM fields."""
     conn = get_connection()
     c = conn.cursor()
     pid = int(parent_id) if parent_id else None
     interests_str = product_interests if isinstance(product_interests, str) else ",".join(product_interests)
     c.execute(
-        "INSERT INTO clients (nom_client, type_client, region, parent_id, tier, kyc_status, product_interests)"
-        " VALUES (?,?,?,?,?,?,?)",
-        (nom_client.strip(), type_client, region, pid, tier, kyc_status, interests_str)
+        "INSERT INTO clients"
+        " (nom_client, type_client, region, country, parent_id, tier, kyc_status, product_interests)"
+        " VALUES (?,?,?,?,?,?,?,?)",
+        (nom_client.strip(), type_client, region, country.strip(),
+         pid, tier, kyc_status, interests_str)
     )
     conn.commit()
     new_id = c.lastrowid
@@ -920,6 +922,168 @@ def add_activity(client_id, date_str, notes, type_interaction):
     )
     conn.commit()
     conn.close()
+
+
+# ---------------------------------------------------------------------------
+# CRUD — CLIENTS
+# ---------------------------------------------------------------------------
+
+def update_client(client_id, nom_client, type_client, region, country="",
+                  parent_id=None, tier="Tier 2", kyc_status="En cours",
+                  product_interests=""):
+    """Update all editable fields of a client row."""
+    try:
+        conn = get_connection()
+        c = conn.cursor()
+        pid = int(parent_id) if parent_id else None
+        interests_str = (product_interests if isinstance(product_interests, str)
+                         else ",".join(product_interests))
+        c.execute(
+            "UPDATE clients SET nom_client=?, type_client=?, region=?, country=?,"
+            " parent_id=?, tier=?, kyc_status=?, product_interests=?"
+            " WHERE id=?",
+            (nom_client.strip(), type_client, region, country.strip(),
+             pid, tier, kyc_status, interests_str, int(client_id))
+        )
+        conn.commit()
+        conn.close()
+        return True, None
+    except Exception as e:
+        return False, str(e)
+
+
+# ---------------------------------------------------------------------------
+# CRUD — ACTIVITIES
+# ---------------------------------------------------------------------------
+
+def update_activity(activity_id, date_str, notes, type_interaction):
+    """Update an existing activity entry."""
+    try:
+        conn = get_connection()
+        conn.execute(
+            "UPDATE activites SET date=?, notes=?, type_interaction=? WHERE id=?",
+            (date_str, notes, type_interaction, int(activity_id))
+        )
+        conn.commit()
+        conn.close()
+        return True, None
+    except Exception as e:
+        return False, str(e)
+
+
+def delete_activity(activity_id):
+    """Permanently delete an activity entry."""
+    try:
+        conn = get_connection()
+        conn.execute("DELETE FROM activites WHERE id=?", (int(activity_id),))
+        conn.commit()
+        conn.close()
+        return True, None
+    except Exception as e:
+        return False, str(e)
+
+
+# ---------------------------------------------------------------------------
+# CRUD — CONTACTS
+# ---------------------------------------------------------------------------
+
+def update_contact(contact_id, prenom, nom, role="", email="",
+                   telephone="", linkedin="", is_primary=False):
+    """Update an existing contact."""
+    try:
+        conn = get_connection()
+        c = conn.cursor()
+        c.execute("SELECT client_id FROM contacts WHERE id=?", (int(contact_id),))
+        row = c.fetchone()
+        if not row:
+            conn.close()
+            return False, "Contact not found."
+        client_id = row["client_id"]
+        if is_primary:
+            c.execute("UPDATE contacts SET is_primary=0 WHERE client_id=?", (client_id,))
+        c.execute(
+            "UPDATE contacts SET prenom=?, nom=?, role=?, email=?,"
+            " telephone=?, linkedin=?, is_primary=? WHERE id=?",
+            (prenom.strip(), nom.strip(), role.strip(), email.strip(),
+             telephone.strip(), linkedin.strip(),
+             1 if is_primary else 0, int(contact_id))
+        )
+        conn.commit()
+        conn.close()
+        return True, None
+    except Exception as e:
+        return False, str(e)
+
+
+def delete_contact(contact_id):
+    """Permanently delete a contact."""
+    try:
+        conn = get_connection()
+        conn.execute("DELETE FROM contacts WHERE id=?", (int(contact_id),))
+        conn.commit()
+        conn.close()
+        return True, None
+    except Exception as e:
+        return False, str(e)
+
+
+# ---------------------------------------------------------------------------
+# CRUD — PIPELINE
+# ---------------------------------------------------------------------------
+
+def delete_pipeline_row(pipeline_id):
+    """
+    Permanently delete a pipeline deal and its audit trail.
+    CASCADE on audit_log is handled by FK, but we delete explicitly for safety.
+    """
+    try:
+        conn = get_connection()
+        c = conn.cursor()
+        c.execute("DELETE FROM audit_log WHERE pipeline_id=?", (int(pipeline_id),))
+        c.execute("DELETE FROM pipeline WHERE id=?", (int(pipeline_id),))
+        conn.commit()
+        conn.close()
+        return True, None
+    except Exception as e:
+        return False, str(e)
+
+
+# ---------------------------------------------------------------------------
+# MAILING LIST — for Mailing List Generator
+# ---------------------------------------------------------------------------
+
+def get_mailing_list(regions=None, countries=None, tiers=None, product_interests=None):
+    """
+    Returns contacts enriched with client metadata for the Mailing List Generator.
+    All filter params are lists; pass None or [] to skip that filter.
+    """
+    conn = get_connection()
+    query = (
+        "SELECT ct.id AS contact_id, ct.prenom AS first_name, ct.nom AS last_name,"
+        " c.nom_client AS company, ct.role, ct.email,"
+        " c.region, COALESCE(c.country,'') AS country,"
+        " COALESCE(c.tier,'Tier 2') AS tier,"
+        " COALESCE(c.product_interests,'') AS product_interests"
+        " FROM contacts ct"
+        " JOIN clients c ON c.id = ct.client_id"
+        " WHERE ct.email != '' AND ct.email IS NOT NULL"
+        " ORDER BY c.nom_client, ct.nom"
+    )
+    df = pd.read_sql_query(query, conn)
+    conn.close()
+
+    if regions:
+        df = df[df["region"].isin(regions)]
+    if countries:
+        df = df[df["country"].isin(countries)]
+    if tiers:
+        df = df[df["tier"].isin(tiers)]
+    if product_interests:
+        def _has_interest(pi_str):
+            return any(p.strip() in pi_str for p in product_interests)
+        df = df[df["product_interests"].apply(_has_interest)]
+
+    return df.reset_index(drop=True)
 
 
 def upsert_clients_from_df(df):
