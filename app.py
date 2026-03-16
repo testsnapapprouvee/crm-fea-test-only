@@ -579,202 +579,12 @@ st.markdown(
     'Reporting executif &middot; Performance NAV</p></div>',
     unsafe_allow_html=True)
 
-tab_ingest, tab_crm, tab_pipeline, tab_dash, tab_sales, tab_activites, tab_perf = st.tabs([
-    "Data Ingestion", "CRM Directory", "Pipeline Management", "Executive Dashboard",
-    "Sales Tracking", "Activities", "Performance & NAV"])
+tab_crm, tab_pipeline, tab_dash, tab_sales, tab_activites, tab_settings, tab_perf = st.tabs([
+    "CRM Directory", "Pipeline Management", "Executive Dashboard",
+    "Sales Tracking", "Activities", "Settings & Admin", "Performance & NAV"])
 
 
-# ============================================================================
-# ONGLET 1 — DATA INGESTION
-# ============================================================================
-with tab_ingest:
-    st.markdown('<div class="section-title">Data Entry &amp; Import</div>',
-                unsafe_allow_html=True)
-    col_form, col_import = st.columns([1, 1], gap="large")
 
-    with col_form:
-        with st.expander("Ajouter un Client", expanded=True):
-            with st.form("form_client", clear_on_submit=True):
-                c1, c2 = st.columns(2)
-                with c1:
-                    nom_client  = st.text_input("Nom du Client")
-                    type_client = st.selectbox("Type Client", TYPES_CLIENT)
-                    region      = st.selectbox("Region", REGIONS)
-                with c2:
-                    is_parent = st.checkbox(
-                        "Ce compte est une Maison Mère (Siège global)",
-                        value=False,
-                        help="Cochez si ce client est lui-même un groupe / holding. "
-                             "La sélection d'une Maison Mère sera alors ignorée.")
-                    # Maison mère — désactivée visuellement si is_parent est coché
-                    all_clients_opts = db.get_all_clients()
-                    parent_options   = ["(Aucune — client autonome)"] + all_clients_opts["nom_client"].tolist()
-                    parent_sel       = st.selectbox(
-                        "Maison Mère (optionnel)",
-                        parent_options,
-                        disabled=is_parent,
-                        help="Non applicable si le compte est lui-même une Maison Mère.")
-                    tier_sel = st.selectbox("Tier", db.TIERS_REFERENTIEL, index=1)
-                    kyc_sel  = st.selectbox("Statut KYC", db.KYC_STATUTS, index=1)
-                    country_sel = st.selectbox("Country", COUNTRIES_LIST)
-                interests_sel = st.multiselect("Product Interests", db.PRODUCT_INTERESTS)
-                sub_c = st.form_submit_button("Enregistrer", use_container_width=True)
-            if sub_c:
-                if not nom_client.strip():
-                    st.error("Nom du client obligatoire.")
-                else:
-                    try:
-                        # Si is_parent coché → parent_id forcé à None
-                        _parent_id = None
-                        if not is_parent and parent_sel != "(Aucune — client autonome)":
-                            _pid_row = all_clients_opts[all_clients_opts["nom_client"] == parent_sel]
-                            if not _pid_row.empty:
-                                _parent_id = int(_pid_row.iloc[0]["id"])
-                        db.add_client(
-                            nom_client.strip(), type_client, region,
-                            country=country_sel,
-                            parent_id=_parent_id, tier=tier_sel, kyc_status=kyc_sel,
-                            product_interests=",".join(interests_sel))
-                        st.success("Client {} ajouté.".format(nom_client))
-                    except Exception as e:
-                        st.warning("Ce client existe déjà." if "UNIQUE" in str(e)
-                                   else "Erreur : {}".format(e))
-
-        with st.expander("Ajouter un Contact", expanded=False):
-            clients_dict_cont = db.get_client_options()
-            if not clients_dict_cont:
-                st.info("Ajoutez d'abord un client.")
-            else:
-                with st.form("form_contact", clear_on_submit=True):
-                    cont_client = st.selectbox("Client", list(clients_dict_cont.keys()), key="cont_client_sel")
-                    cc1, cc2 = st.columns(2)
-                    with cc1:
-                        cont_prenom = st.text_input("Prénom")
-                        cont_nom    = st.text_input("Nom")
-                        cont_role   = st.selectbox("Rôle", [""] + db.ROLES_CONTACT)
-                    with cc2:
-                        cont_email  = st.text_input("Email")
-                        cont_tel    = st.text_input("Téléphone")
-                        cont_li     = st.text_input("LinkedIn (URL)")
-                    cont_primary = st.checkbox("Contact principal")
-                    sub_cont = st.form_submit_button("Enregistrer le Contact", use_container_width=True)
-                if sub_cont:
-                    if not cont_nom.strip():
-                        st.error("Nom du contact obligatoire.")
-                    else:
-                        db.add_contact(
-                            clients_dict_cont[cont_client],
-                            cont_prenom, cont_nom, cont_role,
-                            cont_email, cont_tel, cont_li, cont_primary)
-                        st.success("Contact {prenom} {nom} ajouté pour {client}.".format(
-                            prenom=cont_prenom, nom=cont_nom, client=cont_client))
-
-        with st.expander("Ajouter un Deal Pipeline", expanded=True):
-            clients_dict = db.get_client_options()
-            sales_team_df = db.get_sales_team()
-            MARCHÉS = sorted(sales_team_df["marche"].unique().tolist()) if not sales_team_df.empty else ["Global"]
-            if not clients_dict:
-                st.info("Ajoutez d'abord un client.")
-            else:
-                with st.form("form_deal", clear_on_submit=True):
-                    ca, cb = st.columns(2)
-                    with ca:
-                        client_sel  = st.selectbox("Client", list(clients_dict.keys()))
-                        fonds_sel   = st.selectbox("Fonds", FONDS)
-                        statut_sel  = st.selectbox("Statut", STATUTS)
-                        # Commercial : marché → filtre les commerciaux
-                        marche_sel  = st.selectbox("Marché", ["Tous"] + MARCHÉS)
-                        if marche_sel == "Tous":
-                            owners_filtered = sales_team_df["nom"].tolist() if not sales_team_df.empty else ["Non assigne"]
-                        else:
-                            owners_filtered = sales_team_df[sales_team_df["marche"]==marche_sel]["nom"].tolist()
-                        if not owners_filtered:
-                            owners_filtered = ["Non assigne"]
-                        owner_sel = st.selectbox("Commercial", owners_filtered)
-                    with cb:
-                        target_aum   = st.number_input("AUM Cible (EUR)", min_value=0, step=1_000_000)
-                        revised_aum  = st.number_input("AUM Revise (EUR)", min_value=0, step=1_000_000)
-                        funded_aum   = st.number_input("AUM Finance (EUR)", min_value=0, step=1_000_000,
-                                                        help="Laisser à 0 si Funded → utilise l'AUM Révisé automatiquement")
-                        closing_prob = st.slider("Probabilité de closing (%)", 0, 100, 50, 5)
-                    raison_perte, concurrent = "", ""
-                    if statut_sel in ("Lost","Paused"):
-                        cc, cd = st.columns(2)
-                        with cc: raison_perte = st.selectbox("Raison", RAISONS_PERTE)
-                        with cd: concurrent   = st.text_input("Concurrent")
-                    next_action = st.date_input("Prochaine Action",
-                                               value=date.today() + timedelta(days=14))
-                    sub_d = st.form_submit_button("Enregistrer le Deal", use_container_width=True)
-                if sub_d:
-                    if statut_sel in ("Lost","Paused") and not raison_perte:
-                        st.error("Raison obligatoire.")
-                    else:
-                        db.add_pipeline_entry(
-                            clients_dict[client_sel], fonds_sel, statut_sel,
-                            float(target_aum), float(revised_aum), float(funded_aum),
-                            raison_perte, concurrent, next_action.isoformat(),
-                            owner_sel, closing_prob)
-                        st.success("Deal {} / {} enregistre.".format(fonds_sel, client_sel))
-
-        with st.expander("Gérer les Commerciaux"):
-            st_team = db.get_sales_team()
-            if not st_team.empty:
-                st.dataframe(st_team[["nom","marche"]], hide_index=True, use_container_width=True)
-            st.markdown("**Ajouter un commercial**")
-            with st.form("form_add_sales", clear_on_submit=True):
-                nc1, nc2 = st.columns(2)
-                with nc1: new_sales_nom    = st.text_input("Nom", key="new_sales_nom")
-                with nc2: new_sales_marche = st.selectbox("Marché", ["GCC","EMEA","APAC","Americas","Nordics","Global"], key="new_sales_marche")
-                if st.form_submit_button("Ajouter le commercial", use_container_width=True):
-                    if new_sales_nom.strip():
-                        ok = db.add_sales_member(new_sales_nom.strip(), new_sales_marche)
-                        st.success("Commercial ajouté." if ok else "Nom déjà existant.")
-                        st.rerun()
-
-        with st.expander("Enregistrer une Activite"):
-            clients_dict2 = db.get_client_options()
-            if clients_dict2:
-                with st.form("form_act", clear_on_submit=True):
-                    ce, cf = st.columns(2)
-                    with ce:
-                        act_client = st.selectbox("Client", list(clients_dict2.keys()))
-                        act_type   = st.selectbox("Type", TYPES_INTERACTION)
-                    with cf:
-                        act_date  = st.date_input("Date", value=date.today())
-                        act_notes = st.text_area("Notes", height=68)
-                    sub_a = st.form_submit_button("Enregistrer", use_container_width=True)
-                if sub_a:
-                    db.add_activity(clients_dict2[act_client], act_date.isoformat(),
-                                    act_notes, act_type)
-                    st.success("Activite enregistree pour {}.".format(act_client))
-
-    with col_import:
-        st.markdown("#### Import CSV / Excel — Upsert")
-        import_type   = st.radio("Table cible", ["Clients","Pipeline"], horizontal=True)
-        uploaded_file = st.file_uploader("Fichier CSV ou Excel (.xlsx)",
-                                         type=["csv","xlsx","xls"])
-        if import_type == "Clients":
-            st.info("Colonnes : nom_client, type_client, region")
-        else:
-            st.info("Colonnes : nom_client, fonds, statut, target_aum_initial, "
-                    "revised_aum, funded_aum, raison_perte, concurrent_choisi, "
-                    "next_action_date, sales_owner")
-        if uploaded_file:
-            try:
-                df_imp = (pd.read_csv(uploaded_file) if uploaded_file.name.endswith(".csv")
-                          else pd.read_excel(uploaded_file))
-                st.dataframe(df_imp.head(5), use_container_width=True, height=145)
-                st.caption("{} ligne(s)".format(len(df_imp)))
-                if st.button("Lancer l'import", use_container_width=True):
-                    fn = (db.upsert_clients_from_df if import_type == "Clients"
-                          else db.upsert_pipeline_from_df)
-                    ins, upd = fn(df_imp)
-                    st.success("Import : {} cree(s), {} mis a jour.".format(ins, upd))
-            except Exception as e:
-                st.error("Erreur : {}".format(e))
-
-        st.divider()
-        st.info(" Les activités sont gérées dans l'onglet **Activités** dédié.")
 
 
 # ============================================================================
@@ -783,6 +593,51 @@ with tab_ingest:
 with tab_crm:
     st.markdown('<div class="section-title">CRM Directory — Clients &amp; Contacts</div>',
                 unsafe_allow_html=True)
+
+    # ── Ajouter un Client ────────────────────────────────────────────────────
+    with st.expander("Ajouter un compte client", expanded=False):
+        with st.form("form_client", clear_on_submit=True):
+            c1, c2 = st.columns(2)
+            with c1:
+                nom_client  = st.text_input("Nom du Client")
+                type_client = st.selectbox("Type Client", TYPES_CLIENT)
+                region      = st.selectbox("Région", REGIONS)
+            with c2:
+                is_parent = st.checkbox(
+                    "Ce compte est une Maison Mère (Siège global)",
+                    value=False,
+                    help="Cochez si ce client est lui-même un groupe / holding.")
+                all_clients_opts = db.get_all_clients()
+                parent_options   = ["(Aucune — client autonome)"] + all_clients_opts["nom_client"].tolist()
+                parent_sel       = st.selectbox(
+                    "Maison Mère (optionnel)", parent_options,
+                    disabled=is_parent,
+                    help="Non applicable si le compte est lui-même une Maison Mère.")
+                tier_sel    = st.selectbox("Tier", db.TIERS_REFERENTIEL, index=1)
+                kyc_sel     = st.selectbox("Statut KYC", db.KYC_STATUTS, index=1)
+                country_sel = st.selectbox("Country", COUNTRIES_LIST)
+            interests_sel = st.multiselect("Product Interests", db.PRODUCT_INTERESTS)
+            sub_c = st.form_submit_button("Enregistrer le compte", use_container_width=True)
+        if sub_c:
+            if not nom_client.strip():
+                st.error("Nom du client obligatoire.")
+            else:
+                try:
+                    _parent_id = None
+                    if not is_parent and parent_sel != "(Aucune — client autonome)":
+                        _pid_row = all_clients_opts[all_clients_opts["nom_client"] == parent_sel]
+                        if not _pid_row.empty:
+                            _parent_id = int(_pid_row.iloc[0]["id"])
+                    db.add_client(
+                        nom_client.strip(), type_client, region,
+                        country=country_sel,
+                        parent_id=_parent_id, tier=tier_sel, kyc_status=kyc_sel,
+                        product_interests=",".join(interests_sel))
+                    st.success("Client {} ajouté.".format(nom_client))
+                    st.rerun()
+                except Exception as e:
+                    st.warning("Ce client existe déjà." if "UNIQUE" in str(e)
+                               else "Erreur : {}".format(e))
 
     df_hier = db.get_client_hierarchy()
 
@@ -810,7 +665,7 @@ with tab_crm:
             'text-align:center;margin-top:12px;">'
             '<div style="font-size:0.92rem;font-weight:700;color:{m};">Aucun client enregistré</div>'
             '<div style="color:#888;font-size:0.79rem;margin-top:4px;">'
-            'Commencez par ajouter un client dans l\'onglet <b>Data Ingestion</b>.</div>'
+            'Commencez par ajouter un client dans l\'onglet <b>CRM Directory</b>.</div>'
             '</div>'.format(m=MARINE), unsafe_allow_html=True)
     else:
         noms_clients = sorted(df_hier["nom_client"].tolist())
@@ -1235,11 +1090,214 @@ with tab_crm:
 
 
 # ============================================================================
-# ONGLET 3 — PIPELINE MANAGEMENT
+# MODALE EDITION PIPELINE — @st.dialog
+# ============================================================================
+@st.dialog("Modifier le Deal", width="large")
+def _dialog_edit_pipeline(pipeline_id, row_data):
+    """Modale d'édition d'un deal pipeline — sans scroll, centrée."""
+    client_name    = str(row_data.get("nom_client",""))
+    current_statut = str(row_data.get("statut","Prospect"))
+
+    st.markdown(
+        '<div style="font-size:0.84rem;font-weight:700;color:{marine};">'        'Client : <span style="color:{ciel};">{name}</span>'        '&nbsp;{badge}&nbsp;<span style="font-size:0.68rem;color:#888;">ID #{pid}</span>'        '</div>'.format(
+            marine=MARINE, ciel=B_MID, name=client_name,
+            badge=statut_badge(current_statut), pid=pipeline_id),
+        unsafe_allow_html=True)
+
+    _st_team    = db.get_sales_team()
+    _marchés_ed = sorted(_st_team["marche"].unique().tolist()) if not _st_team.empty else ["Global"]
+
+    with st.form(key="dialog_edit_{}".format(pipeline_id)):
+        r1c1, r1c2 = st.columns(2)
+        with r1c1:
+            fi = FONDS.index(row_data["fonds"]) if row_data["fonds"] in FONDS else 0
+            new_fonds  = st.selectbox("Fonds", FONDS, index=fi)
+            cur_owner  = str(row_data.get("sales_owner") or "Non assigne")
+            cur_marche = "Tous"
+            if not _st_team.empty:
+                rows_m = _st_team[_st_team["nom"] == cur_owner]
+                if not rows_m.empty:
+                    cur_marche = rows_m.iloc[0]["marche"]
+            marche_edit = st.selectbox(
+                "Marché commercial", ["Tous"] + _marchés_ed,
+                index=(["Tous"] + _marchés_ed).index(cur_marche)
+                      if cur_marche in (["Tous"] + _marchés_ed) else 0,
+                key="dialog_marche_{}".format(pipeline_id))
+            if marche_edit == "Tous":
+                _owners_edit = _st_team["nom"].tolist() if not _st_team.empty else ["Non assigne"]
+            else:
+                _owners_edit = _st_team[_st_team["marche"]==marche_edit]["nom"].tolist()
+            if not _owners_edit:
+                _owners_edit = ["Non assigne"]
+            oi = _owners_edit.index(cur_owner) if cur_owner in _owners_edit else 0
+            new_sales = st.selectbox("Commercial", _owners_edit, index=oi,
+                                     key="dialog_owner_{}".format(pipeline_id))
+        with r1c2:
+            si = STATUTS.index(current_statut) if current_statut in STATUTS else 0
+            new_statut = st.selectbox("Statut", STATUTS, index=si)
+            cur_prob   = float(row_data.get("closing_probability") or 50)
+            new_prob   = st.slider("Probabilité de closing (%)", 0, 100, int(cur_prob), 5,
+                                   key="dialog_prob_{}".format(pipeline_id))
+
+        r2c1, r2c2, r2c3 = st.columns(3)
+        with r2c1:
+            new_target_m = st.number_input(
+                "AUM Cible (en M€)",
+                value=round(float(row_data.get("target_aum_initial",0.0)) / 1_000_000, 2),
+                min_value=0.0, step=1.0, format="%.2f")
+        with r2c2:
+            new_revised_m = st.number_input(
+                "AUM Révisé (en M€)",
+                value=round(float(row_data.get("revised_aum",0.0)) / 1_000_000, 2),
+                min_value=0.0, step=1.0, format="%.2f")
+        with r2c3:
+            new_funded_m = st.number_input(
+                "AUM Financé (en M€)",
+                value=round(float(row_data.get("funded_aum",0.0)) / 1_000_000, 2),
+                min_value=0.0, step=1.0, format="%.2f",
+                help="Laisser à 0 si Funded → utilise l'AUM Révisé automatiquement")
+
+        r3c1, r3c2, r3c3 = st.columns(3)
+        with r3c1:
+            ropts  = [""] + RAISONS_PERTE
+            cur_r  = str(row_data.get("raison_perte") or "")
+            ri     = ropts.index(cur_r) if cur_r in ropts else 0
+            lbl_r  = "Raison (obligatoire)" if new_statut in ("Lost","Paused") else "Raison"
+            new_raison = st.selectbox(lbl_r, ropts, index=ri)
+        with r3c2:
+            new_conc = st.text_input("Concurrent",
+                                     value=str(row_data.get("concurrent_choisi") or ""))
+        with r3c3:
+            nad = row_data.get("next_action_date")
+            if not isinstance(nad, date): nad = date.today() + timedelta(days=14)
+            new_nad = st.date_input("Prochaine Action", value=nad)
+
+        col_save, col_cancel = st.columns([3, 1])
+        with col_save:
+            sub = st.form_submit_button("Sauvegarder les modifications",
+                                        use_container_width=True)
+        with col_cancel:
+            cancel = st.form_submit_button("Annuler", use_container_width=True)
+
+    # ── Audit log (outside form, inside dialog) ──────────────────────────────
+    df_audit = db.get_audit_log(pipeline_id)
+    if not df_audit.empty:
+        with st.expander("Historique modifications", expanded=False):
+            st.dataframe(df_audit, use_container_width=True, hide_index=True,
+                         height=min(200, 46 + len(df_audit) * 36))
+
+    # ── Delete deal ──────────────────────────────────────────────────────────
+    st.markdown("---")
+    if st.button("Supprimer ce deal (irréversible)", type="tertiary",
+                 key="dialog_del_{}".format(pipeline_id)):
+        st.session_state["confirm_del_deal"] = pipeline_id
+
+    if st.session_state.get("confirm_del_deal") == pipeline_id:
+        st.error("Cette action supprimera définitivement le deal #{} "
+                 "et tout son historique d'audit.".format(pipeline_id))
+        dd1, dd2, _ = st.columns([1, 1, 6])
+        with dd1:
+            if st.button("Confirmer la suppression",
+                         key="dialog_del_confirm_{}".format(pipeline_id)):
+                ok, err = db.delete_pipeline_row(pipeline_id)
+                if ok:
+                    st.session_state.pop("confirm_del_deal", None)
+                    st.session_state.pop("pipeline_dialog_id", None)
+                    st.rerun()
+                else:
+                    st.error(err)
+        with dd2:
+            if st.button("Annuler", key="dialog_del_cancel_{}".format(pipeline_id)):
+                st.session_state.pop("confirm_del_deal", None)
+                st.rerun()
+
+    # ── Form submission logic ────────────────────────────────────────────────
+    if cancel:
+        st.session_state.pop("pipeline_dialog_id", None)
+        st.rerun()
+
+    if sub:
+        new_target  = new_target_m  * 1_000_000
+        new_revised = new_revised_m * 1_000_000
+        new_funded  = new_funded_m  * 1_000_000
+        if new_statut == "Funded":
+            kyc_check = str(row_data.get("kyc_status", "En cours"))
+            if kyc_check in ("Bloqué", "En cours"):
+                st.error(
+                    "KYC incomplet : impossible de valider le financement. "
+                    "Statut KYC actuel : **{}**. "
+                    "Veuillez valider le KYC du client avant de passer au statut Funded.".format(kyc_check))
+                return
+        ok, msg = db.update_pipeline_row({
+            "id": pipeline_id, "fonds": new_fonds, "statut": new_statut,
+            "target_aum_initial": new_target, "revised_aum": new_revised,
+            "funded_aum": new_funded, "raison_perte": new_raison,
+            "concurrent_choisi": new_conc, "next_action_date": new_nad,
+            "sales_owner": new_sales, "closing_probability": new_prob})
+        if ok:
+            st.session_state.pop("pipeline_dialog_id", None)
+            st.success("Deal mis à jour.")
+            st.rerun()
+        else:
+            st.error(msg)
+
+
+# ============================================================================
+# ONGLET 2 — PIPELINE MANAGEMENT
 # ============================================================================
 with tab_pipeline:
     st.markdown('<div class="section-title">Pipeline Management</div>',
                 unsafe_allow_html=True)
+
+    # ── Ajouter un Deal ──────────────────────────────────────────────────────
+    with st.expander("Ajouter un deal", expanded=False):
+        _clients_dict_deal = db.get_client_options()
+        _sales_team_deal   = db.get_sales_team()
+        _MARCHÉS_deal = sorted(_sales_team_deal["marche"].unique().tolist()) if not _sales_team_deal.empty else ["Global"]
+        if not _clients_dict_deal:
+            st.info("Ajoutez d'abord un client dans l'onglet CRM Directory.")
+        else:
+            with st.form("form_deal", clear_on_submit=True):
+                ca, cb = st.columns(2)
+                with ca:
+                    client_sel  = st.selectbox("Client", list(_clients_dict_deal.keys()))
+                    fonds_sel   = st.selectbox("Fonds", FONDS)
+                    statut_sel  = st.selectbox("Statut", STATUTS)
+                    marche_sel  = st.selectbox("Marché", ["Tous"] + _MARCHÉS_deal)
+                    if marche_sel == "Tous":
+                        _owners_deal = _sales_team_deal["nom"].tolist() if not _sales_team_deal.empty else ["Non assigne"]
+                    else:
+                        _owners_deal = _sales_team_deal[_sales_team_deal["marche"]==marche_sel]["nom"].tolist()
+                    if not _owners_deal:
+                        _owners_deal = ["Non assigne"]
+                    owner_sel = st.selectbox("Commercial", _owners_deal)
+                with cb:
+                    target_aum_m   = st.number_input("AUM Cible (en M€)", min_value=0.0, step=1.0, format="%.2f")
+                    revised_aum_m  = st.number_input("AUM Révisé (en M€)", min_value=0.0, step=1.0, format="%.2f")
+                    funded_aum_m   = st.number_input("AUM Financé (en M€)", min_value=0.0, step=1.0, format="%.2f",
+                                                     help="Laisser à 0 si Funded → utilise l'AUM Révisé automatiquement")
+                    closing_prob = st.slider("Probabilité de closing (%)", 0, 100, 50, 5)
+                raison_perte_d, concurrent_d = "", ""
+                if statut_sel in ("Lost","Paused"):
+                    cc, cd = st.columns(2)
+                    with cc: raison_perte_d = st.selectbox("Raison", RAISONS_PERTE)
+                    with cd: concurrent_d   = st.text_input("Concurrent")
+                next_action = st.date_input("Prochaine Action",
+                                           value=date.today() + timedelta(days=14))
+                sub_d = st.form_submit_button("Enregistrer le Deal", use_container_width=True)
+            if sub_d:
+                if statut_sel in ("Lost","Paused") and not raison_perte_d:
+                    st.error("Raison obligatoire.")
+                else:
+                    db.add_pipeline_entry(
+                        _clients_dict_deal[client_sel], fonds_sel, statut_sel,
+                        target_aum_m * 1_000_000,
+                        revised_aum_m * 1_000_000,
+                        funded_aum_m * 1_000_000,
+                        raison_perte_d, concurrent_d, next_action.isoformat(),
+                        owner_sel, closing_prob)
+                    st.success("Deal {} / {} enregistré.".format(fonds_sel, client_sel))
+                    st.rerun()
 
     with st.expander("Filtres", expanded=False):
         fc1, fc2, fc3 = st.columns(3)
@@ -1295,156 +1353,25 @@ with tab_pipeline:
     if len(selected_rows) > 0 and selected_rows[0] < len(df_view):
         pipeline_id = int(df_view.iloc[selected_rows[0]]["id"])
 
+    # Ouvre la modale si une ligne est sélectionnée.
+    # session_state "pipeline_dialog_id" contrôle l'ouverture pour éviter la
+    # réouverture automatique après fermeture ou sauvegarde.
     if pipeline_id is not None:
-        row_data = db.get_pipeline_row_by_id(pipeline_id)
-        if row_data:
-            client_name    = str(row_data.get("nom_client",""))
-            current_statut = str(row_data.get("statut","Prospect"))
-            st.markdown(
-                '<div class="detail-panel"><div style="font-size:0.88rem;font-weight:700;color:{marine};">'
-                'Modification — <span style="color:{ciel};">{name}</span>'
-                '&nbsp;{badge}&nbsp;<span style="font-size:0.68rem;color:#888;font-weight:400;">'
-                'ID #{pid}</span></div></div>'.format(
-                    marine=MARINE, ciel=B_MID, name=client_name,
-                    badge=statut_badge(current_statut), pid=pipeline_id),
-                unsafe_allow_html=True)
-            with st.container():
-                _st_team = db.get_sales_team()
-                _marchés_edit = sorted(_st_team["marche"].unique().tolist()) if not _st_team.empty else ["Global"]
-                with st.form(key="edit_{}".format(pipeline_id)):
-                    r1c1, r1c2 = st.columns(2)
-                    with r1c1:
-                        fi = FONDS.index(row_data["fonds"]) if row_data["fonds"] in FONDS else 0
-                        new_fonds  = st.selectbox("Fonds", FONDS, index=fi)
-                        # Commercial : sélection par marché
-                        cur_owner  = str(row_data.get("sales_owner") or "Non assigne")
-                        cur_marche = "Tous"
-                        if not _st_team.empty:
-                            rows_m = _st_team[_st_team["nom"] == cur_owner]
-                            if not rows_m.empty:
-                                cur_marche = rows_m.iloc[0]["marche"]
-                        marche_edit = st.selectbox("Marché commercial",
-                            ["Tous"] + _marchés_edit,
-                            index=(["Tous"] + _marchés_edit).index(cur_marche)
-                                  if cur_marche in (["Tous"] + _marchés_edit) else 0,
-                            key="marche_edit_{}".format(pipeline_id))
-                        if marche_edit == "Tous":
-                            _owners_edit = _st_team["nom"].tolist() if not _st_team.empty else ["Non assigne"]
-                        else:
-                            _owners_edit = _st_team[_st_team["marche"]==marche_edit]["nom"].tolist()
-                        if not _owners_edit:
-                            _owners_edit = ["Non assigne"]
-                        oi = _owners_edit.index(cur_owner) if cur_owner in _owners_edit else 0
-                        new_sales = st.selectbox("Commercial", _owners_edit, index=oi,
-                                                 key="owner_edit_{}".format(pipeline_id))
-                    with r1c2:
-                        si = STATUTS.index(current_statut) if current_statut in STATUTS else 0
-                        new_statut   = st.selectbox("Statut", STATUTS, index=si)
-                        cur_prob     = float(row_data.get("closing_probability") or 50)
-                        new_prob     = st.slider("Probabilité de closing (%)", 0, 100,
-                                                 int(cur_prob), 5,
-                                                 key="prob_edit_{}".format(pipeline_id))
-                    r2c1, r2c2, r2c3 = st.columns(3)
-                    with r2c1:
-                        new_target = st.number_input("AUM Cible (EUR)",
-                            value=float(row_data.get("target_aum_initial",0.0)),
-                            min_value=0.0, step=1_000_000.0, format="%.0f")
-                    with r2c2:
-                        new_revised = st.number_input("AUM Revise (EUR)",
-                            value=float(row_data.get("revised_aum",0.0)),
-                            min_value=0.0, step=1_000_000.0, format="%.0f")
-                    with r2c3:
-                        new_funded = st.number_input("AUM Finance (EUR)",
-                            value=float(row_data.get("funded_aum",0.0)),
-                            min_value=0.0, step=1_000_000.0, format="%.0f",
-                            help="Laisser à 0 si Funded → utilise l'AUM Révisé automatiquement")
-                    r3c1, r3c2, r3c3 = st.columns(3)
-                    with r3c1:
-                        ropts = [""] + RAISONS_PERTE
-                        cur_r = str(row_data.get("raison_perte") or "")
-                        ri    = ropts.index(cur_r) if cur_r in ropts else 0
-                        lbl_r = "Raison (obligatoire)" if new_statut in ("Lost","Paused") else "Raison"
-                        new_raison = st.selectbox(lbl_r, ropts, index=ri)
-                    with r3c2:
-                        new_conc = st.text_input("Concurrent",
-                            value=str(row_data.get("concurrent_choisi") or ""))
-                    with r3c3:
-                        nad = row_data.get("next_action_date")
-                        if not isinstance(nad, date): nad = date.today() + timedelta(days=14)
-                        new_nad = st.date_input("Prochaine Action", value=nad)
-                    sub = st.form_submit_button("Sauvegarder", use_container_width=True)
-                if sub:
-                    # ── SÉCURITÉ MÉTIER : KYC bloquant ──────────────────────────
-                    if new_statut == "Funded":
-                        kyc_check = str(row_data.get("kyc_status", "En cours"))
-                        if kyc_check in ("Bloqué", "En cours"):
-                            st.error(
-                                "KYC incomplet : impossible de valider le financement. "
-                                "Statut KYC actuel : **{}**. "
-                                "Veuillez valider le KYC du client avant de passer au statut Funded.".format(kyc_check))
-                        else:
-                            ok, msg = db.update_pipeline_row({
-                                "id": pipeline_id, "fonds": new_fonds, "statut": new_statut,
-                                "target_aum_initial": new_target, "revised_aum": new_revised,
-                                "funded_aum": new_funded, "raison_perte": new_raison,
-                                "concurrent_choisi": new_conc, "next_action_date": new_nad,
-                                "sales_owner": new_sales, "closing_probability": new_prob})
-                            if ok:
-                                st.success("Deal mis a jour — {} / {}".format(new_statut, fmt_m(new_funded)))
-                                st.rerun()
-                            else:
-                                st.error(msg)
-                    else:
-                        ok, msg = db.update_pipeline_row({
-                            "id": pipeline_id, "fonds": new_fonds, "statut": new_statut,
-                            "target_aum_initial": new_target, "revised_aum": new_revised,
-                            "funded_aum": new_funded, "raison_perte": new_raison,
-                            "concurrent_choisi": new_conc, "next_action_date": new_nad,
-                            "sales_owner": new_sales, "closing_probability": new_prob})
-                        if ok:
-                            st.success("Deal mis a jour — {} / {}".format(new_statut, fmt_m(new_funded)))
-                            st.rerun()
-                        else:
-                            st.error(msg)
-            df_audit = db.get_audit_log(pipeline_id)
-            if not df_audit.empty:
-                with st.expander("Historique modifications — Deal #{}".format(pipeline_id)):
-                    st.dataframe(df_audit, use_container_width=True, hide_index=True,
-                                 height=min(220, 46 + len(df_audit) * 36))
+        if st.session_state.get("pipeline_dialog_id") != pipeline_id:
+            st.session_state["pipeline_dialog_id"] = pipeline_id
 
-            # ── Delete deal ──────────────────────────────────────────────────
-            st.markdown("---")
-            if st.button("Supprimer ce deal (irréversible)",
-                         key="del_deal_{}".format(pipeline_id),
-                         type="tertiary"):
-                st.session_state["confirm_del_deal"] = pipeline_id
+    dialog_pid = st.session_state.get("pipeline_dialog_id")
+    if dialog_pid is not None:
+        _row = db.get_pipeline_row_by_id(dialog_pid)
+        if _row:
+            _dialog_edit_pipeline(dialog_pid, _row)
 
-            if st.session_state.get("confirm_del_deal") == pipeline_id:
-                st.error("⚠️ This will permanently delete deal #{} "
-                         "and its full audit trail.".format(pipeline_id))
-                dd1, dd2, _ = st.columns([1, 1, 6])
-                with dd1:
-                    if st.button("Confirmer la suppression",
-                                 key="del_deal_confirm_{}".format(pipeline_id)):
-                        ok, err = db.delete_pipeline_row(pipeline_id)
-                        if ok:
-                            st.session_state.pop("confirm_del_deal", None)
-                            st.success("Deal deleted.")
-                            st.rerun()
-                        else:
-                            st.error(err)
-                with dd2:
-                    if st.button("Annuler",
-                                 key="del_deal_cancel_{}".format(pipeline_id)):
-                        st.session_state.pop("confirm_del_deal", None)
-                        st.rerun()
-    else:
+    if pipeline_id is None and not st.session_state.get("pipeline_dialog_id"):
         st.markdown(
             '<div style="background:#001c4b04;border:1px dashed #001c4b20;'
-            'padding:20px;text-align:center;margin-top:10px;">'
-            '<div style="color:{};font-weight:600;font-size:0.85rem;">Selectionnez un deal dans le tableau</div>'
-            '<div style="color:#888;font-size:0.75rem;margin-top:2px;">'
-            "Le formulaire d'edition s'affichera ici</div>"
+            'padding:14px;text-align:center;margin-top:8px;">'
+            '<div style="color:{};font-size:0.82rem;font-weight:600;">'
+            'Cliquez sur une ligne pour modifier le deal</div>'
             '</div>'.format(MARINE), unsafe_allow_html=True)
 
     st.divider()
@@ -1719,6 +1646,116 @@ with tab_dash:
         with dt1: _content_funded(_filtre_effectif)
         with dt2: _content_pipeline(_filtre_effectif)
         with dt3: _content_lost(_filtre_effectif)
+
+
+# ============================================================================
+# ONGLET SETTINGS & ADMIN
+# ============================================================================
+with tab_settings:
+    st.markdown('<div class="section-title">Settings &amp; Admin</div>',
+                unsafe_allow_html=True)
+
+    sa_col1, sa_col2 = st.columns([1, 1], gap="large")
+
+    with sa_col1:
+        # ── Gérer les Commerciaux ────────────────────────────────────────────
+        with st.expander("Gérer les Commerciaux", expanded=True):
+            st_team = db.get_sales_team()
+            if not st_team.empty:
+                st.dataframe(st_team[["nom","marche"]], hide_index=True,
+                             use_container_width=True)
+            st.markdown("**Ajouter un commercial**")
+            with st.form("form_add_sales", clear_on_submit=True):
+                nc1, nc2 = st.columns(2)
+                with nc1:
+                    new_sales_nom    = st.text_input("Nom", key="new_sales_nom")
+                with nc2:
+                    new_sales_marche = st.selectbox(
+                        "Marché",
+                        ["GCC","EMEA","APAC","Americas","Nordics","Global"],
+                        key="new_sales_marche")
+                if st.form_submit_button("Ajouter", use_container_width=True):
+                    if new_sales_nom.strip():
+                        ok = db.add_sales_member(new_sales_nom.strip(), new_sales_marche)
+                        st.success("Commercial ajouté." if ok else "Nom déjà existant.")
+                        st.rerun()
+
+        # ── Ajouter un Contact ───────────────────────────────────────────────
+        with st.expander("Ajouter un Contact", expanded=False):
+            clients_dict_cont = db.get_client_options()
+            if not clients_dict_cont:
+                st.info("Ajoutez d'abord un client.")
+            else:
+                with st.form("form_contact", clear_on_submit=True):
+                    cont_client = st.selectbox("Client", list(clients_dict_cont.keys()),
+                                               key="cont_client_sel")
+                    cc1, cc2 = st.columns(2)
+                    with cc1:
+                        cont_prenom = st.text_input("Prénom")
+                        cont_nom    = st.text_input("Nom")
+                        cont_role   = st.selectbox("Rôle", [""] + db.ROLES_CONTACT)
+                    with cc2:
+                        cont_email  = st.text_input("Email")
+                        cont_tel    = st.text_input("Téléphone")
+                        cont_li     = st.text_input("LinkedIn (URL)")
+                    cont_primary = st.checkbox("Contact principal")
+                    sub_cont = st.form_submit_button("Enregistrer le Contact",
+                                                     use_container_width=True)
+                if sub_cont:
+                    if not cont_nom.strip():
+                        st.error("Nom du contact obligatoire.")
+                    else:
+                        db.add_contact(
+                            clients_dict_cont[cont_client],
+                            cont_prenom, cont_nom, cont_role,
+                            cont_email, cont_tel, cont_li, cont_primary)
+                        st.success("Contact {prenom} {nom} ajouté pour {client}.".format(
+                            prenom=cont_prenom, nom=cont_nom, client=cont_client))
+
+        # ── Enregistrer une Activité ─────────────────────────────────────────
+        with st.expander("Enregistrer une Activité", expanded=False):
+            clients_dict2 = db.get_client_options()
+            if clients_dict2:
+                with st.form("form_act", clear_on_submit=True):
+                    ce, cf = st.columns(2)
+                    with ce:
+                        act_client = st.selectbox("Client", list(clients_dict2.keys()))
+                        act_type   = st.selectbox("Type", TYPES_INTERACTION)
+                    with cf:
+                        act_date  = st.date_input("Date", value=date.today())
+                        act_notes = st.text_area("Notes", height=68)
+                    sub_a = st.form_submit_button("Enregistrer", use_container_width=True)
+                if sub_a:
+                    db.add_activity(clients_dict2[act_client],
+                                    act_date.isoformat(), act_notes, act_type)
+                    st.success("Activité enregistrée pour {}.".format(act_client))
+
+    with sa_col2:
+        # ── Import CSV / Excel ───────────────────────────────────────────────
+        st.markdown("#### Import CSV / Excel — Upsert")
+        import_type   = st.radio("Table cible", ["Clients","Pipeline"], horizontal=True)
+        uploaded_file = st.file_uploader("Fichier CSV ou Excel (.xlsx)",
+                                         type=["csv","xlsx","xls"])
+        if import_type == "Clients":
+            st.info("Colonnes : nom_client, type_client, region")
+        else:
+            st.info("Colonnes : nom_client, fonds, statut, target_aum_initial, "
+                    "revised_aum, funded_aum, raison_perte, concurrent_choisi, "
+                    "next_action_date, sales_owner")
+        if uploaded_file:
+            try:
+                df_imp = (pd.read_csv(uploaded_file)
+                          if uploaded_file.name.endswith(".csv")
+                          else pd.read_excel(uploaded_file))
+                st.dataframe(df_imp.head(5), use_container_width=True, height=145)
+                st.caption("{} ligne(s)".format(len(df_imp)))
+                if st.button("Lancer l'import", use_container_width=True):
+                    fn = (db.upsert_clients_from_df if import_type == "Clients"
+                          else db.upsert_pipeline_from_df)
+                    ins, upd = fn(df_imp)
+                    st.success("Import : {} créé(s), {} mis à jour.".format(ins, upd))
+            except Exception as e:
+                st.error("Erreur : {}".format(e))
 
 
 # ============================================================================
