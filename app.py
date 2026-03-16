@@ -538,7 +538,7 @@ with st.sidebar:
                 st.error("Erreur : {}".format(e))
 
     st.divider()
-    st.caption("Version 9.1 — Amundi Edition")
+    st.caption("Version 9.2 — Amundi Edition — CRM Avancé")
 
 
 # ---------------------------------------------------------------------------
@@ -550,8 +550,8 @@ st.markdown(
     'Reporting executif &middot; Performance NAV</p></div>',
     unsafe_allow_html=True)
 
-tab_ingest, tab_pipeline, tab_dash, tab_sales, tab_activites, tab_perf = st.tabs([
-    "Data Ingestion", "Pipeline Management", "Executive Dashboard",
+tab_ingest, tab_crm, tab_pipeline, tab_dash, tab_sales, tab_activites, tab_perf = st.tabs([
+    "Data Ingestion", "Annuaire CRM", "Pipeline Management", "Executive Dashboard",
     "Sales Tracking", "Activités", "Performance & NAV"])
 
 
@@ -570,19 +570,63 @@ with tab_ingest:
                 with c1:
                     nom_client  = st.text_input("Nom du Client")
                     type_client = st.selectbox("Type Client", TYPES_CLIENT)
+                    region      = st.selectbox("Region", REGIONS)
                 with c2:
-                    region = st.selectbox("Region", REGIONS)
+                    # Maison mère (parent) — optionnel
+                    all_clients_opts = db.get_all_clients()
+                    parent_options   = ["(Aucune — client autonome)"] + all_clients_opts["nom_client"].tolist()
+                    parent_sel       = st.selectbox("Maison Mère (optionnel)", parent_options)
+                    tier_sel         = st.selectbox("Tier", db.TIERS_REFERENTIEL, index=1)
+                    kyc_sel          = st.selectbox("Statut KYC", db.KYC_STATUTS, index=1)
+                interests_sel = st.multiselect("Product Interests", db.PRODUCT_INTERESTS)
                 sub_c = st.form_submit_button("Enregistrer", use_container_width=True)
             if sub_c:
                 if not nom_client.strip():
                     st.error("Nom du client obligatoire.")
                 else:
                     try:
-                        db.add_client(nom_client.strip(), type_client, region)
-                        st.success("Client {} ajoute.".format(nom_client))
+                        _parent_id = None
+                        if parent_sel != "(Aucune — client autonome)":
+                            _pid_row = all_clients_opts[all_clients_opts["nom_client"] == parent_sel]
+                            if not _pid_row.empty:
+                                _parent_id = int(_pid_row.iloc[0]["id"])
+                        db.add_client(
+                            nom_client.strip(), type_client, region,
+                            parent_id=_parent_id, tier=tier_sel, kyc_status=kyc_sel,
+                            product_interests=",".join(interests_sel))
+                        st.success("Client {} ajouté.".format(nom_client))
                     except Exception as e:
-                        st.warning("Ce client existe deja." if "UNIQUE" in str(e)
+                        st.warning("Ce client existe déjà." if "UNIQUE" in str(e)
                                    else "Erreur : {}".format(e))
+
+        with st.expander("Ajouter un Contact", expanded=False):
+            clients_dict_cont = db.get_client_options()
+            if not clients_dict_cont:
+                st.info("Ajoutez d'abord un client.")
+            else:
+                with st.form("form_contact", clear_on_submit=True):
+                    cont_client = st.selectbox("Client", list(clients_dict_cont.keys()), key="cont_client_sel")
+                    cc1, cc2 = st.columns(2)
+                    with cc1:
+                        cont_prenom = st.text_input("Prénom")
+                        cont_nom    = st.text_input("Nom")
+                        cont_role   = st.selectbox("Rôle", [""] + db.ROLES_CONTACT)
+                    with cc2:
+                        cont_email  = st.text_input("Email")
+                        cont_tel    = st.text_input("Téléphone")
+                        cont_li     = st.text_input("LinkedIn (URL)")
+                    cont_primary = st.checkbox("Contact principal")
+                    sub_cont = st.form_submit_button("Enregistrer le Contact", use_container_width=True)
+                if sub_cont:
+                    if not cont_nom.strip():
+                        st.error("Nom du contact obligatoire.")
+                    else:
+                        db.add_contact(
+                            clients_dict_cont[cont_client],
+                            cont_prenom, cont_nom, cont_role,
+                            cont_email, cont_tel, cont_li, cont_primary)
+                        st.success("Contact {prenom} {nom} ajouté pour {client}.".format(
+                            prenom=cont_prenom, nom=cont_nom, client=cont_client))
 
         with st.expander("Ajouter un Deal Pipeline", expanded=True):
             clients_dict = db.get_client_options()
@@ -693,7 +737,240 @@ with tab_ingest:
 
 
 # ============================================================================
-# ONGLET 2 — PIPELINE MANAGEMENT
+# ONGLET 2 — ANNUAIRE CRM (Master-Detail : Clients + Contacts)
+# ============================================================================
+with tab_crm:
+    st.markdown('<div class="section-title">Annuaire CRM — Clients &amp; Contacts</div>',
+                unsafe_allow_html=True)
+
+    df_hier = db.get_client_hierarchy()
+
+    # ── helpers visuels ──────────────────────────────────────────────────────
+    def _kyc_dot(kyc):
+        colors = {"Validé": "#22a062", "En cours": ORANGE, "Bloqué": "#c0392b"}
+        c = colors.get(kyc, "#aaa")
+        return (
+            '<span style="display:inline-block;width:9px;height:9px;border-radius:50%;'
+            'background:{c};vertical-align:middle;margin-right:5px;" '
+            'title="KYC : {kyc}"></span>').format(c=c, kyc=kyc)
+
+    def _tier_badge(tier):
+        tier_colors = {"Tier 1": MARINE, "Tier 2": B_MID, "Tier 3": B_PAL}
+        c = tier_colors.get(tier, GRIS)
+        return (
+            '<span style="background:{c};color:#fff;font-size:0.62rem;font-weight:700;'
+            'padding:1px 7px;letter-spacing:0.3px;vertical-align:middle;">{t}</span>'
+        ).format(c=c, t=tier)
+
+    # ── layout Master-Detail ─────────────────────────────────────────────────
+    col_list, col_detail = st.columns([1, 2], gap="large")
+
+    with col_list:
+        st.markdown(
+            '<div class="section-title" style="font-size:0.78rem;">Clients ({n})</div>'.format(
+                n=len(df_hier)), unsafe_allow_html=True)
+
+        # Filtres
+        crm_f1, crm_f2 = st.columns(2)
+        with crm_f1:
+            crm_filt_tier = st.multiselect("Tier", db.TIERS_REFERENTIEL,
+                                           key="crm_filt_tier", label_visibility="collapsed",
+                                           placeholder="Tier…")
+        with crm_f2:
+            crm_filt_kyc = st.multiselect("KYC", db.KYC_STATUTS,
+                                          key="crm_filt_kyc", label_visibility="collapsed",
+                                          placeholder="KYC…")
+
+        df_view_crm = df_hier.copy()
+        if crm_filt_tier:
+            df_view_crm = df_view_crm[df_view_crm["tier"].isin(crm_filt_tier)]
+        if crm_filt_kyc:
+            df_view_crm = df_view_crm[df_view_crm["kyc_status"].isin(crm_filt_kyc)]
+
+        # Sélection client dans session_state
+        if "crm_selected_client_id" not in st.session_state:
+            st.session_state["crm_selected_client_id"] = None
+
+        for _, row_c in df_view_crm.iterrows():
+            cid        = int(row_c["id"])
+            cnom       = str(row_c["nom_client"])
+            tier       = str(row_c.get("tier","Tier 2"))
+            kyc        = str(row_c.get("kyc_status","En cours"))
+            parent_nom = str(row_c.get("parent_nom",""))
+            is_sel     = (st.session_state["crm_selected_client_id"] == cid)
+
+            # Indicateur parent (filiale)
+            parent_html = ""
+            if parent_nom:
+                parent_html = (
+                    '<div style="font-size:0.62rem;color:#777;margin-top:2px;">'
+                    '↳ Filiale de <em>{}</em></div>').format(parent_nom)
+
+            card_bg = "#e8f1f9" if is_sel else "#f9fbfd"
+            border  = "2px solid {}".format(ORANGE) if is_sel else "1px solid #e0e8f0"
+
+            st.markdown(
+                '<div style="background:{bg};border:{bdr};padding:9px 12px;margin:4px 0;cursor:pointer;">'
+                '<div style="display:flex;align-items:center;gap:6px;flex-wrap:wrap;">'
+                '{kycdot}{tier_b}'
+                '<span style="font-weight:700;font-size:0.82rem;color:{marine};">{nom}</span>'
+                '</div>'
+                '{parent_html}</div>'.format(
+                    bg=card_bg, bdr=border,
+                    kycdot=_kyc_dot(kyc), tier_b=_tier_badge(tier),
+                    marine=MARINE, nom=cnom, parent_html=parent_html),
+                unsafe_allow_html=True)
+
+            if st.button("Sélectionner", key="crm_sel_{}".format(cid),
+                         use_container_width=True):
+                st.session_state["crm_selected_client_id"] = cid
+                st.rerun()
+
+    # ── Panneau detail (contacts) ────────────────────────────────────────────
+    with col_detail:
+        sel_cid = st.session_state.get("crm_selected_client_id")
+
+        if sel_cid is None:
+            st.markdown(
+                '<div style="background:#001c4b04;border:2px dashed #001c4b18;'
+                'padding:40px;text-align:center;margin-top:20px;">'
+                '<div style="font-size:0.92rem;font-weight:700;color:{marine};">Sélectionnez un client</div>'
+                '<div style="color:#888;font-size:0.79rem;margin-top:4px;">'
+                'La fiche contacts s\'affichera ici</div>'
+                '</div>'.format(marine=MARINE), unsafe_allow_html=True)
+        else:
+            # Données du client sélectionné
+            sel_row = df_hier[df_hier["id"] == sel_cid]
+            if sel_row.empty:
+                st.warning("Client introuvable.")
+            else:
+                sel_row = sel_row.iloc[0]
+                sel_nom    = str(sel_row["nom_client"])
+                sel_tier   = str(sel_row.get("tier","Tier 2"))
+                sel_kyc    = str(sel_row.get("kyc_status","En cours"))
+                sel_type   = str(sel_row.get("type_client",""))
+                sel_region = str(sel_row.get("region",""))
+                sel_parent = str(sel_row.get("parent_nom",""))
+                sel_prods  = str(sel_row.get("product_interests",""))
+
+                # Fiche client
+                kyc_color = {"Validé":"#22a062","En cours":ORANGE,"Bloqué":"#c0392b"}.get(sel_kyc, "#aaa")
+                st.markdown(
+                    '<div class="detail-panel" style="margin-bottom:12px;">'
+                    '<div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap;margin-bottom:8px;">'
+                    '<span style="font-size:1.0rem;font-weight:800;color:{marine};">{nom}</span>'
+                    '{tier_b}'
+                    '<span style="background:{kycc};color:#fff;font-size:0.68rem;font-weight:700;padding:2px 10px;">'
+                    'KYC : {kyc}</span>'
+                    '</div>'
+                    '<div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:8px;font-size:0.78rem;">'
+                    '<div><div style="color:#888;font-size:0.67rem;">Type</div>'
+                    '<div style="font-weight:600;color:{marine};">{type}</div></div>'
+                    '<div><div style="color:#888;font-size:0.67rem;">Région</div>'
+                    '<div style="font-weight:600;color:{marine};">{region}</div></div>'
+                    '<div><div style="color:#888;font-size:0.67rem;">Maison Mère</div>'
+                    '<div style="font-weight:600;color:{marine};">{parent}</div></div>'
+                    '</div>'
+                    '{prods_block}'
+                    '</div>'.format(
+                        marine=MARINE, nom=sel_nom,
+                        tier_b=_tier_badge(sel_tier),
+                        kycc=kyc_color, kyc=sel_kyc,
+                        type=sel_type, region=sel_region,
+                        parent=sel_parent if sel_parent else "—",
+                        prods_block=(
+                            '<div style="margin-top:9px;font-size:0.74rem;">'
+                            '<span style="color:#888;">Product Interests : </span>'
+                            + " ".join(
+                                '<span style="background:{ciel}18;border:1px solid {ciel}44;'
+                                'color:{marine};padding:1px 7px;font-size:0.68rem;font-weight:600;'
+                                'margin:2px;">{p}</span>'.format(ciel=CIEL, marine=MARINE, p=p.strip())
+                                for p in sel_prods.split(",") if p.strip()
+                            ) + '</div>'
+                        ) if sel_prods.strip() else ""
+                    ),
+                    unsafe_allow_html=True)
+
+                # Contacts
+                df_contacts = db.get_contacts(sel_cid)
+                st.markdown(
+                    '<div class="section-title" style="font-size:0.78rem;margin-bottom:8px;">'
+                    'Contacts ({n})</div>'.format(n=len(df_contacts)),
+                    unsafe_allow_html=True)
+
+                if df_contacts.empty:
+                    st.markdown(
+                        '<div style="color:#888;font-size:0.80rem;padding:8px 0;">'
+                        'Aucun contact enregistré pour ce client.</div>',
+                        unsafe_allow_html=True)
+                else:
+                    for _, ct in df_contacts.iterrows():
+                        prenom   = str(ct.get("prenom",""))
+                        cnom_ct  = str(ct.get("nom",""))
+                        role     = str(ct.get("role",""))
+                        email    = str(ct.get("email","")).strip()
+                        tel      = str(ct.get("telephone","")).strip()
+                        linkedin = str(ct.get("linkedin","")).strip()
+                        primary  = bool(ct.get("is_primary", 0))
+
+                        email_html = (
+                            '<a href="mailto:{e}" style="color:{ciel};text-decoration:none;">{e}</a>'
+                            .format(e=email, ciel=CIEL)) if email else "—"
+                        li_html = (
+                            '<a href="https://{l}" target="_blank" '
+                            'style="color:{ciel};text-decoration:none;">LinkedIn</a>'
+                            .format(l=linkedin.lstrip("https://").lstrip("http://"), ciel=CIEL)
+                        ) if linkedin else ""
+                        primary_badge = (
+                            '<span style="background:{o};color:#fff;font-size:0.60rem;font-weight:700;'
+                            'padding:1px 6px;vertical-align:middle;margin-left:4px;">Contact Principal</span>'
+                            .format(o=ORANGE)) if primary else ""
+
+                        st.markdown(
+                            '<div style="background:#f4f8fc;border-left:3px solid {ciel};'
+                            'padding:10px 14px;margin:6px 0;">'
+                            '<div style="display:flex;align-items:center;gap:6px;margin-bottom:4px;">'
+                            '<span style="font-weight:700;font-size:0.85rem;color:{marine};">'
+                            '{prenom} {nom}</span>{primary}'
+                            '<span style="color:#888;font-size:0.72rem;margin-left:auto;">{role}</span>'
+                            '</div>'
+                            '<div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:4px;'
+                            'font-size:0.75rem;">'
+                            '<div>{email}</div>'
+                            '<div style="color:#666;">{tel}</div>'
+                            '<div>{li}</div>'
+                            '</div></div>'.format(
+                                ciel=CIEL, marine=MARINE,
+                                prenom=prenom, nom=cnom_ct,
+                                primary=primary_badge, role=role,
+                                email=email_html, tel=tel or "—", li=li_html),
+                            unsafe_allow_html=True)
+
+                # Formulaire ajout contact rapide
+                with st.expander("Ajouter un contact pour {}".format(sel_nom), expanded=False):
+                    with st.form("form_contact_detail_{}".format(sel_cid), clear_on_submit=True):
+                        qcc1, qcc2 = st.columns(2)
+                        with qcc1:
+                            qc_prenom = st.text_input("Prénom", key="qc_prenom_{}".format(sel_cid))
+                            qc_nom    = st.text_input("Nom",    key="qc_nom_{}".format(sel_cid))
+                            qc_role   = st.selectbox("Rôle", [""] + db.ROLES_CONTACT, key="qc_role_{}".format(sel_cid))
+                        with qcc2:
+                            qc_email  = st.text_input("Email",     key="qc_email_{}".format(sel_cid))
+                            qc_tel    = st.text_input("Téléphone", key="qc_tel_{}".format(sel_cid))
+                            qc_li     = st.text_input("LinkedIn",  key="qc_li_{}".format(sel_cid))
+                        qc_primary = st.checkbox("Contact principal", key="qc_primary_{}".format(sel_cid))
+                        if st.form_submit_button("Enregistrer le Contact", use_container_width=True):
+                            if not qc_nom.strip():
+                                st.error("Nom obligatoire.")
+                            else:
+                                db.add_contact(sel_cid, qc_prenom, qc_nom, qc_role,
+                                               qc_email, qc_tel, qc_li, qc_primary)
+                                st.success("Contact ajouté.")
+                                st.rerun()
+
+
+# ============================================================================
+# ONGLET 3 — PIPELINE MANAGEMENT
 # ============================================================================
 with tab_pipeline:
     st.markdown('<div class="section-title">Pipeline Management</div>',
@@ -832,17 +1109,38 @@ with tab_pipeline:
                         new_nad = st.date_input("Prochaine Action", value=nad)
                     sub = st.form_submit_button("Sauvegarder", use_container_width=True)
                 if sub:
-                    ok, msg = db.update_pipeline_row({
-                        "id": pipeline_id, "fonds": new_fonds, "statut": new_statut,
-                        "target_aum_initial": new_target, "revised_aum": new_revised,
-                        "funded_aum": new_funded, "raison_perte": new_raison,
-                        "concurrent_choisi": new_conc, "next_action_date": new_nad,
-                        "sales_owner": new_sales, "closing_probability": new_prob})
-                    if ok:
-                        st.success("Deal mis a jour — {} / {}".format(new_statut, fmt_m(new_funded)))
-                        st.rerun()
+                    # ── SÉCURITÉ MÉTIER : KYC bloquant ──────────────────────────
+                    if new_statut == "Funded":
+                        kyc_check = str(row_data.get("kyc_status", "En cours"))
+                        if kyc_check in ("Bloqué", "En cours"):
+                            st.error(
+                                "KYC incomplet : impossible de valider le financement. "
+                                "Statut KYC actuel : **{}**. "
+                                "Veuillez valider le KYC du client avant de passer au statut Funded.".format(kyc_check))
+                        else:
+                            ok, msg = db.update_pipeline_row({
+                                "id": pipeline_id, "fonds": new_fonds, "statut": new_statut,
+                                "target_aum_initial": new_target, "revised_aum": new_revised,
+                                "funded_aum": new_funded, "raison_perte": new_raison,
+                                "concurrent_choisi": new_conc, "next_action_date": new_nad,
+                                "sales_owner": new_sales, "closing_probability": new_prob})
+                            if ok:
+                                st.success("Deal mis a jour — {} / {}".format(new_statut, fmt_m(new_funded)))
+                                st.rerun()
+                            else:
+                                st.error(msg)
                     else:
-                        st.error(msg)
+                        ok, msg = db.update_pipeline_row({
+                            "id": pipeline_id, "fonds": new_fonds, "statut": new_statut,
+                            "target_aum_initial": new_target, "revised_aum": new_revised,
+                            "funded_aum": new_funded, "raison_perte": new_raison,
+                            "concurrent_choisi": new_conc, "next_action_date": new_nad,
+                            "sales_owner": new_sales, "closing_probability": new_prob})
+                        if ok:
+                            st.success("Deal mis a jour — {} / {}".format(new_statut, fmt_m(new_funded)))
+                            st.rerun()
+                        else:
+                            st.error(msg)
             df_audit = db.get_audit_log(pipeline_id)
             if not df_audit.empty:
                 with st.expander("Historique modifications — Deal #{}".format(pipeline_id)):
@@ -894,7 +1192,7 @@ with tab_pipeline:
 
 
 # ============================================================================
-# ONGLET 3 — EXECUTIVE DASHBOARD
+# ONGLET 4 — EXECUTIVE DASHBOARD
 # KPI grid CSS pur → alignement parfait
 # Surbrillance orange au hover + indicateur ▸
 # ============================================================================
@@ -1099,7 +1397,7 @@ with tab_dash:
 
 
 # ============================================================================
-# ONGLET 4 — SALES TRACKING
+# ONGLET 5 — SALES TRACKING
 # ============================================================================
 with tab_sales:
     st.markdown('<div class="section-title">Sales Tracking — Suivi par Commercial</div>',
@@ -1188,7 +1486,7 @@ with tab_sales:
 
 
 # ============================================================================
-# ONGLET 5 — ACTIVITÉS
+# ONGLET 6 — ACTIVITÉS
 # ============================================================================
 with tab_activites:
     st.markdown('<div class="section-title">Journal des Activites</div>',
@@ -1326,7 +1624,7 @@ with tab_activites:
 
 
 # ============================================================================
-# ONGLET 6 — PERFORMANCE & NAV
+# ONGLET 7 — PERFORMANCE & NAV
 # ============================================================================
 with tab_perf:
     st.markdown('<div class="section-title">Performance et NAV</div>', unsafe_allow_html=True)
