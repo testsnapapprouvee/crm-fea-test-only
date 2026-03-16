@@ -46,6 +46,15 @@ STATUTS_ACTIFS    = ["Prospect","Initial Pitch","Due Diligence","Soft Commit"]
 RAISONS_PERTE     = ["Pricing","Track Record","Macro","Competitor","Autre"]
 TYPES_INTERACTION = ["Call","Meeting","Email","Roadshow","Conference","Autre"]
 
+# v10.1 — Countries reference list
+COUNTRIES_LIST = [
+    "", "United Arab Emirates", "Saudi Arabia", "Qatar", "Kuwait", "Bahrain", "Oman",
+    "United Kingdom", "France", "Germany", "Switzerland", "Luxembourg", "Netherlands",
+    "Italy", "Spain", "Belgium", "Austria", "Sweden", "Norway", "Denmark", "Finland",
+    "Singapore", "Japan", "Hong Kong", "China", "South Korea", "Australia", "India",
+    "United States", "Canada", "Brazil", "Mexico", "South Africa", "Egypt",
+]
+
 STATUT_COLORS = {
     "Funded":        B_MID,    "Soft Commit":   "#2c7fb8",
     "Due Diligence": "#004f8c", "Initial Pitch": B_PAL,
@@ -54,6 +63,26 @@ STATUT_COLORS = {
 }
 
 fmt_m = db.format_finance
+
+# ---------------------------------------------------------------------------
+# TIMEFRAME HELPER — v10.1
+# ---------------------------------------------------------------------------
+from datetime import date as _date_cls
+
+TIMEFRAMES = ["Max", "YTD", "1M Rolling", "3M Rolling", "1Y Rolling"]
+
+def _timeframe_cutoff(timeframe: str):
+    """Returns the start date for the chosen timeframe, or None for Max."""
+    today = _date_cls.today()
+    if timeframe == "YTD":
+        return _date_cls(today.year, 1, 1)
+    if timeframe == "1M Rolling":
+        return today - timedelta(days=30)
+    if timeframe == "3M Rolling":
+        return today - timedelta(days=91)
+    if timeframe == "1Y Rolling":
+        return today - timedelta(days=365)
+    return None  # "Max" → no filter
 
 # ---------------------------------------------------------------------------
 # CONFIG
@@ -538,7 +567,7 @@ with st.sidebar:
                 st.error("Erreur : {}".format(e))
 
     st.divider()
-    st.caption("Version 9.2 — Amundi Edition — CRM Avancé")
+    st.caption("Version 10.1 — Amundi Edition — Production Grade")
 
 
 # ---------------------------------------------------------------------------
@@ -551,15 +580,15 @@ st.markdown(
     unsafe_allow_html=True)
 
 tab_ingest, tab_crm, tab_pipeline, tab_dash, tab_sales, tab_activites, tab_perf = st.tabs([
-    "Data Ingestion", "Annuaire CRM", "Pipeline Management", "Executive Dashboard",
-    "Sales Tracking", "Activités", "Performance & NAV"])
+    "Data Ingestion", "CRM Directory", "Pipeline Management", "Executive Dashboard",
+    "Sales Tracking", "Activities", "Performance & NAV"])
 
 
 # ============================================================================
 # ONGLET 1 — DATA INGESTION
 # ============================================================================
 with tab_ingest:
-    st.markdown('<div class="section-title">Saisie et Import de Donnees</div>',
+    st.markdown('<div class="section-title">Data Entry &amp; Import</div>',
                 unsafe_allow_html=True)
     col_form, col_import = st.columns([1, 1], gap="large")
 
@@ -587,6 +616,7 @@ with tab_ingest:
                         help="Non applicable si le compte est lui-même une Maison Mère.")
                     tier_sel = st.selectbox("Tier", db.TIERS_REFERENTIEL, index=1)
                     kyc_sel  = st.selectbox("Statut KYC", db.KYC_STATUTS, index=1)
+                    country_sel = st.selectbox("Country", COUNTRIES_LIST)
                 interests_sel = st.multiselect("Product Interests", db.PRODUCT_INTERESTS)
                 sub_c = st.form_submit_button("Enregistrer", use_container_width=True)
             if sub_c:
@@ -602,6 +632,7 @@ with tab_ingest:
                                 _parent_id = int(_pid_row.iloc[0]["id"])
                         db.add_client(
                             nom_client.strip(), type_client, region,
+                            country=country_sel,
                             parent_id=_parent_id, tier=tier_sel, kyc_status=kyc_sel,
                             product_interests=",".join(interests_sel))
                         st.success("Client {} ajouté.".format(nom_client))
@@ -750,7 +781,7 @@ with tab_ingest:
 # ONGLET 2 — ANNUAIRE CRM (Recherche centralisée + Fiche épurée)
 # ============================================================================
 with tab_crm:
-    st.markdown('<div class="section-title">Annuaire CRM — Clients &amp; Contacts</div>',
+    st.markdown('<div class="section-title">CRM Directory — Clients &amp; Contacts</div>',
                 unsafe_allow_html=True)
 
     df_hier = db.get_client_hierarchy()
@@ -966,6 +997,73 @@ with tab_crm:
                                 email=email_html, li=li_html),
                             unsafe_allow_html=True)
 
+                        ct_id = int(ct.get("id", 0))
+                        cb1, cb2, cb_sp = st.columns([1, 1, 10])
+                        with cb1:
+                            if st.button("✏️", key="edit_ct_{}".format(ct_id),
+                                         help="Edit contact"):
+                                st.session_state["edit_ct_id"] = ct_id
+                                st.session_state["edit_ct_data"] = ct.to_dict()
+                        with cb2:
+                            if st.button("🗑️", key="del_ct_{}".format(ct_id),
+                                         help="Delete contact"):
+                                st.session_state["confirm_del_ct"] = ct_id
+
+                        if st.session_state.get("confirm_del_ct") == ct_id:
+                            st.warning("Delete {} {}?".format(
+                                ct.get("prenom",""), ct.get("nom","")))
+                            cdc1, cdc2, _ = st.columns([1, 1, 6])
+                            with cdc1:
+                                if st.button("✅ Confirm",
+                                             key="cdc_yes_{}".format(ct_id)):
+                                    ok, err = db.delete_contact(ct_id)
+                                    if ok:
+                                        st.session_state.pop("confirm_del_ct", None)
+                                        st.rerun()
+                                    else:
+                                        st.error(err)
+                            with cdc2:
+                                if st.button("❌ Cancel",
+                                             key="cdc_no_{}".format(ct_id)):
+                                    st.session_state.pop("confirm_del_ct", None)
+                                    st.rerun()
+
+                edit_ct_id = st.session_state.get("edit_ct_id")
+                if edit_ct_id:
+                    ect = st.session_state.get("edit_ct_data", {})
+                    with st.expander("✏️ Editing Contact #{}".format(edit_ct_id), expanded=True):
+                        with st.form("form_edit_ct_{}".format(edit_ct_id), clear_on_submit=True):
+                            ec1, ec2 = st.columns(2)
+                            with ec1:
+                                ec_prenom = st.text_input("First Name", value=str(ect.get("prenom","")))
+                                ec_nom    = st.text_input("Last Name",  value=str(ect.get("nom","")))
+                                ec_role   = st.selectbox("Role", [""] + db.ROLES_CONTACT,
+                                    index=([""] + db.ROLES_CONTACT).index(str(ect.get("role","")))
+                                          if str(ect.get("role","")) in ([""] + db.ROLES_CONTACT) else 0)
+                            with ec2:
+                                ec_email = st.text_input("Email",     value=str(ect.get("email","")))
+                                ec_tel   = st.text_input("Phone",     value=str(ect.get("telephone","")))
+                                ec_li    = st.text_input("LinkedIn",  value=str(ect.get("linkedin","")))
+                            ec_primary = st.checkbox("Primary contact",
+                                                    value=bool(ect.get("is_primary", 0)))
+                            ecs1, ecs2 = st.columns(2)
+                            with ecs1:
+                                if st.form_submit_button("Save Changes", use_container_width=True):
+                                    ok, err = db.update_contact(edit_ct_id, ec_prenom, ec_nom,
+                                                                ec_role, ec_email, ec_tel,
+                                                                ec_li, ec_primary)
+                                    if ok:
+                                        st.session_state.pop("edit_ct_id", None)
+                                        st.session_state.pop("edit_ct_data", None)
+                                        st.rerun()
+                                    else:
+                                        st.error(err)
+                            with ecs2:
+                                if st.form_submit_button("Cancel", use_container_width=True):
+                                    st.session_state.pop("edit_ct_id", None)
+                                    st.session_state.pop("edit_ct_data", None)
+                                    st.rerun()
+
                 # ── Ajouter un contact (expander discret) ────────────────────
                 with st.expander("＋ Ajouter un contact pour {}".format(sel_nom),
                                  expanded=False):
@@ -989,6 +1087,79 @@ with tab_crm:
                                                qc_email, qc_tel, qc_li, qc_primary)
                                 st.success("Contact ajouté.")
                                 st.rerun()
+
+        # ── MAILING LIST GENERATOR ────────────────────────────────────────────
+        st.markdown("---")
+        with st.expander("📧 Mailing List Generator", expanded=False):
+            st.markdown(
+                '<div class="pipeline-hint">Filter contacts by account attributes '
+                'to build a targeted mailing list. Only contacts with an email '
+                'address are included.</div>',
+                unsafe_allow_html=True)
+
+            mg1, mg2, mg3, mg4 = st.columns(4)
+            with mg1:
+                ml_regions = st.multiselect("Region", db.REGIONS_REFERENTIEL,
+                                            key="ml_regions")
+            with mg2:
+                ml_countries = st.multiselect("Country", COUNTRIES_LIST[1:],
+                                              key="ml_countries")
+            with mg3:
+                ml_tiers = st.multiselect("Tier", db.TIERS_REFERENTIEL,
+                                          key="ml_tiers")
+            with mg4:
+                ml_interests = st.multiselect("Product Interests",
+                                              db.PRODUCT_INTERESTS,
+                                              key="ml_interests")
+
+            df_ml = db.get_mailing_list(
+                regions=ml_regions or None,
+                countries=ml_countries or None,
+                tiers=ml_tiers or None,
+                product_interests=ml_interests or None,
+            )
+
+            if df_ml.empty:
+                st.info("No contacts match the selected filters.")
+            else:
+                display_cols = ["first_name", "last_name", "company",
+                                "role", "email"]
+                st.markdown(
+                    '<div class="pipeline-hint"><b>{}</b> contact(s) '
+                    'found</div>'.format(len(df_ml)),
+                    unsafe_allow_html=True)
+                st.dataframe(
+                    df_ml[display_cols].rename(columns={
+                        "first_name": "First Name",
+                        "last_name":  "Last Name",
+                        "company":    "Company",
+                        "role":       "Role",
+                        "email":      "Email",
+                    }),
+                    use_container_width=True, hide_index=True,
+                    height=min(320, 46 + len(df_ml) * 36))
+
+                emails_str = "; ".join(df_ml["email"].tolist())
+                st.markdown(
+                    '<div style="font-size:0.76rem;font-weight:700;'
+                    'color:{m};margin:10px 0 4px 0;">Email list '
+                    '(copy &amp; paste into Outlook):</div>'.format(m=MARINE),
+                    unsafe_allow_html=True)
+                st.code(emails_str, language=None)
+
+                csv_bytes = df_ml[display_cols].rename(columns={
+                    "first_name": "First Name",
+                    "last_name":  "Last Name",
+                    "company":    "Company",
+                    "role":       "Role",
+                    "email":      "Email",
+                }).to_csv(index=False).encode("utf-8")
+                st.download_button(
+                    "⬇️ Export CSV",
+                    data=csv_bytes,
+                    file_name="mailing_list_{}.csv".format(date.today().isoformat()),
+                    mime="text/csv",
+                    use_container_width=True)
 
 
 # ============================================================================
@@ -1168,6 +1339,32 @@ with tab_pipeline:
                 with st.expander("Historique modifications — Deal #{}".format(pipeline_id)):
                     st.dataframe(df_audit, use_container_width=True, hide_index=True,
                                  height=min(220, 46 + len(df_audit) * 36))
+
+            # ── Delete deal ──────────────────────────────────────────────────
+            st.markdown("---")
+            if st.button("🗑️ Delete this deal (irreversible)",
+                         key="del_deal_{}".format(pipeline_id)):
+                st.session_state["confirm_del_deal"] = pipeline_id
+
+            if st.session_state.get("confirm_del_deal") == pipeline_id:
+                st.error("⚠️ This will permanently delete deal #{} "
+                         "and its full audit trail.".format(pipeline_id))
+                dd1, dd2, _ = st.columns([1, 1, 6])
+                with dd1:
+                    if st.button("✅ Confirm Delete",
+                                 key="del_deal_confirm_{}".format(pipeline_id)):
+                        ok, err = db.delete_pipeline_row(pipeline_id)
+                        if ok:
+                            st.session_state.pop("confirm_del_deal", None)
+                            st.success("Deal deleted.")
+                            st.rerun()
+                        else:
+                            st.error(err)
+                with dd2:
+                    if st.button("❌ Cancel",
+                                 key="del_deal_cancel_{}".format(pipeline_id)):
+                        st.session_state.pop("confirm_del_deal", None)
+                        st.rerun()
     else:
         st.markdown(
             '<div style="background:#001c4b04;border:1px dashed #001c4b20;'
@@ -1206,7 +1403,7 @@ with tab_pipeline:
     df_lp = df_lp[df_lp["statut"].isin(["Lost","Paused"])].copy()
     if not df_lp.empty:
         st.divider()
-        st.markdown("#### Deals Perdus / En Pause")
+        st.markdown("#### Lost / Paused Deals")
         df_lp2 = df_lp[["nom_client","fonds","statut","target_aum_initial",
                          "raison_perte","concurrent_choisi","sales_owner"]].copy()
         df_lp2["target_aum_initial"] = df_lp2["target_aum_initial"].apply(fmt_m)
@@ -1222,19 +1419,52 @@ with tab_dash:
     st.markdown('<div class="section-title">Executive Dashboard</div>',
                 unsafe_allow_html=True)
 
+    # ── Timeframe selector ───────────────────────────────────────────────────
+    tf_dash = st.selectbox("Timeframe", TIMEFRAMES, key="tf_dash",
+                           label_visibility="collapsed")
+    cutoff_dash = _timeframe_cutoff(tf_dash)
+
+    # ── Filtered KPI computation ─────────────────────────────────────────────
     kpis = db.get_kpis()
+    if cutoff_dash is not None:
+        import pandas as _pd
+        _conn = db.get_connection()
+        _cutoff_str = cutoff_dash.isoformat()
+        _df_p = _pd.read_sql_query(
+            "SELECT p.statut, p.funded_aum, p.revised_aum"
+            " FROM pipeline p"
+            " WHERE DATE(p.updated_at) >= ?",
+            _conn, params=(_cutoff_str,))
+        _conn.close()
+        if not _df_p.empty:
+            kpis["total_funded"]    = float(_df_p[_df_p["statut"]=="Funded"]["funded_aum"].sum())
+            kpis["pipeline_actif"]  = float(_df_p[_df_p["statut"].isin(
+                ["Prospect","Initial Pitch","Due Diligence","Soft Commit"])]["revised_aum"].sum())
+            kpis["nb_funded"]       = int((_df_p["statut"]=="Funded").sum())
+            kpis["nb_lost"]         = int((_df_p["statut"]=="Lost").sum())
+            kpis["nb_paused"]       = int((_df_p["statut"]=="Paused").sum())
+            kpis["nb_deals_actifs"] = int(_df_p["statut"].isin(
+                ["Prospect","Initial Pitch","Due Diligence","Soft Commit"]).sum())
+            nb_fl = kpis["nb_funded"] + kpis["nb_lost"]
+            kpis["taux_conversion"] = round(kpis["nb_funded"] / nb_fl * 100, 1) if nb_fl > 0 else 0.0
+        else:
+            for k in ("total_funded","pipeline_actif","nb_funded","nb_lost",
+                      "nb_paused","nb_deals_actifs","taux_conversion"):
+                kpis[k] = 0
+
     nb_lost_paused = kpis["nb_lost"] + kpis.get("nb_paused", 0)
+    tf_label = "" if tf_dash == "Max" else "  —  {}".format(tf_dash)
 
     # ---- KPI Cards ----
     card_lp = (
         '<div class="kpi-card kpi-card-static">'
-        '<div class="kpi-label">Lost / Paused</div>'
+        '<div class="kpi-label">Lost / Paused Deals</div>'
         '<div class="kpi-value">{n}</div>'
         '<div class="kpi-sub">{n} deals</div>'
         '</div>'
     ).format(n=nb_lost_paused) if nb_lost_paused > 0 else (
         '<div class="kpi-card kpi-card-static">'
-        '<div class="kpi-label">Lost / Paused</div>'
+        '<div class="kpi-label">Lost / Paused Deals</div>'
         '<div class="kpi-value">0</div>'
         '<div class="kpi-sub">&nbsp;</div>'
         '</div>'
@@ -1242,22 +1472,22 @@ with tab_dash:
     st.markdown(
         '<div class="kpi-grid">'
         '<div class="kpi-card kpi-card-static">'
-        '<div class="kpi-label">AUM Finance Total</div>'
+        '<div class="kpi-label">Total Funded AUM</div>'
         '<div class="kpi-value">{aum_f}</div>'
-        '<div class="kpi-sub">{nb_f} deal(s) Funded</div>'
+        '<div class="kpi-sub">{nb_f} deal(s) funded</div>'
         '</div>'
         '<div class="kpi-card kpi-card-static">'
-        '<div class="kpi-label">Pipeline Actif</div>'
+        '<div class="kpi-label">Active Pipeline</div>'
         '<div class="kpi-value">{aum_p}</div>'
-        '<div class="kpi-sub">{nb_p} deals en cours</div>'
+        '<div class="kpi-sub">{nb_p} active deals</div>'
         '</div>'
         '<div class="kpi-card kpi-card-static">'
         '<div class="kpi-label">Weighted Pipeline</div>'
         '<div class="kpi-value">{wp}</div>'
-        '<div class="kpi-sub">proba ponderee</div>'
+        '<div class="kpi-sub">probability-weighted</div>'
         '</div>'
         '<div class="kpi-card kpi-card-static">'
-        '<div class="kpi-label">Taux Conversion</div>'
+        '<div class="kpi-label">Conversion Rate</div>'
         '<div class="kpi-value">{taux:.1f}%</div>'
         '<div class="kpi-sub">{nb_f2} funded / {nb_l} lost</div>'
         '</div>'
@@ -1382,7 +1612,7 @@ with tab_dash:
             st.plotly_chart(fig_fonds, use_container_width=True, config={"displayModeBar": False})
 
     st.divider()
-    st.markdown("#### Top Deals — AUM Finance")
+    st.markdown("#### Top Deals — Funded AUM")
     df_funded_top = (db.get_pipeline_with_clients()
                      .query("statut == 'Funded'")
                      .sort_values("funded_aum", ascending=False)
@@ -1422,7 +1652,7 @@ with tab_dash:
 # ONGLET 5 — SALES TRACKING
 # ============================================================================
 with tab_sales:
-    st.markdown('<div class="section-title">Sales Tracking — Suivi par Commercial</div>',
+    st.markdown('<div class="section-title">Sales Tracking</div>',
                 unsafe_allow_html=True)
     df_sm = db.get_sales_metrics()
     df_na = db.get_next_actions_by_sales(days_ahead=30)
@@ -1457,7 +1687,7 @@ with tab_sales:
                     unsafe_allow_html=True)
 
         st.divider()
-        st.markdown("#### AUM Finance vs Pipeline par Commercial")
+        st.markdown("#### Funded AUM vs Active Pipeline by Sales Rep")
         if df_sm["AUM_Finance"].sum() > 0:
             fig_sales = go.Figure()
             for lbl, col_key, color in [
@@ -1476,7 +1706,7 @@ with tab_sales:
 
         st.divider()
         # ── SALES INTELLIGENCE : Répartition Fonds par Marché ────────────────
-        st.markdown("#### Analyse Stratégique — Répartition Fonds par Marché")
+        st.markdown("#### Strategic Analysis — Fund Breakdown by Market")
         si_mode = st.radio(
             "Périmètre",
             ["Pipeline Actif (AUM Révisé)", "Funded (AUM Financé)"],
@@ -1537,7 +1767,7 @@ with tab_sales:
                 st.dataframe(pivot_display, use_container_width=True)
 
         st.divider()
-        st.markdown("#### Prochaines Actions — 30 jours")
+        st.markdown("#### Next Actions — 30 Days")
         if df_na.empty:
             st.info("Aucune action planifiee dans les 30 prochains jours.")
         else:
@@ -1573,10 +1803,23 @@ with tab_sales:
 # ONGLET 6 — ACTIVITÉS
 # ============================================================================
 with tab_activites:
-    st.markdown('<div class="section-title">Journal des Activites</div>',
+    st.markdown('<div class="section-title">Activities Journal</div>',
                 unsafe_allow_html=True)
 
+    # ── Timeframe selector ───────────────────────────────────────────────────
+    tf_act = st.selectbox("Timeframe", TIMEFRAMES, key="tf_act",
+                          label_visibility="collapsed")
+    cutoff_act = _timeframe_cutoff(tf_act)
+
     df_all_act = db.get_activities()
+
+    # Apply timeframe to base dataset used for KPIs
+    df_act_base = df_all_act.copy()
+    if cutoff_act is not None and not df_act_base.empty:
+        df_act_base = df_act_base[df_act_base["date"].apply(
+            lambda d: (isinstance(d, _date_cls) and d >= cutoff_act)
+                      or (isinstance(d, str) and d >= cutoff_act.isoformat())
+        )]
 
     # ---- Filtres ----
     fa1, fa2, fa3 = st.columns([2, 2, 3])
@@ -1600,17 +1843,17 @@ with tab_activites:
                 df_act_filtered["notes"].str.contains(filt_search.strip(), case=False, na=False)]
 
     # ---- KPIs activités ----
-    if not df_all_act.empty:
+    if not df_act_base.empty:
         sc1, sc2, sc3, sc4 = st.columns(4)
-        nb_mois = len(df_all_act[df_all_act["date"].apply(
+        nb_mois = len(df_act_base[df_act_base["date"].apply(
             lambda d: str(d)[:7] == date.today().strftime("%Y-%m") if d else False)])
-        top_type = df_all_act["type_interaction"].value_counts()
+        top_type = df_act_base["type_interaction"].value_counts()
         top_type_str = top_type.index[0] if not top_type.empty else "—"
         for col, label, val in [
-            (sc1, "Total activités",    str(len(df_all_act))),
-            (sc2, "Ce mois",            str(nb_mois)),
-            (sc3, "Type le + fréquent", top_type_str),
-            (sc4, "Clients touchés",    str(df_all_act["nom_client"].nunique())),
+            (sc1, "Total Activities",   str(len(df_act_base))),
+            (sc2, "This Month",         str(nb_mois)),
+            (sc3, "Top Activity Type",  top_type_str),
+            (sc4, "Clients Reached",    str(df_act_base["nom_client"].nunique())),
         ]:
             with col:
                 st.markdown(
@@ -1689,6 +1932,10 @@ with tab_activites:
                     "{}{}</div>".format(label_d, suffix), unsafe_allow_html=True)
 
             # Carte activité
+            act_id   = int(row.get("id", 0))
+            color    = TYPE_COLORS.get(typ, "#888")
+            icon     = TYPE_ICONS.get(typ, "")
+
             st.markdown(
                 "<div style='display:flex;gap:12px;align-items:flex-start;"
                 "padding:9px 14px;margin:3px 0;background:#f9fbfd;"
@@ -1705,6 +1952,73 @@ with tab_activites:
                 "</div></div>".format(
                     color=color, icon=icon, client=client, typ=typ, notes=notes),
                 unsafe_allow_html=True)
+
+            # ── CRUD action buttons ──────────────────────────────────────────
+            btn_col1, btn_col2, btn_spacer = st.columns([1, 1, 8])
+            with btn_col1:
+                if st.button("✏️", key="edit_act_{}".format(act_id),
+                             help="Edit this activity"):
+                    st.session_state["edit_act_id"] = act_id
+                    st.session_state["edit_act_data"] = {
+                        "date": str(row.get("date", "")),
+                        "notes": notes,
+                        "type": typ,
+                    }
+            with btn_col2:
+                if st.button("🗑️", key="del_act_{}".format(act_id),
+                             help="Delete this activity"):
+                    st.session_state["confirm_del_act"] = act_id
+
+            # Delete confirmation
+            if st.session_state.get("confirm_del_act") == act_id:
+                st.warning("Delete this activity? This cannot be undone.")
+                dc1, dc2, _ = st.columns([1, 1, 6])
+                with dc1:
+                    if st.button("✅ Confirm", key="confirm_yes_act_{}".format(act_id)):
+                        ok, err = db.delete_activity(act_id)
+                        if ok:
+                            st.session_state.pop("confirm_del_act", None)
+                            st.rerun()
+                        else:
+                            st.error(err)
+                with dc2:
+                    if st.button("❌ Cancel", key="confirm_no_act_{}".format(act_id)):
+                        st.session_state.pop("confirm_del_act", None)
+                        st.rerun()
+
+    edit_act_id = st.session_state.get("edit_act_id")
+    if edit_act_id:
+        edit_data = st.session_state.get("edit_act_data", {})
+        with st.expander("✏️ Editing Activity #{}".format(edit_act_id), expanded=True):
+            with st.form("form_edit_act_{}".format(edit_act_id), clear_on_submit=True):
+                ea1, ea2 = st.columns(2)
+                with ea1:
+                    ea_type = st.selectbox("Type", TYPES_INTERACTION,
+                        index=TYPES_INTERACTION.index(edit_data.get("type","Call"))
+                              if edit_data.get("type") in TYPES_INTERACTION else 0)
+                    try:
+                        ea_date_val = date.fromisoformat(edit_data.get("date",""))
+                    except Exception:
+                        ea_date_val = date.today()
+                    ea_date = st.date_input("Date", value=ea_date_val)
+                with ea2:
+                    ea_notes = st.text_area("Notes", value=edit_data.get("notes",""), height=80)
+                col_save, col_cancel = st.columns(2)
+                with col_save:
+                    if st.form_submit_button("Save Changes", use_container_width=True):
+                        ok, err = db.update_activity(edit_act_id, ea_date.isoformat(),
+                                                     ea_notes, ea_type)
+                        if ok:
+                            st.session_state.pop("edit_act_id", None)
+                            st.session_state.pop("edit_act_data", None)
+                            st.rerun()
+                        else:
+                            st.error(err)
+                with col_cancel:
+                    if st.form_submit_button("Cancel", use_container_width=True):
+                        st.session_state.pop("edit_act_id", None)
+                        st.session_state.pop("edit_act_data", None)
+                        st.rerun()
 
 
 # ============================================================================
