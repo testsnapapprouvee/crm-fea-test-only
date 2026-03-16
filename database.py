@@ -1,5 +1,5 @@
 # =============================================================================
-# database.py  —  CRM Asset Management  —  Amundi Edition  v9.3 Production
+# database.py  —  CRM Asset Management  —  Amundi Edition  v13.0 — Smart AUM SQL
 # Priorite : STABILITE ABSOLUE — zero helper complexe, SQL plat
 # Charte : #001c4b Marine | #019ee1 Ciel | #f07d00 Orange
 # v9.3 :
@@ -423,6 +423,7 @@ def get_pipeline_by_statut(statut, fonds_filter=None):
         "SELECT p.id, c.nom_client, c.type_client, c.region,"
         " p.fonds, p.statut,"
         " p.target_aum_initial, p.revised_aum, p.funded_aum,"
+        " (CASE WHEN p.revised_aum > 0 THEN p.revised_aum ELSE p.target_aum_initial END) AS aum_pipeline,"
         " p.raison_perte, p.concurrent_choisi,"
         " p.next_action_date, p.sales_owner,"
         " ("
@@ -432,7 +433,7 @@ def get_pipeline_by_statut(statut, fonds_filter=None):
         " ) AS derniere_activite"
         " FROM pipeline p JOIN clients c ON c.id = p.client_id"
         " WHERE p.statut = ? " + fonds_sql +
-        " ORDER BY p.revised_aum DESC, p.funded_aum DESC"
+        " ORDER BY aum_pipeline DESC, p.funded_aum DESC"
     )
     params = [statut] + fonds_params
     df = pd.read_sql_query(query, conn, params=params)
@@ -553,16 +554,17 @@ def get_active_deals_detail(fonds_filter=None):
     query = (
         "SELECT c.nom_client AS Client, p.fonds AS Fonds, p.statut AS Statut,"
         " c.type_client AS Type, c.region AS Region,"
+        " (CASE WHEN p.revised_aum > 0 THEN p.revised_aum ELSE p.target_aum_initial END) AS AUM_Pipeline,"
         " p.revised_aum AS AUM_Revise, p.target_aum_initial AS AUM_Cible,"
         " p.next_action_date AS Prochaine_Action, p.sales_owner AS Commercial"
         " FROM pipeline p JOIN clients c ON c.id = p.client_id"
         " WHERE p.statut IN ('Prospect','Initial Pitch','Due Diligence','Soft Commit')"
         " " + fonds_sql +
-        " ORDER BY p.revised_aum DESC"
+        " ORDER BY AUM_Pipeline DESC"
     )
     df = pd.read_sql_query(query, conn, params=fonds_params if fonds_params else None)
     conn.close()
-    for col in ["AUM_Revise", "AUM_Cible"]:
+    for col in ["AUM_Pipeline", "AUM_Revise", "AUM_Cible"]:
         if col in df.columns:
             df[col] = pd.to_numeric(df[col], errors="coerce").fillna(0.0)
     if "Prochaine_Action" in df.columns:
@@ -626,7 +628,7 @@ def get_sales_metrics(fonds_filter=None):
         "     THEN 1 ELSE 0 END) AS Actifs,"
         " COALESCE(SUM(CASE WHEN p.statut='Funded' THEN p.funded_aum ELSE 0 END),0) AS AUM_Finance,"
         " COALESCE(SUM(CASE WHEN p.statut IN ('Prospect','Initial Pitch','Due Diligence','Soft Commit')"
-        "     THEN p.revised_aum ELSE 0 END),0) AS Pipeline_Actif,"
+        "     THEN (CASE WHEN p.revised_aum > 0 THEN p.revised_aum ELSE p.target_aum_initial END) ELSE 0 END),0) AS Pipeline_Actif,"
         " SUM(CASE WHEN p.next_action_date < DATE('now')"
         "     AND p.statut NOT IN ('Lost','Redeemed','Funded') THEN 1 ELSE 0 END) AS Retards"
         " FROM pipeline p WHERE 1=1 " + fonds_sql +
@@ -676,7 +678,7 @@ def get_market_fonds_breakdown(mode="pipeline"):
         aum_col       = "p.funded_aum"
     else:
         statut_clause = "p.statut IN ('Prospect','Initial Pitch','Due Diligence','Soft Commit')"
-        aum_col       = "p.revised_aum"
+        aum_col       = "(CASE WHEN p.revised_aum > 0 THEN p.revised_aum ELSE p.target_aum_initial END)"
     query = (
         "SELECT COALESCE(st.marche, p.sales_owner) AS marche,"
         " p.fonds,"
@@ -705,7 +707,7 @@ def get_kpis(fonds_filter=None):
     c.execute("SELECT COALESCE(SUM(p.funded_aum),0) FROM pipeline p WHERE p.statut='Funded' " + fonds_sql, fonds_params)
     total_funded = float(c.fetchone()[0])
 
-    c.execute("SELECT COALESCE(SUM(p.revised_aum),0) FROM pipeline p WHERE p.statut IN ('Prospect','Initial Pitch','Due Diligence','Soft Commit') " + fonds_sql, fonds_params)
+    c.execute("SELECT COALESCE(SUM(CASE WHEN p.revised_aum > 0 THEN p.revised_aum ELSE p.target_aum_initial END),0) FROM pipeline p WHERE p.statut IN ('Prospect','Initial Pitch','Due Diligence','Soft Commit') " + fonds_sql, fonds_params)
     pipeline_actif = float(c.fetchone()[0])
 
     c.execute("SELECT COUNT(*) FROM pipeline p WHERE p.statut='Funded' " + fonds_sql, fonds_params)
@@ -738,7 +740,8 @@ def get_kpis(fonds_filter=None):
     aum_by_fonds = {r[0]: float(r[1]) for r in c.fetchall()}
 
     c.execute(
-        "SELECT SUM(p.revised_aum * COALESCE(p.closing_probability,50)/100.0)"
+        "SELECT SUM((CASE WHEN p.revised_aum > 0 THEN p.revised_aum ELSE p.target_aum_initial END)"
+        " * COALESCE(p.closing_probability,50)/100.0)"
         " FROM pipeline p"
         " WHERE p.statut IN ('Prospect','Initial Pitch','Due Diligence','Soft Commit')"
         + fonds_sql,
