@@ -572,12 +572,21 @@ with tab_ingest:
                     type_client = st.selectbox("Type Client", TYPES_CLIENT)
                     region      = st.selectbox("Region", REGIONS)
                 with c2:
-                    # Maison mère (parent) — optionnel
+                    is_parent = st.checkbox(
+                        "Ce compte est une Maison Mère (Siège global)",
+                        value=False,
+                        help="Cochez si ce client est lui-même un groupe / holding. "
+                             "La sélection d'une Maison Mère sera alors ignorée.")
+                    # Maison mère — désactivée visuellement si is_parent est coché
                     all_clients_opts = db.get_all_clients()
                     parent_options   = ["(Aucune — client autonome)"] + all_clients_opts["nom_client"].tolist()
-                    parent_sel       = st.selectbox("Maison Mère (optionnel)", parent_options)
-                    tier_sel         = st.selectbox("Tier", db.TIERS_REFERENTIEL, index=1)
-                    kyc_sel          = st.selectbox("Statut KYC", db.KYC_STATUTS, index=1)
+                    parent_sel       = st.selectbox(
+                        "Maison Mère (optionnel)",
+                        parent_options,
+                        disabled=is_parent,
+                        help="Non applicable si le compte est lui-même une Maison Mère.")
+                    tier_sel = st.selectbox("Tier", db.TIERS_REFERENTIEL, index=1)
+                    kyc_sel  = st.selectbox("Statut KYC", db.KYC_STATUTS, index=1)
                 interests_sel = st.multiselect("Product Interests", db.PRODUCT_INTERESTS)
                 sub_c = st.form_submit_button("Enregistrer", use_container_width=True)
             if sub_c:
@@ -585,8 +594,9 @@ with tab_ingest:
                     st.error("Nom du client obligatoire.")
                 else:
                     try:
+                        # Si is_parent coché → parent_id forcé à None
                         _parent_id = None
-                        if parent_sel != "(Aucune — client autonome)":
+                        if not is_parent and parent_sel != "(Aucune — client autonome)":
                             _pid_row = all_clients_opts[all_clients_opts["nom_client"] == parent_sel]
                             if not _pid_row.empty:
                                 _parent_id = int(_pid_row.iloc[0]["id"])
@@ -737,7 +747,7 @@ with tab_ingest:
 
 
 # ============================================================================
-# ONGLET 2 — ANNUAIRE CRM (Master-Detail : Clients + Contacts)
+# ONGLET 2 — ANNUAIRE CRM (Recherche centralisée + Fiche épurée)
 # ============================================================================
 with tab_crm:
     st.markdown('<div class="section-title">Annuaire CRM — Clients &amp; Contacts</div>',
@@ -745,13 +755,13 @@ with tab_crm:
 
     df_hier = db.get_client_hierarchy()
 
-    # ── helpers visuels ──────────────────────────────────────────────────────
+    # ── helpers visuels (réutilisés dans la fiche) ───────────────────────────
     def _kyc_dot(kyc):
         colors = {"Validé": "#22a062", "En cours": ORANGE, "Bloqué": "#c0392b"}
         c = colors.get(kyc, "#aaa")
         return (
-            '<span style="display:inline-block;width:9px;height:9px;border-radius:50%;'
-            'background:{c};vertical-align:middle;margin-right:5px;" '
+            '<span style="display:inline-block;width:10px;height:10px;border-radius:50%;'
+            'background:{c};vertical-align:middle;margin-right:6px;" '
             'title="KYC : {kyc}"></span>').format(c=c, kyc=kyc)
 
     def _tier_badge(tier):
@@ -759,211 +769,223 @@ with tab_crm:
         c = tier_colors.get(tier, GRIS)
         return (
             '<span style="background:{c};color:#fff;font-size:0.62rem;font-weight:700;'
-            'padding:1px 7px;letter-spacing:0.3px;vertical-align:middle;">{t}</span>'
+            'padding:2px 8px;letter-spacing:0.3px;vertical-align:middle;">{t}</span>'
         ).format(c=c, t=tier)
 
-    # ── layout Master-Detail ─────────────────────────────────────────────────
-    col_list, col_detail = st.columns([1, 2], gap="large")
-
-    with col_list:
+    # ── Moteur de recherche centralisé ──────────────────────────────────────
+    if df_hier.empty:
         st.markdown(
-            '<div class="section-title" style="font-size:0.78rem;">Clients ({n})</div>'.format(
-                n=len(df_hier)), unsafe_allow_html=True)
+            '<div style="background:#001c4b04;border:2px dashed #001c4b18;padding:40px;'
+            'text-align:center;margin-top:12px;">'
+            '<div style="font-size:0.92rem;font-weight:700;color:{m};">Aucun client enregistré</div>'
+            '<div style="color:#888;font-size:0.79rem;margin-top:4px;">'
+            'Commencez par ajouter un client dans l\'onglet <b>Data Ingestion</b>.</div>'
+            '</div>'.format(m=MARINE), unsafe_allow_html=True)
+    else:
+        noms_clients = sorted(df_hier["nom_client"].tolist())
+        crm_search   = st.selectbox(
+            "Rechercher un compte client…",
+            options=[""] + noms_clients,
+            format_func=lambda x: x if x else "— Sélectionner un compte —",
+            key="crm_search_box")
 
-        # Filtres
-        crm_f1, crm_f2 = st.columns(2)
-        with crm_f1:
-            crm_filt_tier = st.multiselect("Tier", db.TIERS_REFERENTIEL,
-                                           key="crm_filt_tier", label_visibility="collapsed",
-                                           placeholder="Tier…")
-        with crm_f2:
-            crm_filt_kyc = st.multiselect("KYC", db.KYC_STATUTS,
-                                          key="crm_filt_kyc", label_visibility="collapsed",
-                                          placeholder="KYC…")
-
-        df_view_crm = df_hier.copy()
-        if crm_filt_tier:
-            df_view_crm = df_view_crm[df_view_crm["tier"].isin(crm_filt_tier)]
-        if crm_filt_kyc:
-            df_view_crm = df_view_crm[df_view_crm["kyc_status"].isin(crm_filt_kyc)]
-
-        # Sélection client dans session_state
-        if "crm_selected_client_id" not in st.session_state:
-            st.session_state["crm_selected_client_id"] = None
-
-        for _, row_c in df_view_crm.iterrows():
-            cid        = int(row_c["id"])
-            cnom       = str(row_c["nom_client"])
-            tier       = str(row_c.get("tier","Tier 2"))
-            kyc        = str(row_c.get("kyc_status","En cours"))
-            parent_nom = str(row_c.get("parent_nom",""))
-            is_sel     = (st.session_state["crm_selected_client_id"] == cid)
-
-            # Indicateur parent (filiale)
-            parent_html = ""
-            if parent_nom:
-                parent_html = (
-                    '<div style="font-size:0.62rem;color:#777;margin-top:2px;">'
-                    '↳ Filiale de <em>{}</em></div>').format(parent_nom)
-
-            card_bg = "#e8f1f9" if is_sel else "#f9fbfd"
-            border  = "2px solid {}".format(ORANGE) if is_sel else "1px solid #e0e8f0"
-
+        if not crm_search:
+            # Vue résumée : compteurs KYC
+            nb_total   = len(df_hier)
+            nb_valide  = int((df_hier["kyc_status"] == "Validé").sum())
+            nb_encours = int((df_hier["kyc_status"] == "En cours").sum())
+            nb_bloque  = int((df_hier["kyc_status"] == "Bloqué").sum())
             st.markdown(
-                '<div style="background:{bg};border:{bdr};padding:9px 12px;margin:4px 0;cursor:pointer;">'
-                '<div style="display:flex;align-items:center;gap:6px;flex-wrap:wrap;">'
-                '{kycdot}{tier_b}'
-                '<span style="font-weight:700;font-size:0.82rem;color:{marine};">{nom}</span>'
-                '</div>'
-                '{parent_html}</div>'.format(
-                    bg=card_bg, bdr=border,
-                    kycdot=_kyc_dot(kyc), tier_b=_tier_badge(tier),
-                    marine=MARINE, nom=cnom, parent_html=parent_html),
+                '<div style="display:grid;grid-template-columns:repeat(4,1fr);gap:8px;margin:16px 0;">'
+                '<div class="kpi-card kpi-card-static"><div class="kpi-label">Comptes</div>'
+                '<div class="kpi-value">{t}</div><div class="kpi-sub">clients enregistrés</div></div>'
+                '<div class="kpi-card kpi-card-static"><div class="kpi-label">KYC Validé</div>'
+                '<div class="kpi-value" style="color:#22a062;">{v}</div><div class="kpi-sub">&nbsp;</div></div>'
+                '<div class="kpi-card kpi-card-static"><div class="kpi-label">KYC En cours</div>'
+                '<div class="kpi-value" style="color:{o};">{e}</div><div class="kpi-sub">&nbsp;</div></div>'
+                '<div class="kpi-card kpi-card-static"><div class="kpi-label">KYC Bloqué</div>'
+                '<div class="kpi-value" style="color:#c0392b;">{b}</div><div class="kpi-sub">&nbsp;</div></div>'
+                '</div>'.format(t=nb_total, v=nb_valide, e=nb_encours, b=nb_bloque, o=ORANGE),
                 unsafe_allow_html=True)
-
-            if st.button("Sélectionner", key="crm_sel_{}".format(cid),
-                         use_container_width=True):
-                st.session_state["crm_selected_client_id"] = cid
-                st.rerun()
-
-    # ── Panneau detail (contacts) ────────────────────────────────────────────
-    with col_detail:
-        sel_cid = st.session_state.get("crm_selected_client_id")
-
-        if sel_cid is None:
             st.markdown(
-                '<div style="background:#001c4b04;border:2px dashed #001c4b18;'
-                'padding:40px;text-align:center;margin-top:20px;">'
-                '<div style="font-size:0.92rem;font-weight:700;color:{marine};">Sélectionnez un client</div>'
-                '<div style="color:#888;font-size:0.79rem;margin-top:4px;">'
-                'La fiche contacts s\'affichera ici</div>'
-                '</div>'.format(marine=MARINE), unsafe_allow_html=True)
+                '<div style="color:#888;font-size:0.78rem;text-align:center;padding:8px 0;">'
+                'Sélectionnez un compte dans la liste déroulante pour afficher sa fiche.</div>',
+                unsafe_allow_html=True)
         else:
-            # Données du client sélectionné
-            sel_row = df_hier[df_hier["id"] == sel_cid]
+            # ── FICHE CLIENT ─────────────────────────────────────────────────
+            sel_row = df_hier[df_hier["nom_client"] == crm_search]
             if sel_row.empty:
                 st.warning("Client introuvable.")
             else:
-                sel_row = sel_row.iloc[0]
-                sel_nom    = str(sel_row["nom_client"])
-                sel_tier   = str(sel_row.get("tier","Tier 2"))
-                sel_kyc    = str(sel_row.get("kyc_status","En cours"))
-                sel_type   = str(sel_row.get("type_client",""))
-                sel_region = str(sel_row.get("region",""))
-                sel_parent = str(sel_row.get("parent_nom",""))
-                sel_prods  = str(sel_row.get("product_interests",""))
+                sel      = sel_row.iloc[0]
+                sel_id   = int(sel["id"])
+                sel_nom  = str(sel["nom_client"])
+                sel_tier = str(sel.get("tier", "Tier 2"))
+                sel_kyc  = str(sel.get("kyc_status", "En cours"))
+                sel_type = str(sel.get("type_client", ""))
+                sel_reg  = str(sel.get("region", ""))
+                sel_par  = str(sel.get("parent_nom", ""))
+                sel_prod = str(sel.get("product_interests", ""))
+                kyc_color = {"Validé": "#22a062", "En cours": ORANGE,
+                             "Bloqué": "#c0392b"}.get(sel_kyc, "#aaa")
 
-                # Fiche client
-                kyc_color = {"Validé":"#22a062","En cours":ORANGE,"Bloqué":"#c0392b"}.get(sel_kyc, "#aaa")
+                # Filiales (si ce client est lui-même une Maison Mère)
+                conn_tmp = db.get_connection()
+                try:
+                    import sqlite3 as _sq3
+                    _c = conn_tmp.cursor()
+                    _c.execute(
+                        "SELECT nom_client FROM clients WHERE parent_id = ? ORDER BY nom_client",
+                        (sel_id,))
+                    filiales = [r[0] for r in _c.fetchall()]
+                finally:
+                    conn_tmp.close()
+
+                # ── En-tête fiche ────────────────────────────────────────────
+                prods_html = ""
+                if sel_prod.strip():
+                    tags = " ".join(
+                        '<span style="background:{c}18;border:1px solid {c}44;color:{m};'
+                        'padding:1px 8px;font-size:0.68rem;font-weight:600;margin:2px;">{p}</span>'
+                        .format(c=CIEL, m=MARINE, p=p.strip())
+                        for p in sel_prod.split(",") if p.strip())
+                    prods_html = (
+                        '<div style="margin-top:10px;font-size:0.74rem;">'
+                        '<span style="color:#888;margin-right:6px;">Product Interests :</span>'
+                        + tags + '</div>')
+
+                hier_html = ""
+                if sel_par:
+                    hier_html += (
+                        '<div style="margin-top:8px;font-size:0.77rem;color:#555;">'
+                        '<span style="color:#888;">Filiale de :</span> '
+                        '<span style="font-weight:700;color:{m};">{p}</span></div>'
+                        .format(m=MARINE, p=sel_par))
+                if filiales:
+                    fils_list = " &middot; ".join(
+                        '<span style="font-weight:600;color:{m};">{f}</span>'
+                        .format(m=MARINE, f=f) for f in filiales)
+                    hier_html += (
+                        '<div style="margin-top:6px;font-size:0.77rem;color:#555;">'
+                        '<span style="color:#888;">Filiales ({n}) :</span> {fl}</div>'
+                        .format(n=len(filiales), fl=fils_list))
+
                 st.markdown(
-                    '<div class="detail-panel" style="margin-bottom:12px;">'
-                    '<div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap;margin-bottom:8px;">'
-                    '<span style="font-size:1.0rem;font-weight:800;color:{marine};">{nom}</span>'
+                    '<div class="detail-panel" style="margin-bottom:14px;">'
+                    # --- ligne titre ---
+                    '<div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap;'
+                    'margin-bottom:10px;">'
+                    '<span style="font-size:1.05rem;font-weight:800;color:{m};">{nom}</span>'
                     '{tier_b}'
-                    '<span style="background:{kycc};color:#fff;font-size:0.68rem;font-weight:700;padding:2px 10px;">'
-                    'KYC : {kyc}</span>'
+                    '<span style="background:{kycc};color:#fff;font-size:0.68rem;font-weight:700;'
+                    'padding:2px 10px;">{kycd} KYC : {kyc}</span>'
                     '</div>'
-                    '<div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:8px;font-size:0.78rem;">'
-                    '<div><div style="color:#888;font-size:0.67rem;">Type</div>'
-                    '<div style="font-weight:600;color:{marine};">{type}</div></div>'
-                    '<div><div style="color:#888;font-size:0.67rem;">Région</div>'
-                    '<div style="font-weight:600;color:{marine};">{region}</div></div>'
-                    '<div><div style="color:#888;font-size:0.67rem;">Maison Mère</div>'
-                    '<div style="font-weight:600;color:{marine};">{parent}</div></div>'
+                    # --- grille infos ---
+                    '<div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:10px;'
+                    'font-size:0.79rem;">'
+                    '<div><div style="color:#888;font-size:0.67rem;text-transform:uppercase;'
+                    'letter-spacing:0.5px;">Type</div>'
+                    '<div style="font-weight:600;color:{m};">{type}</div></div>'
+                    '<div><div style="color:#888;font-size:0.67rem;text-transform:uppercase;'
+                    'letter-spacing:0.5px;">Région</div>'
+                    '<div style="font-weight:600;color:{m};">{reg}</div></div>'
+                    '<div><div style="color:#888;font-size:0.67rem;text-transform:uppercase;'
+                    'letter-spacing:0.5px;">Tier</div>'
+                    '<div style="font-weight:600;color:{m};">{tier}</div></div>'
                     '</div>'
-                    '{prods_block}'
+                    '{hier_html}'
+                    '{prods_html}'
                     '</div>'.format(
-                        marine=MARINE, nom=sel_nom,
-                        tier_b=_tier_badge(sel_tier),
-                        kycc=kyc_color, kyc=sel_kyc,
-                        type=sel_type, region=sel_region,
-                        parent=sel_parent if sel_parent else "—",
-                        prods_block=(
-                            '<div style="margin-top:9px;font-size:0.74rem;">'
-                            '<span style="color:#888;">Product Interests : </span>'
-                            + " ".join(
-                                '<span style="background:{ciel}18;border:1px solid {ciel}44;'
-                                'color:{marine};padding:1px 7px;font-size:0.68rem;font-weight:600;'
-                                'margin:2px;">{p}</span>'.format(ciel=CIEL, marine=MARINE, p=p.strip())
-                                for p in sel_prods.split(",") if p.strip()
-                            ) + '</div>'
-                        ) if sel_prods.strip() else ""
-                    ),
+                        m=MARINE, nom=sel_nom,
+                        tier_b=_tier_badge(sel_tier), tier=sel_tier,
+                        kycc=kyc_color, kycd=_kyc_dot(sel_kyc), kyc=sel_kyc,
+                        type=sel_type, reg=sel_reg,
+                        hier_html=hier_html, prods_html=prods_html),
                     unsafe_allow_html=True)
 
-                # Contacts
-                df_contacts = db.get_contacts(sel_cid)
+                # ── Contacts ─────────────────────────────────────────────────
+                df_contacts = db.get_contacts(sel_id)
                 st.markdown(
-                    '<div class="section-title" style="font-size:0.78rem;margin-bottom:8px;">'
+                    '<div class="section-title" style="font-size:0.78rem;margin:10px 0 8px 0;">'
                     'Contacts ({n})</div>'.format(n=len(df_contacts)),
                     unsafe_allow_html=True)
 
                 if df_contacts.empty:
                     st.markdown(
-                        '<div style="color:#888;font-size:0.80rem;padding:8px 0;">'
+                        '<div style="color:#888;font-size:0.80rem;padding:6px 0 10px 0;">'
                         'Aucun contact enregistré pour ce client.</div>',
                         unsafe_allow_html=True)
                 else:
                     for _, ct in df_contacts.iterrows():
-                        prenom   = str(ct.get("prenom",""))
-                        cnom_ct  = str(ct.get("nom",""))
-                        role     = str(ct.get("role",""))
-                        email    = str(ct.get("email","")).strip()
-                        tel      = str(ct.get("telephone","")).strip()
-                        linkedin = str(ct.get("linkedin","")).strip()
+                        prenom   = str(ct.get("prenom", ""))
+                        ct_nom   = str(ct.get("nom", ""))
+                        role     = str(ct.get("role", ""))
+                        email    = str(ct.get("email", "")).strip()
+                        tel      = str(ct.get("telephone", "")).strip()
+                        linkedin = str(ct.get("linkedin", "")).strip()
                         primary  = bool(ct.get("is_primary", 0))
 
                         email_html = (
-                            '<a href="mailto:{e}" style="color:{ciel};text-decoration:none;">{e}</a>'
-                            .format(e=email, ciel=CIEL)) if email else "—"
+                            '<a href="mailto:{e}" style="color:{ciel};text-decoration:none;">'
+                            '{e}</a>'.format(e=email, ciel=CIEL)
+                        ) if email else '<span style="color:#bbb;">—</span>'
+
+                        li_url = linkedin
+                        if li_url and not li_url.startswith("http"):
+                            li_url = "https://" + li_url
                         li_html = (
-                            '<a href="https://{l}" target="_blank" '
-                            'style="color:{ciel};text-decoration:none;">LinkedIn</a>'
-                            .format(l=linkedin.lstrip("https://").lstrip("http://"), ciel=CIEL)
+                            '<a href="{url}" target="_blank" '
+                            'style="color:{ciel};text-decoration:none;">↗ LinkedIn</a>'
+                            .format(url=li_url, ciel=CIEL)
                         ) if linkedin else ""
+
                         primary_badge = (
-                            '<span style="background:{o};color:#fff;font-size:0.60rem;font-weight:700;'
-                            'padding:1px 6px;vertical-align:middle;margin-left:4px;">Contact Principal</span>'
-                            .format(o=ORANGE)) if primary else ""
+                            '<span style="background:{o};color:#fff;font-size:0.60rem;'
+                            'font-weight:700;padding:1px 7px;margin-left:6px;">'
+                            'Principal</span>'.format(o=ORANGE)
+                        ) if primary else ""
 
                         st.markdown(
                             '<div style="background:#f4f8fc;border-left:3px solid {ciel};'
-                            'padding:10px 14px;margin:6px 0;">'
-                            '<div style="display:flex;align-items:center;gap:6px;margin-bottom:4px;">'
-                            '<span style="font-weight:700;font-size:0.85rem;color:{marine};">'
+                            'padding:11px 15px;margin:6px 0;">'
+                            '<div style="display:flex;align-items:center;gap:4px;'
+                            'margin-bottom:5px;">'
+                            '<span style="font-weight:700;font-size:0.86rem;color:{m};">'
                             '{prenom} {nom}</span>{primary}'
-                            '<span style="color:#888;font-size:0.72rem;margin-left:auto;">{role}</span>'
+                            '<span style="color:#888;font-size:0.72rem;margin-left:auto;">'
+                            '{role}</span>'
                             '</div>'
-                            '<div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:4px;'
-                            'font-size:0.75rem;">'
-                            '<div>{email}</div>'
-                            '<div style="color:#666;">{tel}</div>'
-                            '<div>{li}</div>'
+                            '<div style="font-size:0.76rem;line-height:1.8;">'
+                            '<span style="color:#666;margin-right:16px;">📞 {tel}</span>'
+                            '{email}&nbsp;&nbsp;{li}'
                             '</div></div>'.format(
-                                ciel=CIEL, marine=MARINE,
-                                prenom=prenom, nom=cnom_ct,
+                                ciel=CIEL, m=MARINE,
+                                prenom=prenom, nom=ct_nom,
                                 primary=primary_badge, role=role,
-                                email=email_html, tel=tel or "—", li=li_html),
+                                tel=tel if tel else "—",
+                                email=email_html, li=li_html),
                             unsafe_allow_html=True)
 
-                # Formulaire ajout contact rapide
-                with st.expander("Ajouter un contact pour {}".format(sel_nom), expanded=False):
-                    with st.form("form_contact_detail_{}".format(sel_cid), clear_on_submit=True):
-                        qcc1, qcc2 = st.columns(2)
-                        with qcc1:
-                            qc_prenom = st.text_input("Prénom", key="qc_prenom_{}".format(sel_cid))
-                            qc_nom    = st.text_input("Nom",    key="qc_nom_{}".format(sel_cid))
-                            qc_role   = st.selectbox("Rôle", [""] + db.ROLES_CONTACT, key="qc_role_{}".format(sel_cid))
-                        with qcc2:
-                            qc_email  = st.text_input("Email",     key="qc_email_{}".format(sel_cid))
-                            qc_tel    = st.text_input("Téléphone", key="qc_tel_{}".format(sel_cid))
-                            qc_li     = st.text_input("LinkedIn",  key="qc_li_{}".format(sel_cid))
-                        qc_primary = st.checkbox("Contact principal", key="qc_primary_{}".format(sel_cid))
-                        if st.form_submit_button("Enregistrer le Contact", use_container_width=True):
+                # ── Ajouter un contact (expander discret) ────────────────────
+                with st.expander("＋ Ajouter un contact pour {}".format(sel_nom),
+                                 expanded=False):
+                    with st.form("form_ct_crm_{}".format(sel_id), clear_on_submit=True):
+                        fa1, fa2 = st.columns(2)
+                        with fa1:
+                            qc_prenom = st.text_input("Prénom")
+                            qc_nom    = st.text_input("Nom")
+                            qc_role   = st.selectbox("Rôle", [""] + db.ROLES_CONTACT)
+                        with fa2:
+                            qc_email   = st.text_input("Email")
+                            qc_tel     = st.text_input("Téléphone")
+                            qc_li      = st.text_input("LinkedIn (URL ou profil)")
+                        qc_primary = st.checkbox("Contact principal")
+                        if st.form_submit_button("Enregistrer le Contact",
+                                                 use_container_width=True):
                             if not qc_nom.strip():
-                                st.error("Nom obligatoire.")
+                                st.error("Le nom est obligatoire.")
                             else:
-                                db.add_contact(sel_cid, qc_prenom, qc_nom, qc_role,
+                                db.add_contact(sel_id, qc_prenom, qc_nom, qc_role,
                                                qc_email, qc_tel, qc_li, qc_primary)
                                 st.success("Contact ajouté.")
                                 st.rerun()
@@ -1451,6 +1473,68 @@ with tab_sales:
                 xaxis_showgrid=False, yaxis_showgrid=True, yaxis_gridcolor=GRIS,
                 margin=dict(l=10, r=10, t=20, b=10))
             st.plotly_chart(fig_sales, use_container_width=True, config={"displayModeBar": False})
+
+        st.divider()
+        # ── SALES INTELLIGENCE : Répartition Fonds par Marché ────────────────
+        st.markdown("#### Analyse Stratégique — Répartition Fonds par Marché")
+        si_mode = st.radio(
+            "Périmètre",
+            ["Pipeline Actif (AUM Révisé)", "Funded (AUM Financé)"],
+            horizontal=True, key="si_mode")
+        df_mfb = db.get_market_fonds_breakdown(
+            mode="funded" if "Funded" in si_mode else "pipeline")
+
+        if df_mfb.empty or df_mfb["aum"].sum() == 0:
+            st.markdown(
+                '<div style="background:#001c4b04;border:1px dashed #001c4b20;'
+                'padding:24px;text-align:center;">'
+                '<div style="color:{m};font-weight:600;font-size:0.85rem;">'
+                'Aucune donnée disponible pour ce périmètre</div>'
+                '<div style="color:#888;font-size:0.75rem;margin-top:3px;">'
+                'Enregistrez des deals et associez-les à des commerciaux '
+                'pour activer cette analyse.</div>'
+                '</div>'.format(m=MARINE), unsafe_allow_html=True)
+        else:
+            marches = sorted(df_mfb["marche"].unique().tolist())
+            fonds_presents = sorted(df_mfb["fonds"].unique().tolist())
+            fig_si = go.Figure()
+            for i, fonds in enumerate(fonds_presents):
+                df_f   = df_mfb[df_mfb["fonds"] == fonds]
+                y_vals = []
+                for m in marches:
+                    row_m = df_f[df_f["marche"] == m]
+                    y_vals.append(float(row_m["aum"].iloc[0]) if not row_m.empty else 0.0)
+                text_vals = [fmt_m(v) for v in y_vals]
+                fig_si.add_trace(go.Bar(
+                    name=fonds, x=marches, y=y_vals,
+                    text=text_vals, textposition="inside",
+                    textfont=dict(size=9, color=BLANC),
+                    marker_color=PALETTE[i % len(PALETTE)],
+                    marker_line_color=BLANC, marker_line_width=0.5,
+                    hovertemplate=(
+                        "<b>{f}</b><br>Marché : %{{x}}<br>"
+                        "AUM : %{{customdata}}<extra></extra>").format(f=fonds),
+                    customdata=text_vals))
+            fig_si.update_layout(
+                barmode="stack", height=360,
+                paper_bgcolor=BLANC, plot_bgcolor=BLANC, font_color=MARINE,
+                legend_bgcolor=BLANC, legend_bordercolor=GRIS, legend_borderwidth=1,
+                legend_font_size=10, legend_title_text="Fonds",
+                xaxis_showgrid=False, xaxis_title="Marché Commercial",
+                yaxis_showgrid=True, yaxis_gridcolor=GRIS,
+                yaxis_title="AUM (EUR)", yaxis_tickformat=".2s",
+                margin=dict(l=10, r=10, t=20, b=10))
+            st.plotly_chart(fig_si, use_container_width=True,
+                            config={"displayModeBar": False})
+            with st.expander("Tableau détaillé Marché × Fonds", expanded=False):
+                pivot_si = df_mfb.pivot_table(
+                    index="marche", columns="fonds", values="aum",
+                    aggfunc="sum", fill_value=0)
+                pivot_si["TOTAL"] = pivot_si.sum(axis=1)
+                pivot_display = pivot_si.copy()
+                for col in pivot_display.columns:
+                    pivot_display[col] = pivot_display[col].apply(fmt_m)
+                st.dataframe(pivot_display, use_container_width=True)
 
         st.divider()
         st.markdown("#### Prochaines Actions — 30 jours")
