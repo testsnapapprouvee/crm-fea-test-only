@@ -1,11 +1,10 @@
 # =============================================================================
-# database.py  —  CRM Asset Management  —  Amundi Edition  v9.2 CRM+
+# database.py  —  CRM Asset Management  —  Amundi Edition  v9.3 Production
 # Priorite : STABILITE ABSOLUE — zero helper complexe, SQL plat
 # Charte : #001c4b Marine | #019ee1 Ciel | #f07d00 Orange
-# Nouveau v9.2 :
-#   - Table clients étendue : parent_id, tier, kyc_status, product_interests
-#   - Nouvelle table contacts : annuaire CRM
-#   - add_client() enrichi, add_contact(), get_contacts(), get_client_hierarchy()
+# v9.3 :
+#   - Base 100% vierge au démarrage (purge données démo)
+#   - get_market_fonds_breakdown() : croisement Marché × Fonds pour Sales Intel
 # =============================================================================
 
 import sqlite3
@@ -185,28 +184,6 @@ def init_db():
 
     _safe_alter(c, "ALTER TABLE pipeline ADD COLUMN sales_owner TEXT NOT NULL DEFAULT 'Non assigne'")
     _safe_alter(c, "ALTER TABLE pipeline ADD COLUMN closing_probability REAL DEFAULT 50")
-
-    # Peupler sales_team depuis les sales_owner existants
-    c.execute("SELECT DISTINCT sales_owner FROM pipeline WHERE sales_owner != 'Non assigne'")
-    existing_owners = [r[0] for r in c.fetchall()]
-    for owner in existing_owners:
-        try:
-            c.execute("""
-                SELECT c.region FROM pipeline p
-                JOIN clients c ON p.client_id = c.id
-                WHERE p.sales_owner = ? LIMIT 1
-            """, (owner,))
-            row = c.fetchone()
-            marche = "EMEA"
-            if row:
-                reg = str(row[0])
-                if reg in ("GCC",): marche = "GCC"
-                elif reg in ("APAC","Asia ex-Japan"): marche = "APAC"
-                elif reg in ("North America","LatAm"): marche = "Americas"
-                elif reg in ("Nordics","EMEA"): marche = "EMEA"
-            c.execute("INSERT OR IGNORE INTO sales_team (nom, marche) VALUES (?,?)", (owner, marche))
-        except Exception:
-            pass
     conn.commit()
 
     # --- TABLE ACTIVITES ---
@@ -236,10 +213,6 @@ def init_db():
         )
     """)
     conn.commit()
-
-    c.execute("SELECT COUNT(*) FROM clients")
-    if c.fetchone()[0] == 0:
-        _insert_demo_data(conn)
     conn.close()
 
 
@@ -249,100 +222,6 @@ def _safe_alter(c, sql):
         c.execute(sql)
     except sqlite3.OperationalError:
         pass
-
-
-def _insert_demo_data(conn):
-    c = conn.cursor()
-    today = date.today()
-    # parent_id, tier, kyc_status, product_interests seront mis à jour après insertion
-    clients = [
-        ("Al Rajhi Capital",              "IFA",           "GCC"),
-        ("Emirates NBD AM",               "Wholesale",     "GCC"),
-        ("Norges Bank Investment Mgmt",   "Instit",        "Nordics"),
-        ("GIC Singapore",                 "Instit",        "APAC"),
-        ("Rothschild & Co Family Office", "Family Office", "EMEA"),
-        ("BlackRock APAC Division",       "Wholesale",     "Asia ex-Japan"),
-        ("JP Morgan Asset Management",    "Instit",        "North America"),
-        ("ADIA Abu Dhabi",                "Instit",        "GCC"),
-        ("Lombard Odier FO Geneva",       "Family Office", "EMEA"),
-        ("BTG Pactual Wealth",            "Wholesale",     "LatAm"),
-    ]
-    c.executemany("INSERT INTO clients (nom_client, type_client, region) VALUES (?,?,?)", clients)
-
-    # Enrichir avec données CRM avancées (tier, kyc, product_interests)
-    demo_crm = [
-        ("Al Rajhi Capital",              "Tier 1", "Validé",   "Global Value,Private Debt"),
-        ("Emirates NBD AM",               "Tier 1", "Validé",   "Income Builder,Active ETFs"),
-        ("Norges Bank Investment Mgmt",   "Tier 1", "Validé",   "Private Debt,Resilient Equity"),
-        ("GIC Singapore",                 "Tier 1", "Validé",   "Global Value,International Fund"),
-        ("Rothschild & Co Family Office", "Tier 2", "En cours", "International Fund,Income Builder"),
-        ("BlackRock APAC Division",       "Tier 2", "Validé",   "Active ETFs,Resilient Equity"),
-        ("JP Morgan Asset Management",    "Tier 1", "Validé",   "Global Value,Private Debt"),
-        ("ADIA Abu Dhabi",                "Tier 1", "En cours", "Private Debt"),
-        ("Lombard Odier FO Geneva",       "Tier 2", "Bloqué",   "Income Builder"),
-        ("BTG Pactual Wealth",            "Tier 3", "En cours", "International Fund"),
-    ]
-    for nom, tier, kyc, interests in demo_crm:
-        c.execute("UPDATE clients SET tier=?, kyc_status=?, product_interests=? WHERE nom_client=?",
-                  (tier, kyc, interests, nom))
-
-    # Hierarchie : Emirates NBD AM filiale de Al Rajhi Capital (demo)
-    c.execute("SELECT id FROM clients WHERE nom_client='Al Rajhi Capital'")
-    parent_row = c.fetchone()
-    c.execute("SELECT id FROM clients WHERE nom_client='Emirates NBD AM'")
-    child_row = c.fetchone()
-    if parent_row and child_row:
-        c.execute("UPDATE clients SET parent_id=? WHERE id=?", (parent_row[0], child_row[0]))
-
-    pipeline = [
-        (1,  "Global Value",       "Funded",        50_000_000,  45_000_000, 42_000_000, None,     None,       (today + timedelta(days=15)).isoformat(), "Sophie Laurent"),
-        (2,  "Income Builder",     "Soft Commit",   30_000_000,  28_000_000, 0,           None,     None,       (today - timedelta(days=3)).isoformat(),  "Marc Dupont"),
-        (3,  "Private Debt",       "Due Diligence", 100_000_000, 100_000_000,0,           None,     None,       (today + timedelta(days=7)).isoformat(),  "Sophie Laurent"),
-        (4,  "Resilient Equity",   "Funded",        75_000_000,  80_000_000, 78_000_000, None,     None,       (today + timedelta(days=30)).isoformat(), "Karim Belhadj"),
-        (5,  "International Fund", "Initial Pitch", 20_000_000,  20_000_000, 0,           None,     None,       (today - timedelta(days=10)).isoformat(), "Marc Dupont"),
-        (6,  "Active ETFs",        "Lost",          40_000_000,  35_000_000, 0,           "Pricing","Vanguard", (today + timedelta(days=60)).isoformat(), "Karim Belhadj"),
-        (7,  "Global Value",       "Funded",        120_000_000, 115_000_000,110_000_000, None,     None,       (today + timedelta(days=20)).isoformat(), "Sophie Laurent"),
-        (8,  "Private Debt",       "Soft Commit",   200_000_000, 180_000_000,0,           None,     None,       (today - timedelta(days=1)).isoformat(),  "Karim Belhadj"),
-        (9,  "Income Builder",     "Paused",        15_000_000,  12_000_000, 0,           "Macro",  "Internal", (today + timedelta(days=90)).isoformat(), "Marc Dupont"),
-        (10, "Resilient Equity",   "Due Diligence", 60_000_000,  60_000_000, 0,           None,     None,       (today + timedelta(days=5)).isoformat(),  "Sophie Laurent"),
-    ]
-    c.executemany(
-        "INSERT INTO pipeline (client_id, fonds, statut, target_aum_initial, revised_aum, funded_aum,"
-        " raison_perte, concurrent_choisi, next_action_date, sales_owner) VALUES (?,?,?,?,?,?,?,?,?,?)",
-        pipeline
-    )
-
-    # Contacts de démonstration
-    contacts_demo = [
-        (1, "Khalid",    "Al-Mansouri",  "CIO",                       "k.almansouri@alrajhi.com", "+966 11 211 1111", "linkedin.com/in/khalid-almansouri", 1),
-        (1, "Fatima",    "Al-Sayed",     "Analyste",                  "f.alsayed@alrajhi.com",    "+966 11 211 1122", "",                                  0),
-        (2, "Ahmed",     "Hassan",       "Responsable investissements","a.hassan@emiratesnbd.com", "+971 4 230 7777",  "linkedin.com/in/ahmed-hassan",      1),
-        (3, "Lars",      "Eriksen",      "Gérant de portefeuille",     "l.eriksen@nbim.no",        "+47 22 31 61 00",  "linkedin.com/in/lars-eriksen",      1),
-        (4, "Wei",       "Chen",         "CIO",                        "w.chen@gic.sg",            "+65 6889 8888",    "linkedin.com/in/wei-chen-gic",      1),
-        (7, "James",     "Morgan",       "CFO",                        "j.morgan@jpmam.com",       "+1 212 270 6000",  "linkedin.com/in/james-morgan-jpm",  1),
-        (8, "Abdullah",  "Al-Falasi",    "Directeur général",          "a.alfalasi@adia.ae",       "+971 2 415 0000",  "",                                  1),
-    ]
-    c.executemany(
-        "INSERT INTO contacts (client_id, prenom, nom, role, email, telephone, linkedin, is_primary)"
-        " VALUES (?,?,?,?,?,?,?,?)",
-        contacts_demo
-    )
-
-    activites = [
-        (1,  (today - timedelta(days=5)).isoformat(),  "Suivi post-investissement Q1",       "Call"),
-        (2,  (today - timedelta(days=2)).isoformat(),  "Envoi term sheet revise",             "Email"),
-        (3,  (today - timedelta(days=1)).isoformat(),  "Due Diligence equipe risk",           "Meeting"),
-        (4,  (today - timedelta(days=8)).isoformat(),  "Confirmation investissement",         "Email"),
-        (7,  (today - timedelta(days=3)).isoformat(),  "Review trimestrielle performance",    "Meeting"),
-        (8,  (today - timedelta(days=1)).isoformat(),  "Negociation conditions LP — validees","Call"),
-        (5,  (today - timedelta(days=6)).isoformat(),  "Presentation initiale du fonds",      "Meeting"),
-        (10, (today - timedelta(days=4)).isoformat(),  "Envoi DDQ complete",                  "Email"),
-    ]
-    c.executemany(
-        "INSERT INTO activites (client_id, date, notes, type_interaction) VALUES (?,?,?,?)",
-        activites
-    )
-    conn.commit()
 
 
 # ---------------------------------------------------------------------------
@@ -778,6 +657,37 @@ def get_next_actions_by_sales(days_ahead=30, fonds_filter=None):
     df = pd.read_sql_query(query, conn, params=[today_str, limit_str] + fonds_params)
     conn.close()
     return _clean_pipeline_df(df)
+
+
+def get_market_fonds_breakdown(mode="pipeline"):
+    """
+    Croise pipeline × sales_team pour produire :
+      colonnes : marche, fonds, aum
+    mode='pipeline' → AUM Révisé des deals actifs (Prospect…Soft Commit)
+    mode='funded'   → AUM Financé des deals Funded
+    Utilisé pour le graphique empilé Marché × Fonds dans Sales Tracking.
+    """
+    conn = get_connection()
+    if mode == "funded":
+        statut_clause = "p.statut = 'Funded'"
+        aum_col       = "p.funded_aum"
+    else:
+        statut_clause = "p.statut IN ('Prospect','Initial Pitch','Due Diligence','Soft Commit')"
+        aum_col       = "p.revised_aum"
+    query = (
+        "SELECT COALESCE(st.marche, p.sales_owner) AS marche,"
+        " p.fonds,"
+        " COALESCE(SUM({aum}), 0) AS aum"
+        " FROM pipeline p"
+        " LEFT JOIN sales_team st ON st.nom = p.sales_owner"
+        " WHERE {statut}"
+        " GROUP BY COALESCE(st.marche, p.sales_owner), p.fonds"
+        " ORDER BY marche, p.fonds"
+    ).format(aum=aum_col, statut=statut_clause)
+    df = pd.read_sql_query(query, conn)
+    conn.close()
+    df["aum"] = pd.to_numeric(df["aum"], errors="coerce").fillna(0.0)
+    return df
 
 
 # ---------------------------------------------------------------------------
