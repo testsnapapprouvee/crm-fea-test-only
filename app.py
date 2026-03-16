@@ -357,7 +357,7 @@ def _content_statut(statut_nom, fonds_filter=None):
                 ciel=CIEL, marine=MARINE, client=row.get("nom_client",""),
                 fonds=row.get("fonds",""), type=row.get("type_client",""),
                 region=row.get("region",""),
-                aum=fmt_m(float(row.get("revised_aum",0) or 0)),
+                aum=fmt_m(float(row.get("revised_aum",0) or 0) if float(row.get("revised_aum",0) or 0) > 0 else float(row.get("target_aum_initial",0) or 0)),
                 nad=nad_str, timing=timing_html, owner=row.get("sales_owner",""),
                 act_block=(
                     "<div style='margin-top:5px;font-size:0.73rem;color:#666;"
@@ -867,8 +867,8 @@ with st.sidebar:
         st.caption("NAV chargee : {} fonds.".format(len(perf_data_pdf)))
 
     if not fonds_perimetre:
-        st.button("Generer le rapport PDF", disabled=True, use_container_width=True)
-    elif st.button("Generer le rapport PDF", use_container_width=True):
+        st.button("Generer le rapport PDF", key="sidebar_pdf_disabled", disabled=True, use_container_width=True)
+    elif st.button("Generer le rapport PDF", key="sidebar_pdf_btn", use_container_width=True):
         with st.spinner("Generation en cours..."):
             try:
                 pipeline_pdf   = db.get_pipeline_with_clients(fonds_filter=_filtre_effectif)
@@ -900,7 +900,7 @@ with st.sidebar:
                 st.error("Erreur : {}".format(e))
 
     st.divider()
-    st.caption("Version 11.0 — Amundi Edition — Full Modal")
+    st.caption("Version 12.0 — Amundi Edition — Smart AUM + Full Modal")
 
 
 # ---------------------------------------------------------------------------
@@ -927,10 +927,10 @@ with tab_crm:
     # ── Toolbar ──────────────────────────────────────────────────────────────
     tb1, tb2, tb_spacer = st.columns([1, 1, 6])
     with tb1:
-        if st.button("Nouveau compte", use_container_width=True):
+        if st.button("Nouveau compte", key="crm_tb_new_compte", use_container_width=True):
             dialog_add_client()
     with tb2:
-        if st.button("Mailing List", use_container_width=True, type="secondary"):
+        if st.button("Mailing List", key="crm_tb_mailing", use_container_width=True, type="secondary"):
             st.session_state["crm_show_mailing"] = not st.session_state.get("crm_show_mailing", False)
 
     # ── Mailing List Generator (toggled inline, no expander) ─────────────────
@@ -956,7 +956,7 @@ with tab_crm:
                 use_container_width=True, hide_index=True,
                 height=min(280, 46 + len(df_ml) * 36))
             st.code("; ".join(df_ml["email"].tolist()), language=None)
-            st.download_button("Exporter CSV",
+            st.download_button("Exporter CSV", key="crm_ml_dl",
                 data=df_ml[display_cols].to_csv(index=False).encode("utf-8"),
                 file_name="mailing_list_{}.csv".format(date.today().isoformat()),
                 mime="text/csv")
@@ -1248,7 +1248,7 @@ with tab_pipeline:
     # ── Toolbar ──────────────────────────────────────────────────────────────
     tp_new, tp_filt, tp_spacer = st.columns([1, 1, 6])
     with tp_new:
-        if st.button("Nouveau Deal", use_container_width=True):
+        if st.button("Nouveau Deal", key="pipe_tb_new_deal", use_container_width=True):
             # Clear pipeline dialog state before opening add deal
             st.session_state.pop("crm_pipeline_dialog_id", None)
             dialog_add_deal()
@@ -1279,14 +1279,18 @@ with tab_pipeline:
     df_display = df_view.copy()
     df_display["next_action_date"] = df_display["next_action_date"].apply(
         lambda d: d.isoformat() if isinstance(d, date) else "")
-    for col in ["target_aum_initial","revised_aum","funded_aum"]:
-        if col in df_display.columns:
-            df_display[col] = df_display[col].apply(fmt_m)
+    # Smart AUM: single column AUM_Pipeline for active deals, funded_aum for Funded
+    df_display["aum_pipeline"] = df_display.apply(
+        lambda r: float(r["funded_aum"]) if r["statut"] == "Funded"
+        else (float(r["revised_aum"]) if float(r["revised_aum"]) > 0
+              else float(r["target_aum_initial"])), axis=1)
+    df_display["aum_pipeline_fmt"] = df_display["aum_pipeline"].apply(fmt_m)
+    df_display["funded_aum_fmt"]   = df_display["funded_aum"].apply(fmt_m)
     if "closing_probability" in df_display.columns:
         df_display["closing_probability"] = df_display["closing_probability"].fillna(50)
 
     cols_show = ["id","nom_client","type_client","region","fonds","statut",
-                 "target_aum_initial","revised_aum","funded_aum",
+                 "aum_pipeline_fmt","funded_aum_fmt",
                  "closing_probability","raison_perte","next_action_date","sales_owner","derniere_activite"]
 
     event = st.dataframe(
@@ -1299,9 +1303,8 @@ with tab_pipeline:
             "region":              st.column_config.TextColumn("Region", width="small"),
             "fonds":               st.column_config.TextColumn("Fonds"),
             "statut":              st.column_config.TextColumn("Statut"),
-            "target_aum_initial":  st.column_config.TextColumn("AUM Cible"),
-            "revised_aum":         st.column_config.TextColumn("AUM Révisé"),
-            "funded_aum":          st.column_config.TextColumn("AUM Financé"),
+            "aum_pipeline_fmt":    st.column_config.TextColumn("AUM Pipeline"),
+            "funded_aum_fmt":      st.column_config.TextColumn("AUM Financé"),
             "raison_perte":        st.column_config.TextColumn("Raison"),
             "next_action_date":    st.column_config.TextColumn("Next Action"),
             "sales_owner":         st.column_config.TextColumn("Commercial"),
@@ -1328,29 +1331,39 @@ with tab_pipeline:
             st.session_state.pop("crm_pipeline_dialog_id", None)
 
     st.divider()
-    st.markdown("#### Comparaison AUM par Deal Actif")
-    df_viz = db.get_pipeline_with_clients()
-    df_viz = df_viz[
-        (df_viz["target_aum_initial"] > 0) &
-        (df_viz["statut"].isin(["Funded","Soft Commit","Due Diligence","Initial Pitch"]))
-    ].head(10)
+    st.markdown("#### AUM Pipeline par Deal Actif")
+    df_viz_raw = db.get_pipeline_with_clients()
+    # Smart AUM: actifs uniquement, une seule barre = AUM_Pipeline
+    df_viz = df_viz_raw[df_viz_raw["statut"].isin(STATUTS_ACTIFS)].copy()
+    df_viz["aum_pipeline"] = df_viz["revised_aum"].where(
+        df_viz["revised_aum"] > 0, df_viz["target_aum_initial"])
+    df_viz = df_viz[df_viz["aum_pipeline"] > 0].copy()
+    df_viz["x_label"] = df_viz["nom_client"].str[:16] + " – " + df_viz["fonds"].str[:12]
+    df_viz = df_viz.sort_values("aum_pipeline", ascending=False).head(12)
     if not df_viz.empty:
-        fig_viz = go.Figure()
-        for label, col, color in [
-            ("AUM Cible",   "target_aum_initial", GRIS),
-            ("AUM Révisé",  "revised_aum",         B_MID),
-            ("AUM Financé", "funded_aum",           MARINE)]:
-            fig_viz.add_trace(go.Bar(name=label, x=df_viz["nom_client"].str[:18].tolist(),
-                                     y=df_viz[col].tolist(), marker_color=color,
-                                     marker_line_color=BLANC, marker_line_width=0.5))
+        # Color by statut
+        statut_bar_colors = {
+            "Soft Commit": B_MID, "Due Diligence": "#004f8c",
+            "Initial Pitch": B_PAL, "Prospect": "#9ecae1",
+        }
+        bar_colors = [statut_bar_colors.get(s, B_MID) for s in df_viz["statut"]]
+        fig_viz = go.Figure(go.Bar(
+            x=df_viz["x_label"].tolist(),
+            y=df_viz["aum_pipeline"].tolist(),
+            marker_color=bar_colors,
+            marker_line_color=BLANC, marker_line_width=0.5,
+            text=[fmt_m(v) for v in df_viz["aum_pipeline"]],
+            textposition="outside", textfont_size=9, textfont_color=MARINE,
+            hovertemplate="<b>%{x}</b><br>AUM Pipeline : %{text}<br>Statut : %{customdata}<extra></extra>",
+            customdata=df_viz["statut"].tolist()))
         fig_viz.update_layout(
-            height=320, paper_bgcolor=BLANC, plot_bgcolor=BLANC,
-            font_color=MARINE, barmode="group", bargap=0.22, bargroupgap=0.06,
-            legend_bgcolor=BLANC, legend_font_size=10,
-            xaxis_tickangle=-20, xaxis_showgrid=False,
+            height=340, paper_bgcolor=BLANC, plot_bgcolor=BLANC,
+            font_color=MARINE, bargap=0.22,
+            xaxis_tickangle=-25, xaxis_showgrid=False,
             yaxis_showgrid=True, yaxis_gridcolor=GRIS,
-            margin=dict(l=10, r=10, t=20, b=10))
+            margin=dict(l=10, r=10, t=30, b=10))
         st.plotly_chart(fig_viz, use_container_width=True, config={"displayModeBar": False})
+        st.caption("AUM Pipeline = AUM Révisé si > 0, sinon AUM Cible. Deals actifs uniquement.")
 
     df_lp = db.get_pipeline_with_clients()
     df_lp = df_lp[df_lp["statut"].isin(["Lost","Paused"])].copy()
@@ -1375,19 +1388,33 @@ with tab_dash:
     cutoff_dash = _timeframe_cutoff(tf_dash)
 
     kpis = db.get_kpis()
+    # Smart AUM: re-compute pipeline_actif using revised if >0 else target
+    if True:  # always apply smart AUM to base kpis
+        _conn_sa = db.get_connection()
+        _df_sa = pd.read_sql_query(
+            "SELECT revised_aum, target_aum_initial FROM pipeline"
+            " WHERE statut IN ('Prospect','Initial Pitch','Due Diligence','Soft Commit')",
+            _conn_sa)
+        _conn_sa.close()
+        if not _df_sa.empty:
+            _df_sa['aum_p'] = _df_sa['revised_aum'].where(_df_sa['revised_aum'] > 0, _df_sa['target_aum_initial'])
+            kpis['pipeline_actif'] = float(_df_sa['aum_p'].sum())
     if cutoff_dash is not None:
         import pandas as _pd
         _conn = db.get_connection()
         _cutoff_str = cutoff_dash.isoformat()
         _df_p = _pd.read_sql_query(
-            "SELECT p.statut, p.funded_aum, p.revised_aum"
+            "SELECT p.statut, p.funded_aum, p.revised_aum, p.target_aum_initial"
             " FROM pipeline p WHERE DATE(p.updated_at) >= ?",
             _conn, params=(_cutoff_str,))
         _conn.close()
         if not _df_p.empty:
             kpis["total_funded"]    = float(_df_p[_df_p["statut"]=="Funded"]["funded_aum"].sum())
-            kpis["pipeline_actif"]  = float(_df_p[_df_p["statut"].isin(
-                ["Prospect","Initial Pitch","Due Diligence","Soft Commit"])]["revised_aum"].sum())
+            _df_actif = _df_p[_df_p["statut"].isin(
+                ["Prospect","Initial Pitch","Due Diligence","Soft Commit"])].copy()
+            _df_actif["aum_pipeline"] = _df_actif["revised_aum"].where(
+                _df_actif["revised_aum"] > 0, _df_actif["target_aum_initial"])
+            kpis["pipeline_actif"] = float(_df_actif["aum_pipeline"].sum())
             kpis["nb_funded"]       = int((_df_p["statut"]=="Funded").sum())
             kpis["nb_lost"]         = int((_df_p["statut"]=="Lost").sum())
             kpis["nb_paused"]       = int((_df_p["statut"]=="Paused").sum())
@@ -1730,7 +1757,7 @@ with tab_sales:
                     '</div>'.format(
                         dot=dot, timing=timing, marine=MARINE, ciel=CIEL,
                         client=row.get("nom_client",""), fonds=row.get("fonds",""),
-                        statut=row.get("statut",""), aum=fmt_m(float(row.get("revised_aum",0) or 0)),
+                        statut=row.get("statut",""), aum=fmt_m(float(row.get("revised_aum",0) or 0) if float(row.get("revised_aum",0) or 0) > 0 else float(row.get("target_aum_initial",0) or 0)),
                         owner=row.get("sales_owner","")), unsafe_allow_html=True)
 
 
@@ -1744,7 +1771,7 @@ with tab_activites:
     # Toolbar
     act_tb1, act_tb_spacer = st.columns([1, 7])
     with act_tb1:
-        if st.button("Enregistrer une activité", use_container_width=True):
+        if st.button("Enregistrer une activité", key="act_tb_new_act", use_container_width=True):
             dialog_add_activity()
 
     tf_act = st.selectbox("Timeframe", TIMEFRAMES, key="tf_act",
@@ -1911,17 +1938,17 @@ with tab_settings:
             st.dataframe(st_team_disp[["nom","marche"]], hide_index=True,
                          use_container_width=True,
                          height=min(300, 46 + len(st_team_disp) * 36))
-        if st.button("Ajouter un commercial", use_container_width=True):
+        if st.button("Ajouter un commercial", key="settings_btn_add_sales", use_container_width=True):
             dialog_manage_sales()
 
         st.markdown("<br>", unsafe_allow_html=True)
         st.markdown("#### Actions rapides")
         qa1, qa2 = st.columns(2)
         with qa1:
-            if st.button("Nouveau compte client", use_container_width=True):
+            if st.button("Nouveau compte client", key="settings_btn_new_client", use_container_width=True):
                 dialog_add_client()
         with qa2:
-            if st.button("Enregistrer une activité", use_container_width=True):
+            if st.button("Enregistrer une activité", key="settings_btn_new_act", use_container_width=True):
                 dialog_add_activity()
 
     with sa_col2:
@@ -1941,7 +1968,7 @@ with tab_settings:
                           else pd.read_excel(uploaded_file))
                 st.dataframe(df_imp.head(5), use_container_width=True, height=145)
                 st.caption("{} ligne(s)".format(len(df_imp)))
-                if st.button("Lancer l'import", use_container_width=True):
+                if st.button("Lancer l'import", key="settings_btn_import", use_container_width=True):
                     fn = (db.upsert_clients_from_df if import_type == "Clients"
                           else db.upsert_pipeline_from_df)
                     ins, upd = fn(df_imp)
@@ -1973,7 +2000,7 @@ with tab_perf:
             'Les donnees NAV sont integrees dans le PDF si cochees.'
             '</div></div>', unsafe_allow_html=True)
         st.markdown("#### Démonstration")
-        if st.button("Generer un fichier NAV de demonstration", use_container_width=True):
+        if st.button("Generer un fichier NAV de demonstration", key="perf_btn_demo_nav", use_container_width=True):
             demo_dates = pd.date_range("{}-01-01".format(date.today().year - 1),
                                        date.today(), freq="B")
             rng  = np.random.default_rng(42)
