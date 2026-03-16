@@ -275,8 +275,11 @@ def _content_pipeline(fonds_filter=None):
     df = db.get_active_deals_detail(fonds_filter)
     if df.empty: st.info("Aucun deal actif."); return
     df2 = df.copy()
-    for col in ["AUM_Revise","AUM_Cible"]:
-        if col in df2.columns: df2[col] = df2[col].apply(fmt_m)
+    # Show Smart AUM as single "AUM Attendu" column
+    if "AUM_Pipeline" in df2.columns:
+        df2["AUM Attendu"] = df2["AUM_Pipeline"].apply(fmt_m)
+        drop_cols = [c for c in ["AUM_Revise","AUM_Cible","AUM_Pipeline"] if c in df2.columns]
+        df2 = df2.drop(columns=drop_cols)
     if "Prochaine_Action" in df2.columns:
         df2["Prochaine_Action"] = df2["Prochaine_Action"].apply(
             lambda d: d.isoformat() if isinstance(d, date) else str(d or "—"))
@@ -357,7 +360,9 @@ def _content_statut(statut_nom, fonds_filter=None):
                 ciel=CIEL, marine=MARINE, client=row.get("nom_client",""),
                 fonds=row.get("fonds",""), type=row.get("type_client",""),
                 region=row.get("region",""),
-                aum=fmt_m(float(row.get("revised_aum",0) or 0) if float(row.get("revised_aum",0) or 0) > 0 else float(row.get("target_aum_initial",0) or 0)),
+                aum=fmt_m(float(row.get("aum_pipeline", 0) or 0) if row.get("aum_pipeline") is not None
+                        else (float(row.get("revised_aum",0) or 0) if float(row.get("revised_aum",0) or 0) > 0
+                              else float(row.get("target_aum_initial",0) or 0))),
                 nad=nad_str, timing=timing_html, owner=row.get("sales_owner",""),
                 act_block=(
                     "<div style='margin-top:5px;font-size:0.73rem;color:#666;"
@@ -900,7 +905,7 @@ with st.sidebar:
                 st.error("Erreur : {}".format(e))
 
     st.divider()
-    st.caption("Version 12.0 — Amundi Edition — Smart AUM + Full Modal")
+    st.caption("Version 13.0 — Amundi Edition — Smart AUM SQL + Cross-Tab Fix")
 
 
 # ---------------------------------------------------------------------------
@@ -1245,13 +1250,25 @@ with tab_pipeline:
     st.markdown('<div class="section-title">Pipeline Management</div>',
                 unsafe_allow_html=True)
 
-    # ── Toolbar ──────────────────────────────────────────────────────────────
-    tp_new, tp_filt, tp_spacer = st.columns([1, 1, 6])
-    with tp_new:
-        if st.button("Nouveau Deal", key="pipe_tb_new_deal", use_container_width=True):
-            # Clear pipeline dialog state before opening add deal
-            st.session_state.pop("crm_pipeline_dialog_id", None)
+    # ── Quick Action Center — 4 primary buttons, equal width ────────────────
+    st.markdown('<div class="section-title">Quick Actions</div>', unsafe_allow_html=True)
+    qac1, qac2, qac3, qac4 = st.columns(4)
+    with qac1:
+        if st.button("Nouveau Compte", key="qac_new_compte", use_container_width=True, type="primary"):
+            dialog_add_client()
+    with qac2:
+        if st.button("Nouveau Deal", key="qac_new_deal", use_container_width=True, type="primary"):
             dialog_add_deal()
+    with qac3:
+        if st.button("Nouvelle Activité", key="qac_new_activity", use_container_width=True, type="primary"):
+            dialog_add_activity()
+    with qac4:
+        if st.button("Nouveau Commercial", key="qac_new_sales", use_container_width=True, type="primary"):
+            dialog_manage_sales()
+    st.markdown("<br>", unsafe_allow_html=True)
+
+    # ── Filtres ───────────────────────────────────────────────────────────────
+    tp_filt, tp_spacer = st.columns([1, 7])
     with tp_filt:
         if st.button("Filtres", key="pipe_filt_toggle", use_container_width=True, type="secondary"):
             st.session_state["pipe_show_filters"] = not st.session_state.get("pipe_show_filters", False)
@@ -1272,8 +1289,8 @@ with tab_pipeline:
     if filt_fonds:    df_view = df_view[df_view["fonds"].isin(filt_fonds)]
     if filt_regions:  df_view = df_view[df_view["region"].isin(filt_regions)]
 
-    st.markdown('<div class="pipeline-hint">Cliquez sur une ligne pour modifier le deal'
-                ' — <b>{} deal(s)</b> affiché(s)</div>'.format(len(df_view)),
+    st.markdown('<div class="pipeline-hint">Sélectionnez une ligne puis cliquez'
+                ' "Modifier le deal sélectionné" — <b>{} deal(s)</b> affiché(s)</div>'.format(len(df_view)),
                 unsafe_allow_html=True)
 
     df_display = df_view.copy()
@@ -1312,23 +1329,42 @@ with tab_pipeline:
             "derniere_activite":   st.column_config.TextColumn("Dernière Activité"),
         }, key="pipeline_ro")
 
-    # ── ÉTAPE 1 FIX : state namespace strict, isolé à cet onglet ─────────────
-    # On n'ouvre la modale QUE si l'utilisateur clique sur une ligne DANS cet onglet.
+    # ── Cross-tab safe selection: row index stored locally, dialog only on button click
     selected_rows = event.selection.rows if event.selection else []
-    if len(selected_rows) > 0 and selected_rows[0] < len(df_view):
-        clicked_id = int(df_view.iloc[selected_rows[0]]["id"])
-        # Set state only if it changed (prevents re-open after close)
-        if st.session_state.get("crm_pipeline_dialog_id") != clicked_id:
-            st.session_state["crm_pipeline_dialog_id"] = clicked_id
+    _pipe_selected_id = None
+    if selected_rows and selected_rows[0] < len(df_view):
+        _pipe_selected_id = int(df_view.iloc[selected_rows[0]]["id"])
+        st.session_state["pipe_last_selected_id"] = _pipe_selected_id
 
-    # Open dialog if state is set
-    dialog_pid = st.session_state.get("crm_pipeline_dialog_id")
-    if dialog_pid is not None:
-        _row = db.get_pipeline_row_by_id(dialog_pid)
-        if _row:
-            dialog_edit_pipeline(dialog_pid, _row)
+    # Show which deal is selected + edit button — dialog ONLY fires on explicit click
+    _current_sel = st.session_state.get("pipe_last_selected_id")
+    if _current_sel is not None:
+        _sel_row_data = df_view[df_view["id"] == _current_sel]
+        if not _sel_row_data.empty:
+            _sn = str(_sel_row_data.iloc[0].get("nom_client",""))
+            _sf = str(_sel_row_data.iloc[0].get("fonds",""))
+            _ss = str(_sel_row_data.iloc[0].get("statut",""))
+            _hint_col, _btn_col = st.columns([3, 1])
+            with _hint_col:
+                st.markdown(
+                    '<div class="pipeline-hint" style="margin:6px 0;">'
+                    'Deal sélectionné : <b>{}</b> &nbsp;·&nbsp; {} &nbsp;·&nbsp; {}</div>'.format(
+                        _sn, _sf, _ss),
+                    unsafe_allow_html=True)
+            with _btn_col:
+                if st.button("Modifier le deal sélectionné", key="pipe_open_dialog_btn",
+                             type="tertiary", use_container_width=True):
+                    _row = db.get_pipeline_row_by_id(_current_sel)
+                    if _row:
+                        dialog_edit_pipeline(_current_sel, _row)
         else:
-            st.session_state.pop("crm_pipeline_dialog_id", None)
+            # Deal no longer exists (was deleted) — clear selection
+            st.session_state.pop("pipe_last_selected_id", None)
+    else:
+        st.markdown(
+            '<div style="color:#888;font-size:0.78rem;padding:6px 0 2px 0;">'
+            'Sélectionnez une ligne pour activer l\'édition.</div>',
+            unsafe_allow_html=True)
 
     st.divider()
     st.markdown("#### AUM Pipeline par Deal Actif")
@@ -1388,17 +1424,7 @@ with tab_dash:
     cutoff_dash = _timeframe_cutoff(tf_dash)
 
     kpis = db.get_kpis()
-    # Smart AUM: re-compute pipeline_actif using revised if >0 else target
-    if True:  # always apply smart AUM to base kpis
-        _conn_sa = db.get_connection()
-        _df_sa = pd.read_sql_query(
-            "SELECT revised_aum, target_aum_initial FROM pipeline"
-            " WHERE statut IN ('Prospect','Initial Pitch','Due Diligence','Soft Commit')",
-            _conn_sa)
-        _conn_sa.close()
-        if not _df_sa.empty:
-            _df_sa['aum_p'] = _df_sa['revised_aum'].where(_df_sa['revised_aum'] > 0, _df_sa['target_aum_initial'])
-            kpis['pipeline_actif'] = float(_df_sa['aum_p'].sum())
+    # pipeline_actif already uses Smart AUM (CASE WHEN revised_aum > 0 ...) in database.py
     if cutoff_dash is not None:
         import pandas as _pd
         _conn = db.get_connection()
@@ -1412,9 +1438,11 @@ with tab_dash:
             kpis["total_funded"]    = float(_df_p[_df_p["statut"]=="Funded"]["funded_aum"].sum())
             _df_actif = _df_p[_df_p["statut"].isin(
                 ["Prospect","Initial Pitch","Due Diligence","Soft Commit"])].copy()
-            _df_actif["aum_pipeline"] = _df_actif["revised_aum"].where(
-                _df_actif["revised_aum"] > 0, _df_actif["target_aum_initial"])
-            kpis["pipeline_actif"] = float(_df_actif["aum_pipeline"].sum())
+            # Smart AUM: revised if >0, else target
+            _df_actif["_aum_p"] = _df_actif.apply(
+                lambda r: float(r["revised_aum"]) if float(r.get("revised_aum",0) or 0) > 0
+                          else float(r.get("target_aum_initial",0) or 0), axis=1)
+            kpis["pipeline_actif"] = float(_df_actif["_aum_p"].sum())
             kpis["nb_funded"]       = int((_df_p["statut"]=="Funded").sum())
             kpis["nb_lost"]         = int((_df_p["statut"]=="Lost").sum())
             kpis["nb_paused"]       = int((_df_p["statut"]=="Paused").sum())
