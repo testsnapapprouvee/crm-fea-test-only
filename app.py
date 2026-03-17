@@ -1,5 +1,5 @@
 # =============================================================================
-# app.py — CRM Asset Management — Amundi Edition  v11.0
+# app.py — CRM Asset Management — Amundi Edition  v14.0 — Decision Support
 # Architecture : Full Modal (@st.dialog) + Split-Screen CRM
 # Session-state keys are namespaced per feature to prevent cross-tab conflicts
 # =============================================================================
@@ -12,6 +12,10 @@ from datetime import date, timedelta
 import io
 import sys
 import os
+from pptx import Presentation
+from pptx.util import Inches, Pt, Emu
+from pptx.dml.color import RGBColor
+from pptx.enum.text import PP_ALIGN
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
@@ -58,6 +62,230 @@ STATUT_COLORS = {
 }
 
 fmt_m = db.format_finance
+
+# ---------------------------------------------------------------------------
+# PPTX — Account Review Generator (v14.0)
+# ---------------------------------------------------------------------------
+def _rgb(hex_str):
+    """Convert #RRGGBB to RGBColor."""
+    h = hex_str.lstrip("#")
+    return RGBColor(int(h[0:2],16), int(h[2:4],16), int(h[4:6],16))
+
+def generate_account_review_pptx(client_data: dict, group_summary: dict,
+                                   contacts_df, activities_df) -> bytes:
+    """
+    Generates a 2-slide PPTX Account Review.
+    Slide 1: Title — Revue de Compte Stratégique
+    Slide 2: Synthèse — AUM, KYC, Fonds, Next Actions
+    Returns bytes ready for st.download_button.
+    """
+    prs = Presentation()
+    prs.slide_width  = Inches(13.33)
+    prs.slide_height = Inches(7.5)
+
+    MARINE_RGB  = _rgb("#001c4b")
+    CIEL_RGB    = _rgb("#019ee1")
+    ORANGE_RGB  = _rgb("#f07d00")
+    BLANC_RGB   = _rgb("#ffffff")
+    LIGHT_RGB   = _rgb("#f2f6fa")
+    GREY_RGB    = _rgb("#666666")
+
+    blank_layout = prs.slide_layouts[6]  # Completely blank
+
+    def _add_rect(slide, x, y, w, h, fill_rgb, line_rgb=None, line_width_pt=0):
+        from pptx.util import Pt as _Pt
+        shape = slide.shapes.add_shape(
+            1,  # MSO_SHAPE_TYPE.RECTANGLE = 1
+            Inches(x), Inches(y), Inches(w), Inches(h))
+        shape.fill.solid()
+        shape.fill.fore_color.rgb = fill_rgb
+        if line_rgb:
+            shape.line.color.rgb = line_rgb
+            shape.line.width = Pt(line_width_pt)
+        else:
+            shape.line.fill.background()
+        return shape
+
+    def _add_text(slide, text, x, y, w, h, font_size, bold=False, color_rgb=None,
+                  align=PP_ALIGN.LEFT, italic=False, wrap=True):
+        txBox = slide.shapes.add_textbox(
+            Inches(x), Inches(y), Inches(w), Inches(h))
+        txBox.word_wrap = wrap
+        tf = txBox.text_frame
+        tf.word_wrap = wrap
+        para = tf.paragraphs[0]
+        para.alignment = align
+        run = para.add_run()
+        run.text = str(text)
+        run.font.size = Pt(font_size)
+        run.font.bold = bold
+        run.font.italic = italic
+        if color_rgb:
+            run.font.color.rgb = color_rgb
+        return txBox
+
+    # ── SLIDE 1 — TITLE ──────────────────────────────────────────────────────
+    slide1 = prs.slides.add_slide(blank_layout)
+
+    # Dark header bar
+    _add_rect(slide1, 0, 0, 13.33, 2.8, MARINE_RGB)
+    # Accent stripe
+    _add_rect(slide1, 0, 2.8, 13.33, 0.08, CIEL_RGB)
+
+    # Company name
+    _add_text(slide1,
+              "REVUE DE COMPTE STRATÉGIQUE",
+              0.6, 0.35, 12.0, 0.7,
+              font_size=13, bold=False, color_rgb=CIEL_RGB,
+              align=PP_ALIGN.LEFT)
+    _add_text(slide1,
+              client_data.get("nom_client", "—"),
+              0.6, 0.95, 12.0, 1.2,
+              font_size=40, bold=True, color_rgb=BLANC_RGB,
+              align=PP_ALIGN.LEFT)
+
+    # Date
+    _add_text(slide1,
+              date.today().strftime("%d %B %Y").upper(),
+              0.6, 2.2, 6.0, 0.5,
+              font_size=11, bold=False, color_rgb=_rgb("#7ab8d8"),
+              align=PP_ALIGN.LEFT)
+
+    # KYC badge (bottom-right of header)
+    kyc = client_data.get("kyc_status", "En cours")
+    kyc_colors = {"Validé": _rgb("#22a062"), "En cours": ORANGE_RGB, "Bloqué": _rgb("#c0392b")}
+    kyc_rgb = kyc_colors.get(kyc, GREY_RGB)
+    _add_rect(slide1, 10.0, 1.8, 2.7, 0.7, kyc_rgb)
+    _add_text(slide1, "KYC : {}".format(kyc),
+              10.0, 1.9, 2.7, 0.5,
+              font_size=14, bold=True, color_rgb=BLANC_RGB,
+              align=PP_ALIGN.CENTER)
+
+    # Info grid below header
+    infos = [
+        ("TYPE", client_data.get("type_client","—")),
+        ("RÉGION", client_data.get("region","—")),
+        ("TIER", client_data.get("tier","—")),
+        ("COUNTRY", client_data.get("country","—") or "—"),
+    ]
+    for idx, (lbl, val) in enumerate(infos):
+        xi = 0.5 + idx * 3.2
+        _add_rect(slide1, xi, 3.1, 3.0, 1.2, LIGHT_RGB)
+        _add_text(slide1, lbl, xi+0.15, 3.2, 2.7, 0.4,
+                  font_size=9, bold=False, color_rgb=GREY_RGB)
+        _add_text(slide1, val, xi+0.15, 3.55, 2.7, 0.6,
+                  font_size=16, bold=True, color_rgb=MARINE_RGB)
+
+    # Product interests
+    prods = [p.strip() for p in str(client_data.get("product_interests","")).split(",") if p.strip()]
+    if prods:
+        _add_text(slide1, "Product Interests : " + "  ·  ".join(prods),
+                  0.5, 4.5, 12.3, 0.5,
+                  font_size=11, bold=False, color_rgb=GREY_RGB)
+
+    # Footer
+    _add_rect(slide1, 0, 7.1, 13.33, 0.4, _rgb("#f0f4f8"))
+    _add_text(slide1, "Document à usage interne — Confidentiel — Amundi Asset Management",
+              0.5, 7.15, 12.0, 0.3,
+              font_size=8, bold=False, color_rgb=GREY_RGB, align=PP_ALIGN.CENTER)
+
+    # ── SLIDE 2 — SYNTHÈSE ───────────────────────────────────────────────────
+    slide2 = prs.slides.add_slide(blank_layout)
+
+    # Thin top bar
+    _add_rect(slide2, 0, 0, 13.33, 0.55, MARINE_RGB)
+    _add_text(slide2,
+              "SYNTHÈSE  —  {}".format(client_data.get("nom_client","").upper()),
+              0.4, 0.1, 10.0, 0.38,
+              font_size=11, bold=True, color_rgb=BLANC_RGB)
+    _add_text(slide2, date.today().strftime("%d/%m/%Y"),
+              11.0, 0.1, 2.0, 0.38,
+              font_size=11, bold=False, color_rgb=_rgb("#7ab8d8"),
+              align=PP_ALIGN.RIGHT)
+
+    # ── KPI cards row ────────────────────────────────────────────────────────
+    kpi_data = [
+        ("AUM Consolidé",  db.format_finance(group_summary["aum_consolide"]), MARINE_RGB),
+        ("AUM Direct",     db.format_finance(group_summary["aum_direct"]),    CIEL_RGB),
+        ("Fonds Investis", str(len(group_summary["fonds_investis"])),          _rgb("#1a5e8a")),
+        ("Deals Actifs",   str(len(group_summary["next_actions"])),            ORANGE_RGB),
+    ]
+    for idx, (lbl, val, clr) in enumerate(kpi_data):
+        xi = 0.3 + idx * 3.2
+        _add_rect(slide2, xi, 0.75, 3.0, 1.3, MARINE_RGB)
+        _add_rect(slide2, xi, 0.75, 3.0, 0.06, clr)  # color accent top
+        _add_text(slide2, lbl, xi+0.15, 0.85, 2.7, 0.4,
+                  font_size=9, bold=False, color_rgb=_rgb("#7ab8d8"))
+        _add_text(slide2, val, xi+0.15, 1.2, 2.7, 0.65,
+                  font_size=22, bold=True, color_rgb=BLANC_RGB)
+
+    # ── Fonds Investis ───────────────────────────────────────────────────────
+    _add_text(slide2, "FONDS INVESTIS", 0.3, 2.25, 5.5, 0.35,
+              font_size=9, bold=True, color_rgb=CIEL_RGB)
+    _add_rect(slide2, 0.3, 2.6, 5.8, 0.04, CIEL_RGB)
+    if group_summary["fonds_investis"]:
+        for fi, fonds_nm in enumerate(group_summary["fonds_investis"]):
+            _add_rect(slide2, 0.3, 2.72 + fi*0.42, 5.8, 0.38, LIGHT_RGB)
+            _add_text(slide2, fonds_nm, 0.5, 2.74 + fi*0.42, 5.4, 0.36,
+                      font_size=12, bold=False, color_rgb=MARINE_RGB)
+    else:
+        _add_text(slide2, "Aucun fonds financé", 0.3, 2.72, 5.8, 0.4,
+                  font_size=11, bold=False, color_rgb=GREY_RGB)
+
+    # ── Prochaines Actions ───────────────────────────────────────────────────
+    _add_text(slide2, "PROCHAINES ACTIONS", 6.8, 2.25, 6.2, 0.35,
+              font_size=9, bold=True, color_rgb=ORANGE_RGB)
+    _add_rect(slide2, 6.8, 2.6, 6.2, 0.04, ORANGE_RGB)
+    if group_summary["next_actions"]:
+        for ai, act in enumerate(group_summary["next_actions"][:4]):
+            row_y = 2.72 + ai * 0.55
+            _add_rect(slide2, 6.8, row_y, 6.2, 0.5, LIGHT_RGB)
+            label = "{} — {}  |  {}  |  {}".format(
+                act["fonds"], act["statut"],
+                db.format_finance(act["aum_pipeline"]),
+                act["nad"])
+            _add_text(slide2, label, 7.0, row_y + 0.07, 5.8, 0.4,
+                      font_size=10, bold=False, color_rgb=MARINE_RGB)
+    else:
+        _add_text(slide2, "Aucune action planifiée", 6.8, 2.72, 6.2, 0.4,
+                  font_size=11, bold=False, color_rgb=GREY_RGB)
+
+    # ── Dernières Activités ──────────────────────────────────────────────────
+    _add_text(slide2, "DERNIÈRES ACTIVITÉS", 0.3, 5.3, 6.5, 0.35,
+              font_size=9, bold=True, color_rgb=MARINE_RGB)
+    _add_rect(slide2, 0.3, 5.65, 12.7, 0.03, _rgb("#e8e8e8"))
+    TYPE_COLORS_PPTX = {
+        "Call": CIEL_RGB, "Meeting": _rgb("#1a5e8a"),
+        "Email": _rgb("#4a8fbd"), "Autre": GREY_RGB,
+    }
+    if not activities_df.empty:
+        for ri, (_, act_row) in enumerate(activities_df.head(2).iterrows()):
+            row_y = 5.75 + ri * 0.5
+            a_typ = str(act_row.get("type_interaction",""))
+            a_col = TYPE_COLORS_PPTX.get(a_typ, GREY_RGB)
+            _add_rect(slide2, 0.3, row_y, 0.06, 0.38, a_col)
+            _add_text(slide2,
+                      "[{}]  {}  —  {}".format(
+                          a_typ,
+                          str(act_row.get("date","")),
+                          str(act_row.get("notes",""))[:80]),
+                      0.5, row_y + 0.02, 12.3, 0.36,
+                      font_size=10, bold=False, color_rgb=MARINE_RGB)
+    else:
+        _add_text(slide2, "Aucune activité enregistrée.", 0.3, 5.75, 12.7, 0.4,
+                  font_size=11, bold=False, color_rgb=GREY_RGB)
+
+    # Footer
+    _add_rect(slide2, 0, 7.1, 13.33, 0.4, _rgb("#f0f4f8"))
+    _add_text(slide2, "Document à usage interne — Confidentiel — Amundi Asset Management",
+              0.5, 7.15, 12.0, 0.3,
+              font_size=8, bold=False, color_rgb=GREY_RGB, align=PP_ALIGN.CENTER)
+
+    buf = io.BytesIO()
+    prs.save(buf)
+    buf.seek(0)
+    return buf.getvalue()
+
 
 # ---------------------------------------------------------------------------
 # TIMEFRAME HELPER
@@ -210,6 +438,20 @@ code { background:#001c4b08; color:#001c4b; }
 .statut-Lost          { background:#88888822; color:#555;    border:1px solid #aaaaaa55; }
 .statut-Paused        { background:#c0c0c022; color:#666;    border:1px solid #c0c0c055; }
 .statut-Redeemed      { background:#b8b8d022; color:#555;    border:1px solid #b8b8d055; }
+
+
+/* ── Quick Action Center — force Marine primary buttons ── */
+[data-testid="stButton"][key^="qac_"] > button,
+button[kind="primary"] {
+    background: #001c4b !important;
+    color: #ffffff !important;
+    border: none !important;
+    font-weight: 700 !important;
+}
+button[kind="primary"]:hover {
+    background: #019ee1 !important;
+    color: #ffffff !important;
+}
 
 /* ── Structure card in CRM split-screen ── */
 .struct-block {
@@ -787,6 +1029,73 @@ def dialog_edit_activity(act_id: int, act_data: dict):
                 st.rerun()
 
 
+
+
+@st.dialog("Meeting Brief — Analyse Compte", width="large")
+def dialog_meeting_brief(client_data: dict, group_summary: dict,
+                          contacts_df, activities_df, whitespace_df):
+    """One-minute briefing for CRM director / relationship manager."""
+    sel_nom = client_data.get("nom_client", "")
+    st.markdown(
+        '<div style="background:#001c4b;padding:14px 18px;margin-bottom:12px;">'
+        '<div style="font-size:0.72rem;color:#7ab8d8;text-transform:uppercase;letter-spacing:1px;">'
+        'Meeting Brief — Confidentiel</div>'
+        '<div style="font-size:1.2rem;font-weight:800;color:#ffffff;">{}</div>'
+        '</div>'.format(sel_nom), unsafe_allow_html=True)
+
+    bc1, bc2 = st.columns(2)
+    with bc1:
+        st.markdown("**AUM Consolidé Groupe**")
+        st.markdown(
+            '<span style="font-size:1.6rem;font-weight:800;color:#001c4b;">{}</span>'.format(
+                fmt_m(group_summary["aum_consolide"])), unsafe_allow_html=True)
+        if group_summary["fonds_investis"]:
+            st.markdown("**Fonds investis :** " + " · ".join(group_summary["fonds_investis"]))
+        else:
+            st.info("Aucun deal Funded à ce jour.")
+    with bc2:
+        st.markdown("**Contacts clés**")
+        if not contacts_df.empty:
+            for _, ct in contacts_df.head(3).iterrows():
+                st.markdown("- **{}** {} — *{}*".format(
+                    ct.get("prenom",""), ct.get("nom",""), ct.get("role","—")))
+        else:
+            st.caption("Aucun contact enregistré.")
+
+    st.divider()
+    st.markdown("**2 Dernières Activités**")
+    if not activities_df.empty:
+        for _, act in activities_df.head(2).iterrows():
+            st.markdown("- `{}` **{}** — {}".format(
+                str(act.get("date","")),
+                str(act.get("type_interaction","")),
+                str(act.get("notes",""))[:120]))
+    else:
+        st.caption("Aucune activité.")
+
+    st.divider()
+    st.markdown("**Opportunités Whitespace (Cross-Sell)**")
+    if not whitespace_df.empty and sel_nom in whitespace_df.index:
+        row = whitespace_df.loc[sel_nom]
+        gaps = [f for f in row.index if pd.isna(row[f])]
+        invested = [f for f in row.index if not pd.isna(row[f])]
+        if gaps:
+            st.markdown("Fonds **non investis** (opportunités) : " +
+                        ", ".join("**{}**".format(g) for g in gaps))
+        if invested:
+            st.markdown("Fonds investis : " + ", ".join(invested))
+    else:
+        st.caption("Données whitespace indisponibles.")
+
+    if group_summary["next_actions"]:
+        st.divider()
+        st.markdown("**Prochaines Actions Pipeline**")
+        for act in group_summary["next_actions"][:3]:
+            st.markdown("- **{}** — {} — {} — `{}`".format(
+                act["fonds"], act["statut"],
+                fmt_m(act["aum_pipeline"]), act["nad"]))
+
+
 @st.dialog("Gérer les Commerciaux", width="large")
 def dialog_manage_sales():
     st_team = db.get_sales_team()
@@ -905,7 +1214,7 @@ with st.sidebar:
                 st.error("Erreur : {}".format(e))
 
     st.divider()
-    st.caption("Version 13.0 — Amundi Edition — Smart AUM SQL + Cross-Tab Fix")
+    st.caption("Version 14.0 — Amundi Edition — Decision Support | Account Review | Whitespace")
 
 
 # ---------------------------------------------------------------------------
@@ -981,11 +1290,12 @@ with tab_crm:
         noms_clients = sorted(df_hier["nom_client"].tolist())
         crm_search   = st.selectbox(
             "Rechercher un compte client…",
-            options=[""] + noms_clients,
-            format_func=lambda x: x if x else "— Sélectionner un compte —",
+            options=noms_clients,
+            index=None,
+            placeholder="Tapez le nom du client pour rechercher…",
             key="crm_search_box")
 
-        if not crm_search:
+        if crm_search is None:
             nb_total   = len(df_hier)
             nb_valide  = int((df_hier["kyc_status"] == "Validé").sum())
             nb_encours = int((df_hier["kyc_status"] == "En cours").sum())
@@ -1080,9 +1390,37 @@ with tab_crm:
                             prods_html=prods_html),
                         unsafe_allow_html=True)
 
-                    if st.button("Modifier les informations du compte",
-                                 key="crm_edit_co_{}".format(sel_id), type="tertiary"):
-                        dialog_edit_client(sel.to_dict())
+                    _btn_row1, _btn_row2 = st.columns(2)
+                    with _btn_row1:
+                        if st.button("Modifier le compte",
+                                     key="crm_edit_co_{}".format(sel_id),
+                                     type="tertiary", use_container_width=True):
+                            dialog_edit_client(sel.to_dict())
+                    with _btn_row2:
+                        if st.button("Meeting Brief",
+                                     key="crm_brief_{}".format(sel_id),
+                                     type="tertiary", use_container_width=True):
+                            _grp = db.get_client_group_summary(sel_id)
+                            _ws  = db.get_whitespace_matrix()
+                            dialog_meeting_brief(sel.to_dict(), _grp,
+                                                 db.get_contacts(sel_id),
+                                                 db.get_activities(client_id=sel_id),
+                                                 _ws)
+
+                    # ── Account Review PPTX Download ─────────────────
+                    _grp_summary = db.get_client_group_summary(sel_id)
+                    _pptx_bytes  = generate_account_review_pptx(
+                        sel.to_dict(), _grp_summary,
+                        db.get_contacts(sel_id),
+                        db.get_activities(client_id=sel_id))
+                    st.download_button(
+                        "Account Review (.pptx)",
+                        data=_pptx_bytes,
+                        file_name="account_review_{}_{}.pptx".format(
+                            sel_nom.replace(" ","_"), date.today().isoformat()),
+                        mime="application/vnd.openxmlformats-officedocument.presentationml.presentation",
+                        key="crm_pptx_{}".format(sel_id),
+                        use_container_width=True)
 
                     # ── Corporate Structure block ─────────────────────────
                     has_struct = sel_par or filiales
@@ -1101,15 +1439,35 @@ with tab_crm:
                                 '</div>'.format(p=sel_par),
                                 unsafe_allow_html=True)
                         if filiales:
-                            fils_items = "".join(
-                                '<div style="padding:2px 0;border-bottom:1px solid #001c4b08;">'
-                                '<span style="font-weight:600;color:{m};font-size:0.78rem;">{f}</span>'
-                                '</div>'.format(m=MARINE, f=f) for f in filiales)
+                            # Enrich filiales with AUM + Tier from group summary
+                            _fils_enriched = _grp_summary.get("filiales", [])
+                            _fils_dict = {f["nom"]: f for f in _fils_enriched}
+                            fils_items = ""
+                            for f_nom in filiales:
+                                f_data = _fils_dict.get(f_nom, {})
+                                f_aum  = fmt_m(f_data.get("aum", 0))
+                                f_tier = f_data.get("tier", "—")
+                                fils_items += (
+                                    '<div style="display:flex;justify-content:space-between;'
+                                    'align-items:center;padding:5px 0;'
+                                    'border-bottom:1px solid #001c4b08;">'
+                                    '<span style="font-weight:600;color:{m};font-size:0.78rem;">{f}</span>'
+                                    '<span style="font-size:0.70rem;color:#888;">{tier}</span>'
+                                    '<span style="font-size:0.74rem;font-weight:700;color:{ciel};">{aum}</span>'
+                                    '</div>').format(m=MARINE, ciel=CIEL,
+                                                      f=f_nom, tier=f_tier, aum=f_aum)
+                            # Consolidated total
+                            aum_grp = fmt_m(_grp_summary.get("aum_consolide", 0))
                             st.markdown(
                                 '<div class="struct-block">'
+                                '<div style="display:flex;justify-content:space-between;'
+                                'margin-bottom:6px;">'
                                 '<div class="struct-label">Filiales ({n})</div>'
+                                '<div style="font-size:0.72rem;font-weight:700;color:{ciel};">'
+                                'Groupe : {aum_grp}</div></div>'
                                 '{fils}'
-                                '</div>'.format(n=len(filiales), fils=fils_items),
+                                '</div>'.format(n=len(filiales), fils=fils_items,
+                                              ciel=CIEL, aum_grp=aum_grp),
                                 unsafe_allow_html=True)
 
                     # ── Activités Récentes ────────────────────────────────
@@ -1251,7 +1609,6 @@ with tab_pipeline:
                 unsafe_allow_html=True)
 
     # ── Quick Action Center — 4 primary buttons, equal width ────────────────
-    st.markdown('<div class="section-title">Quick Actions</div>', unsafe_allow_html=True)
     qac1, qac2, qac3, qac4 = st.columns(4)
     with qac1:
         if st.button("Nouveau Compte", key="qac_new_compte", use_container_width=True, type="primary"):
@@ -1601,16 +1958,24 @@ with tab_dash:
                 textfont_size=9, textfont_color=MARINE))
             fig_fonds.update_layout(height=300, paper_bgcolor=BLANC, plot_bgcolor=BLANC,
                                     font_color=MARINE, xaxis_showgrid=True, xaxis_gridcolor=GRIS,
-                                    yaxis_autorange="reversed",
-                                    margin=dict(l=10, r=60, t=36, b=10))
+                                    yaxis=dict(autorange="reversed", automargin=True),
+                                    margin=dict(l=180, r=20, t=36, b=10))
             st.plotly_chart(fig_fonds, use_container_width=True, config={"displayModeBar": False})
 
     st.divider()
-    st.markdown("#### Top Deals — Funded AUM")
+    _td_col1, _td_col2 = st.columns([3, 1])
+    with _td_col1:
+        st.markdown("#### Top Deals — Funded AUM")
+    with _td_col2:
+        _td_region = st.selectbox("Filtrer par Région", ["Toutes"] + REGIONS,
+                                   key="dash_top_deals_region",
+                                   label_visibility="collapsed")
     df_funded_top = (db.get_pipeline_with_clients()
                      .query("statut == 'Funded'")
-                     .sort_values("funded_aum", ascending=False)
-                     .head(10))
+                     .sort_values("funded_aum", ascending=False))
+    if _td_region != "Toutes":
+        df_funded_top = df_funded_top[df_funded_top["region"] == _td_region]
+    df_funded_top = df_funded_top.head(10)
     if not df_funded_top.empty:
         max_f = float(df_funded_top["funded_aum"].max())
         for i, (_, row) in enumerate(df_funded_top.iterrows()):
@@ -1639,6 +2004,83 @@ with tab_dash:
         with dt1: _content_funded(_filtre_effectif)
         with dt2: _content_pipeline(_filtre_effectif)
         with dt3: _content_lost(_filtre_effectif)
+
+    # ── DECISION SUPPORT ──────────────────────────────────────────────────
+    st.divider()
+    ds_col1, ds_col2 = st.columns([1.1, 1], gap="large")
+
+    with ds_col1:
+        st.markdown("#### Money in Motion — Projected Inflows")
+        df_cf = db.get_expected_cashflows()
+        if df_cf.empty or df_cf["aum_pondere"].sum() == 0:
+            st.markdown(
+                '<div style="background:#001c4b04;border:1px dashed #001c4b20;'
+                'padding:18px;text-align:center;">'
+                '<div style="color:{m};font-size:0.84rem;">Aucun deal actif avec prochaine action planifiée.</div>'
+                '</div>'.format(m=MARINE), unsafe_allow_html=True)
+        else:
+            all_months = sorted(df_cf["mois"].unique().tolist())
+            fig_cf = go.Figure()
+            for i, fonds in enumerate(sorted(df_cf["fonds"].unique())):
+                df_f = df_cf[df_cf["fonds"] == fonds]
+                month_map = dict(zip(df_f["mois"], df_f["aum_pondere"]))
+                y_vals = [month_map.get(m, 0) for m in all_months]
+                fig_cf.add_trace(go.Bar(
+                    name=fonds, x=all_months, y=y_vals,
+                    marker_color=PALETTE[i % len(PALETTE)],
+                    marker_line_color=BLANC, marker_line_width=0.5,
+                    hovertemplate="<b>{}</b><br>%{{x}}<br>%{{customdata}}<extra></extra>".format(fonds),
+                    customdata=[fmt_m(v) for v in y_vals]))
+            fig_cf.update_layout(
+                barmode="stack", height=280,
+                paper_bgcolor=BLANC, plot_bgcolor=BLANC, font_color=MARINE,
+                legend_bgcolor=BLANC, legend_bordercolor=GRIS, legend_borderwidth=1,
+                legend_font_size=9,
+                xaxis_showgrid=False, yaxis_showgrid=True, yaxis_gridcolor=GRIS,
+                yaxis_tickformat=".2s", yaxis_title="AUM Pondéré (€)",
+                margin=dict(l=10, r=10, t=10, b=10))
+            st.plotly_chart(fig_cf, use_container_width=True,
+                            config={"displayModeBar": False})
+            st.caption("AUM pondéré = AUM Pipeline × Probabilité de closing. Répartition par mois de Next Action.")
+
+    with ds_col2:
+        st.markdown("#### Whitespace Analysis — Cross-Sell")
+        df_ws = db.get_whitespace_matrix()
+        if df_ws.empty:
+            st.markdown(
+                '<div style="background:#001c4b04;border:1px dashed #001c4b20;'
+                'padding:18px;text-align:center;">'
+                '<div style="color:{m};font-size:0.84rem;">Aucune donnée disponible.</div>'
+                '</div>'.format(m=MARINE), unsafe_allow_html=True)
+        else:
+            # Build HTML table
+            fonds_cols = df_ws.columns.tolist()
+            tbl = ('<table style="width:100%;border-collapse:collapse;font-size:0.70rem;">'
+                   '<thead><tr style="background:{m};color:#fff;">'.format(m=MARINE))
+            tbl += '<th style="padding:5px 6px;text-align:left;">Client</th>'
+            for f in fonds_cols:
+                tbl += '<th style="padding:5px 4px;text-align:center;max-width:60px;word-break:break-word;">{}</th>'.format(f[:8])
+            tbl += '</tr></thead><tbody>'
+            for i, (client_nm, row) in enumerate(df_ws.iterrows()):
+                bg = "#f4f8fc" if i % 2 == 0 else BLANC
+                tbl += '<tr style="background:{};">'.format(bg)
+                tbl += '<td style="padding:4px 6px;font-weight:600;color:{m};white-space:nowrap;max-width:110px;overflow:hidden;text-overflow:ellipsis;">{c}</td>'.format(
+                    m=MARINE, c=str(client_nm)[:16])
+                for f in fonds_cols:
+                    val = row[f]
+                    if pd.isna(val) or val == 0:
+                        # Whitespace — opportunity
+                        cell = '<td style="text-align:center;padding:3px;background:#fef6f0;">'                                '<span style="color:#f07d00;font-weight:700;font-size:0.65rem;">—</span></td>'
+                    else:
+                        cell = '<td style="text-align:center;padding:3px;background:#e6f4ea;">'                                '<span style="color:#22a062;font-weight:700;font-size:0.68rem;">{}</span></td>'.format(
+                                   fmt_m(val))
+                    tbl += cell
+                tbl += '</tr>'
+            tbl += '</tbody></table>'
+            st.markdown(tbl, unsafe_allow_html=True)
+            st.caption("Vert = investi (AUM Funded). Orange — = opportunité cross-sell.")
+
+
 
 
 # ============================================================================
