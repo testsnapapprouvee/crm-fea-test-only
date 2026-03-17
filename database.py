@@ -1,10 +1,11 @@
 # =============================================================================
-# database.py  —  CRM Asset Management  —  Amundi Edition  v14.0 — Decision Support
+# database.py  —  CRM Asset Management  —  Amundi Edition  v15.0
 # Priorite : STABILITE ABSOLUE — zero helper complexe, SQL plat
 # Charte : #001c4b Marine | #019ee1 Ciel | #f07d00 Orange
-# v9.3 :
-#   - Base 100% vierge au démarrage (purge données démo)
-#   - get_market_fonds_breakdown() : croisement Marché × Fonds pour Sales Intel
+# v15.0 :
+#   - _clean_pipeline_df : conversion AUM avant guard df.empty (fix crash export)
+#   - get_excel_backup   : force pd.to_numeric avant division (fix crash)
+#   - upsert_pipeline_from_df : Ultimate Smart Import (auto-cree clients/sales)
 # =============================================================================
 
 import sqlite3
@@ -33,25 +34,21 @@ REGIONS_REFERENTIEL = [
 ]
 
 TIERS_REFERENTIEL   = ["Tier 1", "Tier 2", "Tier 3"]
-KYC_STATUTS         = ["Validé", "En cours", "Bloqué"]
+KYC_STATUTS         = ["Valide", "En cours", "Bloque"]
 PRODUCT_INTERESTS   = [
     "Global Value", "International Fund", "Income Builder",
     "Resilient Equity", "Private Debt", "Active ETFs",
 ]
 ROLES_CONTACT = [
-    "CIO", "CFO", "Gérant de portefeuille", "Analyste",
-    "Responsable investissements", "Directeur général", "Autre",
+    "CIO", "CFO", "Gerant de portefeuille", "Analyste",
+    "Responsable investissements", "Directeur general", "Autre",
 ]
 
 # ---------------------------------------------------------------------------
-# FORMATAGE FINANCIER — règle unique, jamais de chiffre brut affiché
+# FORMATAGE FINANCIER
 # ---------------------------------------------------------------------------
 
 def format_finance(val):
-    """
-    >= 1 Md  =>  "X.X Md€"
-    sinon    =>  "X.X M€"
-    """
     try:
         v = float(val)
     except (TypeError, ValueError):
@@ -75,7 +72,7 @@ def get_connection():
 
 
 # ---------------------------------------------------------------------------
-# HELPER — clause IN() sans crash si liste vide
+# HELPER — clause IN()
 # ---------------------------------------------------------------------------
 
 def _fonds_clause(fonds_filter, alias="p"):
@@ -86,16 +83,19 @@ def _fonds_clause(fonds_filter, alias="p"):
 
 
 # ---------------------------------------------------------------------------
-# NETTOYAGE DE TYPES
+# CORRECTIF 1A — _clean_pipeline_df
+# Force AUM numeric conversion BEFORE the df.empty guard
+# This prevents "Expected numeric dtype" crashes on empty pipelines
 # ---------------------------------------------------------------------------
 
 def _clean_pipeline_df(df):
-    if df.empty:
-        return df.copy()
     df = df.copy()
+    # Always convert AUM columns first — even on empty DataFrames
     for col in _AUM_COLS:
         if col in df.columns:
             df[col] = pd.to_numeric(df[col], errors="coerce").fillna(0.0).astype("float64")
+    if df.empty:
+        return df
     if "next_action_date" in df.columns:
         parsed = pd.to_datetime(df["next_action_date"], errors="coerce")
         df["next_action_date"] = [ts.date() if pd.notna(ts) else None for ts in parsed]
@@ -118,7 +118,6 @@ def init_db():
     conn = get_connection()
     c = conn.cursor()
 
-    # --- TABLE CLIENTS (base) ---
     c.execute("""
         CREATE TABLE IF NOT EXISTS clients (
             id          INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -129,14 +128,12 @@ def init_db():
         )
     """)
 
-    # --- MIGRATIONS CLIENTS — colonnes CRM avancé ---
     _safe_alter(c, "ALTER TABLE clients ADD COLUMN parent_id INTEGER REFERENCES clients(id) ON DELETE SET NULL")
     _safe_alter(c, "ALTER TABLE clients ADD COLUMN tier TEXT DEFAULT 'Tier 2' CHECK(tier IN ('Tier 1','Tier 2','Tier 3'))")
-    _safe_alter(c, "ALTER TABLE clients ADD COLUMN kyc_status TEXT DEFAULT 'En cours' CHECK(kyc_status IN ('Validé','En cours','Bloqué'))")
+    _safe_alter(c, "ALTER TABLE clients ADD COLUMN kyc_status TEXT DEFAULT 'En cours' CHECK(kyc_status IN ('Valide','En cours','Bloque'))")
     _safe_alter(c, "ALTER TABLE clients ADD COLUMN product_interests TEXT DEFAULT ''")
     _safe_alter(c, "ALTER TABLE clients ADD COLUMN country TEXT DEFAULT ''")
 
-    # --- TABLE CONTACTS (annuaire CRM) ---
     c.execute("""
         CREATE TABLE IF NOT EXISTS contacts (
             id         INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -153,7 +150,6 @@ def init_db():
         )
     """)
 
-    # --- TABLE PIPELINE ---
     c.execute("""
         CREATE TABLE IF NOT EXISTS pipeline (
             id                   INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -174,7 +170,6 @@ def init_db():
         )
     """)
 
-    # --- TABLE SALES TEAM ---
     c.execute("""
         CREATE TABLE IF NOT EXISTS sales_team (
             id         INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -187,7 +182,6 @@ def init_db():
     _safe_alter(c, "ALTER TABLE pipeline ADD COLUMN closing_probability REAL DEFAULT 50")
     conn.commit()
 
-    # --- TABLE ACTIVITES ---
     c.execute("""
         CREATE TABLE IF NOT EXISTS activites (
             id               INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -200,7 +194,6 @@ def init_db():
         )
     """)
 
-    # --- TABLE AUDIT LOG ---
     c.execute("""
         CREATE TABLE IF NOT EXISTS audit_log (
             id                INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -218,7 +211,6 @@ def init_db():
 
 
 def _safe_alter(c, sql):
-    """Exécute un ALTER TABLE silencieusement si la colonne existe déjà."""
     try:
         c.execute(sql)
     except sqlite3.OperationalError:
@@ -251,11 +243,6 @@ def get_client_options():
 
 
 def get_client_hierarchy():
-    """
-    Retourne tous les clients avec leur maison mère (parent).
-    Colonnes : id, nom_client, type_client, region, country, tier, kyc_status, product_interests,
-               parent_id, parent_nom (nom de la maison mère ou '')
-    """
     conn = get_connection()
     df = pd.read_sql_query(
         "SELECT c.id, c.nom_client, c.type_client, c.region,"
@@ -289,7 +276,6 @@ def get_sales_owners():
 
 
 def get_sales_team():
-    """Retourne la liste des commerciaux avec leur marché."""
     conn = get_connection()
     try:
         df = pd.read_sql_query("SELECT id, nom, marche FROM sales_team ORDER BY nom", conn)
@@ -300,7 +286,6 @@ def get_sales_team():
 
 
 def add_sales_member(nom, marche):
-    """Ajoute un commercial à la table sales_team."""
     conn = get_connection()
     c = conn.cursor()
     try:
@@ -315,7 +300,6 @@ def add_sales_member(nom, marche):
 
 
 def get_sales_by_marche(marche):
-    """Retourne les commerciaux d'un marché donné."""
     conn = get_connection()
     c = conn.cursor()
     c.execute("SELECT nom FROM sales_team WHERE marche = ? ORDER BY nom", (marche,))
@@ -325,11 +309,10 @@ def get_sales_by_marche(marche):
 
 
 # ---------------------------------------------------------------------------
-# CONTACTS — ANNUAIRE CRM
+# CONTACTS
 # ---------------------------------------------------------------------------
 
 def get_contacts(client_id):
-    """Retourne tous les contacts d'un client."""
     conn = get_connection()
     df = pd.read_sql_query(
         "SELECT id, client_id, prenom, nom, role, email, telephone, linkedin, is_primary"
@@ -342,10 +325,8 @@ def get_contacts(client_id):
 
 
 def add_contact(client_id, prenom, nom, role="", email="", telephone="", linkedin="", is_primary=False):
-    """Ajoute un contact à un client."""
     conn = get_connection()
     c = conn.cursor()
-    # Si is_primary, on dépromote les autres
     if is_primary:
         c.execute("UPDATE contacts SET is_primary=0 WHERE client_id=?", (int(client_id),))
     c.execute(
@@ -362,11 +343,10 @@ def add_contact(client_id, prenom, nom, role="", email="", telephone="", linkedi
 
 
 # ---------------------------------------------------------------------------
-# LECTURES — PIPELINE (avec derniere activite en colonne)
+# LECTURES — PIPELINE
 # ---------------------------------------------------------------------------
 
 def get_pipeline_with_clients(fonds_filter=None):
-    """Pipeline complet sans colonne activite (leger, pour les tableaux)."""
     fonds_sql, fonds_params = _fonds_clause(fonds_filter, "p")
     conn = get_connection()
     query = (
@@ -384,10 +364,6 @@ def get_pipeline_with_clients(fonds_filter=None):
 
 
 def get_pipeline_with_last_activity(fonds_filter=None):
-    """
-    Pipeline enrichi avec la derniere activite de chaque client.
-    Colonne supplementaire : derniere_activite (str, peut etre vide).
-    """
     fonds_sql, fonds_params = _fonds_clause(fonds_filter, "p")
     conn = get_connection()
     query = (
@@ -477,7 +453,6 @@ def get_pipeline_row_by_id(pipeline_id):
 
 
 def get_overdue_actions(fonds_filter=None):
-    """Liste legere des actions en retard (pour les alertes en-tete)."""
     today_str = date.today().isoformat()
     fonds_sql, fonds_params = _fonds_clause(fonds_filter, "p")
     conn = get_connection()
@@ -524,7 +499,7 @@ def get_overdue_deal_full(pipeline_id):
 
 
 # ---------------------------------------------------------------------------
-# LECTURES — DRILL-DOWN modales (funded / actifs / lost)
+# LECTURES — DRILL-DOWN
 # ---------------------------------------------------------------------------
 
 def get_funded_deals_detail(fonds_filter=None):
@@ -541,10 +516,9 @@ def get_funded_deals_detail(fonds_filter=None):
     )
     df = pd.read_sql_query(query, conn, params=fonds_params if fonds_params else None)
     conn.close()
-    if "AUM_Finance" in df.columns:
-        df["AUM_Finance"] = pd.to_numeric(df["AUM_Finance"], errors="coerce").fillna(0.0)
-    if "AUM_Cible" in df.columns:
-        df["AUM_Cible"] = pd.to_numeric(df["AUM_Cible"], errors="coerce").fillna(0.0)
+    for col in ["AUM_Finance", "AUM_Cible"]:
+        if col in df.columns:
+            df[col] = pd.to_numeric(df[col], errors="coerce").fillna(0.0)
     return df
 
 
@@ -597,7 +571,7 @@ def get_lost_deals_detail(fonds_filter=None):
 
 
 # ---------------------------------------------------------------------------
-# LECTURES — AUDIT
+# AUDIT
 # ---------------------------------------------------------------------------
 
 def get_audit_log(pipeline_id):
@@ -613,7 +587,7 @@ def get_audit_log(pipeline_id):
 
 
 # ---------------------------------------------------------------------------
-# LECTURES — SALES
+# SALES
 # ---------------------------------------------------------------------------
 
 def get_sales_metrics(fonds_filter=None):
@@ -665,13 +639,6 @@ def get_next_actions_by_sales(days_ahead=30, fonds_filter=None):
 
 
 def get_market_fonds_breakdown(mode="pipeline"):
-    """
-    Croise pipeline × sales_team pour produire :
-      colonnes : marche, fonds, aum
-    mode='pipeline' → AUM Révisé des deals actifs (Prospect…Soft Commit)
-    mode='funded'   → AUM Financé des deals Funded
-    Utilisé pour le graphique empilé Marché × Fonds dans Sales Tracking.
-    """
     conn = get_connection()
     if mode == "funded":
         statut_clause = "p.statut = 'Funded'"
@@ -696,7 +663,7 @@ def get_market_fonds_breakdown(mode="pipeline"):
 
 
 # ---------------------------------------------------------------------------
-# LECTURES — KPIs
+# KPIs
 # ---------------------------------------------------------------------------
 
 def get_kpis(fonds_filter=None):
@@ -779,7 +746,7 @@ def get_aum_by_region(fonds_filter=None):
 
 
 # ---------------------------------------------------------------------------
-# LECTURES — ACTIVITES
+# ACTIVITES
 # ---------------------------------------------------------------------------
 
 def get_activities(client_id=None):
@@ -796,13 +763,12 @@ def get_activities(client_id=None):
 
 
 # ---------------------------------------------------------------------------
-# ECRITURE
+# ECRITURE — CLIENTS / PIPELINE
 # ---------------------------------------------------------------------------
 
 def add_client(nom_client, type_client, region, country="",
                parent_id=None, tier="Tier 2",
                kyc_status="En cours", product_interests=""):
-    """Creates a client with all CRM fields."""
     conn = get_connection()
     c = conn.cursor()
     pid = int(parent_id) if parent_id else None
@@ -899,12 +865,10 @@ def update_pipeline_row(row, modified_by="utilisateur"):
                     "INSERT INTO audit_log (pipeline_id, champ_modifie, ancienne_valeur, nouvelle_valeur, modified_by) VALUES (?,?,?,?,?)",
                     (pid, champ, str(ov), str(nv), modified_by)
                 )
-    # funded_aum auto : si Funded et funded_aum=0, utiliser revised_aum
     if statut == "Funded" and new_funded == 0:
         new_funded = new_revised
 
     new_prob = float(row.get("closing_probability") or 50)
-
     c.execute(
         "UPDATE pipeline SET fonds=?, statut=?, target_aum_initial=?, revised_aum=?,"
         " funded_aum=?, raison_perte=?, concurrent_choisi=?, next_action_date=?,"
@@ -934,7 +898,6 @@ def add_activity(client_id, date_str, notes, type_interaction):
 def update_client(client_id, nom_client, type_client, region, country="",
                   parent_id=None, tier="Tier 2", kyc_status="En cours",
                   product_interests=""):
-    """Update all editable fields of a client row."""
     try:
         conn = get_connection()
         c = conn.cursor()
@@ -960,7 +923,6 @@ def update_client(client_id, nom_client, type_client, region, country="",
 # ---------------------------------------------------------------------------
 
 def update_activity(activity_id, date_str, notes, type_interaction):
-    """Update an existing activity entry."""
     try:
         conn = get_connection()
         conn.execute(
@@ -975,7 +937,6 @@ def update_activity(activity_id, date_str, notes, type_interaction):
 
 
 def delete_activity(activity_id):
-    """Permanently delete an activity entry."""
     try:
         conn = get_connection()
         conn.execute("DELETE FROM activites WHERE id=?", (int(activity_id),))
@@ -992,7 +953,6 @@ def delete_activity(activity_id):
 
 def update_contact(contact_id, prenom, nom, role="", email="",
                    telephone="", linkedin="", is_primary=False):
-    """Update an existing contact."""
     try:
         conn = get_connection()
         c = conn.cursor()
@@ -1019,7 +979,6 @@ def update_contact(contact_id, prenom, nom, role="", email="",
 
 
 def delete_contact(contact_id):
-    """Permanently delete a contact."""
     try:
         conn = get_connection()
         conn.execute("DELETE FROM contacts WHERE id=?", (int(contact_id),))
@@ -1035,10 +994,6 @@ def delete_contact(contact_id):
 # ---------------------------------------------------------------------------
 
 def delete_pipeline_row(pipeline_id):
-    """
-    Permanently delete a pipeline deal and its audit trail.
-    CASCADE on audit_log is handled by FK, but we delete explicitly for safety.
-    """
     try:
         conn = get_connection()
         c = conn.cursor()
@@ -1052,14 +1007,10 @@ def delete_pipeline_row(pipeline_id):
 
 
 # ---------------------------------------------------------------------------
-# MAILING LIST — for Mailing List Generator
+# MAILING LIST
 # ---------------------------------------------------------------------------
 
 def get_mailing_list(regions=None, countries=None, tiers=None, product_interests=None):
-    """
-    Returns contacts enriched with client metadata for the Mailing List Generator.
-    All filter params are lists; pass None or [] to skip that filter.
-    """
     conn = get_connection()
     query = (
         "SELECT ct.id AS contact_id, ct.prenom AS first_name, ct.nom AS last_name,"
@@ -1074,7 +1025,6 @@ def get_mailing_list(regions=None, countries=None, tiers=None, product_interests
     )
     df = pd.read_sql_query(query, conn)
     conn.close()
-
     if regions:
         df = df[df["region"].isin(regions)]
     if countries:
@@ -1085,7 +1035,6 @@ def get_mailing_list(regions=None, countries=None, tiers=None, product_interests
         def _has_interest(pi_str):
             return any(p.strip() in pi_str for p in product_interests)
         df = df[df["product_interests"].apply(_has_interest)]
-
     return df.reset_index(drop=True)
 
 
@@ -1112,72 +1061,143 @@ def upsert_clients_from_df(df):
     return inserted, updated
 
 
+# ---------------------------------------------------------------------------
+# CORRECTIF 2 — ULTIMATE SMART IMPORT
+# Auto-cree clients inconnus (Instit/EMEA) et sales owners (Global)
+# Saute la ligne UNIQUEMENT si nom_client est vide
+# ---------------------------------------------------------------------------
+
 def upsert_pipeline_from_df(df):
+    """
+    Smart Import 100% autonome :
+      A. nom_client inconnu  -> INSERT INTO clients (type_client='Instit', region='EMEA')
+      B. sales_owner inconnu -> INSERT OR IGNORE INTO sales_team (marche='Global')
+      Saute une ligne UNIQUEMENT si nom_client est totalement vide.
+    """
     inserted, updated = 0, 0
     conn = get_connection()
     c = conn.cursor()
     df.columns = [col.lower().strip() for col in df.columns]
+
     for _, row in df.iterrows():
+        # ── 1. Resoudre client_id ─────────────────────────────────────────────
         client_id = None
+
+        # Priorite : client_id explicite dans le fichier
         if "client_id" in df.columns and pd.notna(row.get("client_id")):
-            client_id = int(row["client_id"])
-        elif "nom_client" in df.columns:
+            try:
+                client_id = int(row["client_id"])
+            except (ValueError, TypeError):
+                pass
+
+        # Sinon : resolution par nom_client
+        if client_id is None:
             nom = str(row.get("nom_client", "")).strip()
+            if not nom:
+                continue  # Seul cas ou on saute la ligne
+
             c.execute("SELECT id FROM clients WHERE nom_client=?", (nom,))
             res = c.fetchone()
             if res:
                 client_id = res["id"]
+            else:
+                # AUTO-CREATE : client absent -> creer avec defaults Instit/EMEA
+                try:
+                    c.execute(
+                        "INSERT INTO clients"
+                        " (nom_client, type_client, region, tier, kyc_status)"
+                        " VALUES (?, 'Instit', 'EMEA', 'Tier 2', 'En cours')",
+                        (nom,)
+                    )
+                    client_id = c.lastrowid
+                except sqlite3.IntegrityError:
+                    # Race condition : re-lire
+                    c.execute("SELECT id FROM clients WHERE nom_client=?", (nom,))
+                    res2 = c.fetchone()
+                    if res2:
+                        client_id = res2["id"]
+                    else:
+                        continue
+
         if client_id is None:
             continue
+
+        # ── 2. Valider le fonds ───────────────────────────────────────────────
         fonds = str(row.get("fonds", "")).strip()
         if not fonds:
             continue
-        statut  = str(row.get("statut", "Prospect"))
-        raison  = str(row.get("raison_perte", "") or "").strip() or None
-        conc    = str(row.get("concurrent_choisi", "") or "").strip() or None
-        next_a  = str(row.get("next_action_date", "") or "").strip() or None
-        t_aum   = float(row.get("target_aum_initial", 0) or 0)
-        r_aum   = float(row.get("revised_aum", 0) or 0)
-        f_aum   = float(row.get("funded_aum", 0) or 0)
-        sales   = str(row.get("sales_owner", "Non assigne") or "Non assigne")
-        c.execute("SELECT id FROM pipeline WHERE client_id=? AND fonds=?", (client_id, fonds))
+
+        # ── 3. Preparer les champs ────────────────────────────────────────────
+        statut = str(row.get("statut", "Prospect")).strip()
+        raison = str(row.get("raison_perte", "") or "").strip() or None
+        conc   = str(row.get("concurrent_choisi", "") or "").strip() or None
+        next_a = str(row.get("next_action_date", "") or "").strip() or None
+        t_aum  = float(row.get("target_aum_initial", 0) or 0)
+        r_aum  = float(row.get("revised_aum", 0) or 0)
+        f_aum  = float(row.get("funded_aum", 0) or 0)
+        sales  = str(row.get("sales_owner", "Non assigne") or "Non assigne").strip()
+        prob   = float(row.get("closing_probability", 50) or 50)
+
+        # ── 4. Auto-creer le sales owner s'il est inconnu ────────────────────
+        if sales and sales != "Non assigne":
+            c.execute("SELECT id FROM sales_team WHERE nom=?", (sales,))
+            if not c.fetchone():
+                try:
+                    c.execute(
+                        "INSERT OR IGNORE INTO sales_team (nom, marche) VALUES (?, 'Global')",
+                        (sales,)
+                    )
+                except Exception:
+                    pass  # Ignore les erreurs de contrainte
+
+        # ── 5. Upsert pipeline ────────────────────────────────────────────────
+        c.execute(
+            "SELECT id FROM pipeline WHERE client_id=? AND fonds=?",
+            (client_id, fonds)
+        )
         existing = c.fetchone()
         if existing:
             c.execute(
-                "UPDATE pipeline SET statut=?, target_aum_initial=?, revised_aum=?, funded_aum=?,"
-                " raison_perte=?, concurrent_choisi=?, next_action_date=?, sales_owner=?,"
-                " updated_at=CURRENT_TIMESTAMP WHERE id=?",
-                (statut, t_aum, r_aum, f_aum, raison, conc, next_a, sales, existing["id"])
+                "UPDATE pipeline"
+                " SET statut=?, target_aum_initial=?, revised_aum=?, funded_aum=?,"
+                " raison_perte=?, concurrent_choisi=?, next_action_date=?,"
+                " sales_owner=?, closing_probability=?,"
+                " updated_at=CURRENT_TIMESTAMP"
+                " WHERE id=?",
+                (statut, t_aum, r_aum, f_aum, raison, conc,
+                 next_a, sales, prob, existing["id"])
             )
             updated += 1
         else:
             c.execute(
-                "INSERT INTO pipeline (client_id, fonds, statut, target_aum_initial, revised_aum,"
-                " funded_aum, raison_perte, concurrent_choisi, next_action_date, sales_owner)"
-                " VALUES (?,?,?,?,?,?,?,?,?,?)",
-                (client_id, fonds, statut, t_aum, r_aum, f_aum, raison, conc, next_a, sales)
+                "INSERT INTO pipeline"
+                " (client_id, fonds, statut, target_aum_initial, revised_aum,"
+                "  funded_aum, raison_perte, concurrent_choisi, next_action_date,"
+                "  sales_owner, closing_probability)"
+                " VALUES (?,?,?,?,?,?,?,?,?,?,?)",
+                (client_id, fonds, statut, t_aum, r_aum, f_aum,
+                 raison, conc, next_a, sales, prob)
             )
             inserted += 1
+
     conn.commit()
     conn.close()
     return inserted, updated
 
 
-
 # ---------------------------------------------------------------------------
-# ANALYTICS — Money in Motion & Whitespace (v14.0)
+# ANALYTICS — Money in Motion & Whitespace
 # ---------------------------------------------------------------------------
 
 def get_expected_cashflows():
     """
-    Projected inflows: groups active deals by closing month (next_action_date)
-    computes weighted AUM = aum_pipeline * closing_probability / 100
-    Returns DataFrame with columns: mois (YYYY-MM), fonds, aum_pondere
-    Only next 6 months from today.
+    Projected inflows by closing month (next_action_date).
+    weighted AUM = aum_pipeline * closing_probability / 100
+    Returns: mois (YYYY-MM), fonds, aum_pondere — next 6 months only.
     """
     conn = get_connection()
     today_str = date.today().isoformat()
-    limit_str = (date.today().replace(day=1) + __import__('datetime').timedelta(days=190)).isoformat()
+    limit_str = (date.today().replace(day=1) + timedelta(days=190)).isoformat()
     query = (
         "SELECT"
         " strftime('%Y-%m', COALESCE(p.next_action_date, date('now','+90 days'))) AS mois,"
@@ -1199,10 +1219,8 @@ def get_expected_cashflows():
 
 def get_whitespace_matrix():
     """
-    Whitespace Analysis: clients (rows) × fonds (columns).
-    Cell value = funded_aum if the client has a Funded deal in that fonds,
-                 None otherwise (= whitespace / cross-sell opportunity).
-    Returns a pivoted DataFrame indexed by nom_client.
+    Whitespace cross-sell analysis: clients x fonds.
+    NaN = opportunity (not invested), float = funded_aum.
     """
     conn = get_connection()
     query = (
@@ -1218,42 +1236,31 @@ def get_whitespace_matrix():
     if df.empty:
         return pd.DataFrame()
     df["funded_aum"] = pd.to_numeric(df["funded_aum"], errors="coerce").fillna(0.0)
-    # Replace 0 with NaN so pivot shows actual gaps
     df["funded_aum"] = df["funded_aum"].replace(0.0, float("nan"))
     pivot = df.pivot_table(index="nom_client", columns="fonds",
                            values="funded_aum", aggfunc="sum")
-    # Reindex to ensure all fonds appear as columns
-    from database import FONDS_REFERENTIEL
-    all_fonds = FONDS_REFERENTIEL
-    for f in all_fonds:
+    for f in FONDS_REFERENTIEL:
         if f not in pivot.columns:
             pivot[f] = float("nan")
-    pivot = pivot[all_fonds]
-    return pivot
+    return pivot[FONDS_REFERENTIEL]
 
 
 def get_client_group_summary(client_id: int):
-    """
-    Returns consolidated AUM for a client group (client + all direct filiales).
-    Result dict: {
-        'aum_consolide': float,
-        'aum_direct': float,
-        'filiales': [{'nom': str, 'aum': float, 'tier': str}],
-        'next_actions': [{'fonds': str, 'statut': str, 'nad': str, 'aum_pipeline': float}],
-        'fonds_investis': [str],
-    }
-    """
+    """Consolidated AUM for client + all direct subsidiaries."""
     conn = get_connection()
     c = conn.cursor()
 
-    # All client IDs in the group (client + filiales)
-    c.execute("SELECT id, nom_client, tier FROM clients WHERE parent_id = ? ORDER BY nom_client",
-              (client_id,))
-    filiales_rows = [{"id": r["id"], "nom": r["nom_client"], "tier": r["tier"]} for r in c.fetchall()]
+    c.execute(
+        "SELECT id, nom_client, tier FROM clients WHERE parent_id = ? ORDER BY nom_client",
+        (client_id,)
+    )
+    filiales_rows = [
+        {"id": r["id"], "nom": r["nom_client"], "tier": r["tier"]}
+        for r in c.fetchall()
+    ]
     all_ids = [client_id] + [f["id"] for f in filiales_rows]
+    placeholders = ",".join("?" * len(all_ids))
 
-    # AUM direct (this client only)
-    placeholders_1 = "?"
     c.execute(
         "SELECT COALESCE(SUM(funded_aum), 0) FROM pipeline"
         " WHERE client_id = ? AND statut = 'Funded'",
@@ -1261,7 +1268,6 @@ def get_client_group_summary(client_id: int):
     )
     aum_direct = float(c.fetchone()[0])
 
-    # AUM per filiale
     for fil in filiales_rows:
         c.execute(
             "SELECT COALESCE(SUM(funded_aum), 0) FROM pipeline"
@@ -1270,8 +1276,6 @@ def get_client_group_summary(client_id: int):
         )
         fil["aum"] = float(c.fetchone()[0])
 
-    # Consolidated AUM (all group)
-    placeholders = ",".join("?" * len(all_ids))
     c.execute(
         "SELECT COALESCE(SUM(funded_aum), 0) FROM pipeline"
         " WHERE client_id IN ({}) AND statut = 'Funded'".format(placeholders),
@@ -1279,22 +1283,25 @@ def get_client_group_summary(client_id: int):
     )
     aum_consolide = float(c.fetchone()[0])
 
-    # Next actions (active deals)
     c.execute(
         "SELECT p.fonds, p.statut, p.next_action_date, p.sales_owner,"
         " (CASE WHEN p.revised_aum > 0 THEN p.revised_aum ELSE p.target_aum_initial END) AS aum_pipeline"
         " FROM pipeline p"
-        " WHERE p.client_id IN ({}) AND p.statut IN ('Prospect','Initial Pitch','Due Diligence','Soft Commit')"
+        " WHERE p.client_id IN ({})"
+        " AND p.statut IN ('Prospect','Initial Pitch','Due Diligence','Soft Commit')"
         " ORDER BY p.next_action_date ASC LIMIT 5".format(placeholders),
         all_ids
     )
-    next_actions = [{"fonds": r["fonds"], "statut": r["statut"],
-                     "nad": str(r["next_action_date"] or "—"),
-                     "aum_pipeline": float(r["aum_pipeline"] or 0),
-                     "sales_owner": str(r["sales_owner"] or "")}
-                    for r in c.fetchall()]
+    next_actions = [
+        {
+            "fonds": r["fonds"], "statut": r["statut"],
+            "nad": str(r["next_action_date"] or "—"),
+            "aum_pipeline": float(r["aum_pipeline"] or 0),
+            "sales_owner": str(r["sales_owner"] or ""),
+        }
+        for r in c.fetchall()
+    ]
 
-    # Fonds funded
     c.execute(
         "SELECT DISTINCT fonds FROM pipeline"
         " WHERE client_id IN ({}) AND statut = 'Funded'".format(placeholders),
@@ -1304,23 +1311,26 @@ def get_client_group_summary(client_id: int):
 
     conn.close()
     return {
-        "aum_consolide": aum_consolide,
-        "aum_direct":    aum_direct,
-        "filiales":      filiales_rows,
-        "next_actions":  next_actions,
+        "aum_consolide":  aum_consolide,
+        "aum_direct":     aum_direct,
+        "filiales":       filiales_rows,
+        "next_actions":   next_actions,
         "fonds_investis": fonds_investis,
     }
 
 
 # ---------------------------------------------------------------------------
-# BACKUP EXCEL
+# CORRECTIF 1B — BACKUP EXCEL
+# Force pd.to_numeric avant la division pour eviter "Expected numeric dtype"
 # ---------------------------------------------------------------------------
 
 def get_excel_backup(fonds_filter=None):
     buf = io.BytesIO()
     df_p = get_pipeline_with_last_activity(fonds_filter).copy()
+    # Force numeric conversion BEFORE dividing — prevents crash on empty/mixed pipeline
     for col in ["target_aum_initial", "revised_aum", "funded_aum"]:
         if col in df_p.columns:
+            df_p[col] = pd.to_numeric(df_p[col], errors="coerce").fillna(0.0)
             df_p[col] = (df_p[col] / 1_000_000).round(2)
     rename_p = {
         "id": "ID", "nom_client": "Client", "type_client": "Type", "region": "Region",
