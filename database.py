@@ -1,5 +1,5 @@
 # =============================================================================
-# database.py  —  CRM Asset Management  —  Amundi Edition  v13.0 — Smart AUM SQL
+# database.py  —  CRM Asset Management  —  Amundi Edition  v14.0 — Decision Support
 # Priorite : STABILITE ABSOLUE — zero helper complexe, SQL plat
 # Charte : #001c4b Marine | #019ee1 Ciel | #f07d00 Orange
 # v9.3 :
@@ -1161,6 +1161,155 @@ def upsert_pipeline_from_df(df):
     conn.commit()
     conn.close()
     return inserted, updated
+
+
+
+# ---------------------------------------------------------------------------
+# ANALYTICS — Money in Motion & Whitespace (v14.0)
+# ---------------------------------------------------------------------------
+
+def get_expected_cashflows():
+    """
+    Projected inflows: groups active deals by closing month (next_action_date)
+    computes weighted AUM = aum_pipeline * closing_probability / 100
+    Returns DataFrame with columns: mois (YYYY-MM), fonds, aum_pondere
+    Only next 6 months from today.
+    """
+    conn = get_connection()
+    today_str = date.today().isoformat()
+    limit_str = (date.today().replace(day=1) + __import__('datetime').timedelta(days=190)).isoformat()
+    query = (
+        "SELECT"
+        " strftime('%Y-%m', COALESCE(p.next_action_date, date('now','+90 days'))) AS mois,"
+        " p.fonds,"
+        " SUM((CASE WHEN p.revised_aum > 0 THEN p.revised_aum ELSE p.target_aum_initial END)"
+        "     * COALESCE(p.closing_probability, 50) / 100.0) AS aum_pondere"
+        " FROM pipeline p"
+        " WHERE p.statut IN ('Prospect','Initial Pitch','Due Diligence','Soft Commit')"
+        " AND strftime('%Y-%m', COALESCE(p.next_action_date, date('now','+90 days')))"
+        "     BETWEEN strftime('%Y-%m', ?) AND strftime('%Y-%m', ?)"
+        " GROUP BY mois, p.fonds"
+        " ORDER BY mois, p.fonds"
+    )
+    df = pd.read_sql_query(query, conn, params=[today_str, limit_str])
+    conn.close()
+    df["aum_pondere"] = pd.to_numeric(df["aum_pondere"], errors="coerce").fillna(0.0)
+    return df
+
+
+def get_whitespace_matrix():
+    """
+    Whitespace Analysis: clients (rows) × fonds (columns).
+    Cell value = funded_aum if the client has a Funded deal in that fonds,
+                 None otherwise (= whitespace / cross-sell opportunity).
+    Returns a pivoted DataFrame indexed by nom_client.
+    """
+    conn = get_connection()
+    query = (
+        "SELECT c.nom_client, p.fonds,"
+        " COALESCE(SUM(CASE WHEN p.statut='Funded' THEN p.funded_aum ELSE 0 END), 0) AS funded_aum"
+        " FROM pipeline p"
+        " JOIN clients c ON c.id = p.client_id"
+        " GROUP BY c.nom_client, p.fonds"
+        " ORDER BY c.nom_client, p.fonds"
+    )
+    df = pd.read_sql_query(query, conn)
+    conn.close()
+    if df.empty:
+        return pd.DataFrame()
+    df["funded_aum"] = pd.to_numeric(df["funded_aum"], errors="coerce").fillna(0.0)
+    # Replace 0 with NaN so pivot shows actual gaps
+    df["funded_aum"] = df["funded_aum"].replace(0.0, float("nan"))
+    pivot = df.pivot_table(index="nom_client", columns="fonds",
+                           values="funded_aum", aggfunc="sum")
+    # Reindex to ensure all fonds appear as columns
+    from database import FONDS_REFERENTIEL
+    all_fonds = FONDS_REFERENTIEL
+    for f in all_fonds:
+        if f not in pivot.columns:
+            pivot[f] = float("nan")
+    pivot = pivot[all_fonds]
+    return pivot
+
+
+def get_client_group_summary(client_id: int):
+    """
+    Returns consolidated AUM for a client group (client + all direct filiales).
+    Result dict: {
+        'aum_consolide': float,
+        'aum_direct': float,
+        'filiales': [{'nom': str, 'aum': float, 'tier': str}],
+        'next_actions': [{'fonds': str, 'statut': str, 'nad': str, 'aum_pipeline': float}],
+        'fonds_investis': [str],
+    }
+    """
+    conn = get_connection()
+    c = conn.cursor()
+
+    # All client IDs in the group (client + filiales)
+    c.execute("SELECT id, nom_client, tier FROM clients WHERE parent_id = ? ORDER BY nom_client",
+              (client_id,))
+    filiales_rows = [{"id": r["id"], "nom": r["nom_client"], "tier": r["tier"]} for r in c.fetchall()]
+    all_ids = [client_id] + [f["id"] for f in filiales_rows]
+
+    # AUM direct (this client only)
+    placeholders_1 = "?"
+    c.execute(
+        "SELECT COALESCE(SUM(funded_aum), 0) FROM pipeline"
+        " WHERE client_id = ? AND statut = 'Funded'",
+        (client_id,)
+    )
+    aum_direct = float(c.fetchone()[0])
+
+    # AUM per filiale
+    for fil in filiales_rows:
+        c.execute(
+            "SELECT COALESCE(SUM(funded_aum), 0) FROM pipeline"
+            " WHERE client_id = ? AND statut = 'Funded'",
+            (fil["id"],)
+        )
+        fil["aum"] = float(c.fetchone()[0])
+
+    # Consolidated AUM (all group)
+    placeholders = ",".join("?" * len(all_ids))
+    c.execute(
+        "SELECT COALESCE(SUM(funded_aum), 0) FROM pipeline"
+        " WHERE client_id IN ({}) AND statut = 'Funded'".format(placeholders),
+        all_ids
+    )
+    aum_consolide = float(c.fetchone()[0])
+
+    # Next actions (active deals)
+    c.execute(
+        "SELECT p.fonds, p.statut, p.next_action_date, p.sales_owner,"
+        " (CASE WHEN p.revised_aum > 0 THEN p.revised_aum ELSE p.target_aum_initial END) AS aum_pipeline"
+        " FROM pipeline p"
+        " WHERE p.client_id IN ({}) AND p.statut IN ('Prospect','Initial Pitch','Due Diligence','Soft Commit')"
+        " ORDER BY p.next_action_date ASC LIMIT 5".format(placeholders),
+        all_ids
+    )
+    next_actions = [{"fonds": r["fonds"], "statut": r["statut"],
+                     "nad": str(r["next_action_date"] or "—"),
+                     "aum_pipeline": float(r["aum_pipeline"] or 0),
+                     "sales_owner": str(r["sales_owner"] or "")}
+                    for r in c.fetchall()]
+
+    # Fonds funded
+    c.execute(
+        "SELECT DISTINCT fonds FROM pipeline"
+        " WHERE client_id IN ({}) AND statut = 'Funded'".format(placeholders),
+        all_ids
+    )
+    fonds_investis = [r[0] for r in c.fetchall()]
+
+    conn.close()
+    return {
+        "aum_consolide": aum_consolide,
+        "aum_direct":    aum_direct,
+        "filiales":      filiales_rows,
+        "next_actions":  next_actions,
+        "fonds_investis": fonds_investis,
+    }
 
 
 # ---------------------------------------------------------------------------
