@@ -1,5 +1,5 @@
 # =============================================================================
-# app.py — CRM Asset Management — Amundi Edition  v14.0 — Decision Support
+# app.py — CRM Asset Management — Amundi Edition  v15.0 — Universal Export Hub
 # Architecture : Full Modal (@st.dialog) + Split-Screen CRM
 # Session-state keys are namespaced per feature to prevent cross-tab conflicts
 # =============================================================================
@@ -280,6 +280,149 @@ def generate_account_review_pptx(client_data: dict, group_summary: dict,
     _add_text(slide2, "Document à usage interne — Confidentiel — Amundi Asset Management",
               0.5, 7.15, 12.0, 0.3,
               font_size=8, bold=False, color_rgb=GREY_RGB, align=PP_ALIGN.CENTER)
+
+    buf = io.BytesIO()
+    prs.save(buf)
+    buf.seek(0)
+    return buf.getvalue()
+
+
+# ---------------------------------------------------------------------------
+# PPTX — Global Portfolio Report Generator (v15.0)
+# ---------------------------------------------------------------------------
+def generate_global_pptx(kpis: dict, pipeline_df, mode_comex: bool = False) -> bytes:
+    """
+    2-slide global PPTX report:
+      Slide 1 : Title & KPI Overview
+      Slide 2 : Top Deals table (client names masked if mode_comex)
+    Returns bytes ready for st.download_button.
+    """
+    prs = Presentation()
+    prs.slide_width  = Inches(13.33)
+    prs.slide_height = Inches(7.5)
+
+    MARINE_RGB  = _rgb("#001c4b")
+    CIEL_RGB    = _rgb("#019ee1")
+    ORANGE_RGB  = _rgb("#f07d00")
+    BLANC_RGB   = _rgb("#ffffff")
+    LIGHT_RGB   = _rgb("#f2f6fa")
+    GREY_RGB    = _rgb("#666666")
+
+    blank_layout = prs.slide_layouts[6]
+
+    def _rect(slide, x, y, w, h, fill_rgb):
+        sh = slide.shapes.add_shape(1, Inches(x), Inches(y), Inches(w), Inches(h))
+        sh.fill.solid(); sh.fill.fore_color.rgb = fill_rgb
+        sh.line.fill.background()
+        return sh
+
+    def _text(slide, text, x, y, w, h, fs, bold=False, color=None, align=PP_ALIGN.LEFT):
+        tb = slide.shapes.add_textbox(Inches(x), Inches(y), Inches(w), Inches(h))
+        tf = tb.text_frame; tf.word_wrap = True
+        p = tf.paragraphs[0]; p.alignment = align
+        r = p.add_run(); r.text = str(text)
+        r.font.size = Pt(fs); r.font.bold = bold
+        if color: r.font.color.rgb = color
+        return tb
+
+    # ── SLIDE 1 — TITRE & KPIs ───────────────────────────────────────────────
+    s1 = prs.slides.add_slide(blank_layout)
+    _rect(s1, 0, 0, 13.33, 2.4, MARINE_RGB)
+    _rect(s1, 0, 2.4, 13.33, 0.07, CIEL_RGB)
+
+    label_comex = " [MODE COMEX — ANONYMISÉ]" if mode_comex else ""
+    _text(s1, "RAPPORT GLOBAL — PORTFOLIO PIPELINE" + label_comex,
+          0.6, 0.3, 12.0, 0.6, 11, color=CIEL_RGB)
+    _text(s1, "Amundi Asset Management",
+          0.6, 0.85, 12.0, 0.9, 34, bold=True, color=BLANC_RGB)
+    _text(s1, date.today().strftime("%d %B %Y").upper(),
+          0.6, 1.8, 6.0, 0.5, 11, color=_rgb("#7ab8d8"))
+
+    # KPI row
+    kpi_items = [
+        ("AUM Financé Total",  fmt_m(kpis.get("total_funded", 0)),    CIEL_RGB),
+        ("Pipeline Actif",     fmt_m(kpis.get("pipeline_actif", 0)),   _rgb("#1a5e8a")),
+        ("Pipeline Pondéré",   fmt_m(kpis.get("weighted_pipeline",0)), ORANGE_RGB),
+        ("Taux Conversion",    "{:.1f}%".format(kpis.get("taux_conversion",0)), _rgb("#22a062")),
+    ]
+    for idx, (lbl, val, clr) in enumerate(kpi_items):
+        xi = 0.4 + idx * 3.2
+        _rect(s1, xi, 2.65, 3.0, 1.4, MARINE_RGB)
+        _rect(s1, xi, 2.65, 3.0, 0.07, clr)
+        _text(s1, lbl, xi+0.15, 2.78, 2.7, 0.4, 9, color=_rgb("#7ab8d8"))
+        _text(s1, val, xi+0.15, 3.1,  2.7, 0.75, 22, bold=True, color=BLANC_RGB)
+
+    # Statut pills
+    statut_rep = kpis.get("statut_repartition", {})
+    statut_items = [(s, statut_rep.get(s, 0)) for s in
+                    ["Funded","Soft Commit","Due Diligence","Initial Pitch","Prospect"]
+                    if statut_rep.get(s, 0) > 0]
+    _text(s1, "RÉPARTITION PAR STATUT", 0.4, 4.25, 12.5, 0.35, 8, bold=True, color=GREY_RGB)
+    for si, (stat, cnt) in enumerate(statut_items):
+        xi = 0.4 + si * 2.55
+        _rect(s1, xi, 4.65, 2.35, 0.9, LIGHT_RGB)
+        _text(s1, stat[:12], xi+0.1, 4.72, 2.15, 0.35, 9, color=GREY_RGB)
+        _text(s1, str(cnt), xi+0.1, 5.0, 2.15, 0.45, 18, bold=True, color=MARINE_RGB)
+
+    # Footer
+    _rect(s1, 0, 7.1, 13.33, 0.4, LIGHT_RGB)
+    _text(s1, "Document à usage interne — Confidentiel — Amundi Asset Management",
+          0.5, 7.15, 12.0, 0.3, 8, color=GREY_RGB, align=PP_ALIGN.CENTER)
+
+    # ── SLIDE 2 — TOP DEALS ──────────────────────────────────────────────────
+    s2 = prs.slides.add_slide(blank_layout)
+    _rect(s2, 0, 0, 13.33, 0.55, MARINE_RGB)
+    _text(s2, "TOP DEALS — AUM FINANCÉ", 0.4, 0.1, 10.0, 0.38, 11, bold=True, color=BLANC_RGB)
+    _text(s2, date.today().strftime("%d/%m/%Y"), 11.0, 0.1, 2.0, 0.38,
+          11, color=_rgb("#7ab8d8"), align=PP_ALIGN.RIGHT)
+
+    if mode_comex:
+        _text(s2, "Noms de clients masqués — Mode Comex",
+              0.4, 0.65, 12.5, 0.35, 9, color=ORANGE_RGB)
+
+    # Table header
+    headers = ["Rang", "Client", "Fonds", "Type", "Région", "AUM Financé", "Commercial"]
+    col_widths = [0.6, 2.8, 2.0, 1.4, 1.2, 1.5, 1.8]
+    col_x = [0.3]
+    for w in col_widths[:-1]:
+        col_x.append(col_x[-1] + w)
+
+    header_y = 1.05
+    for hi, (hdr, cx, cw) in enumerate(zip(headers, col_x, col_widths)):
+        _rect(s2, cx, header_y, cw, 0.4, MARINE_RGB)
+        _text(s2, hdr, cx+0.05, header_y+0.06, cw-0.1, 0.28,
+              8, bold=True, color=BLANC_RGB)
+
+    # Table rows
+    df_funded = pipeline_df[pipeline_df["statut"] == "Funded"].sort_values(
+        "funded_aum", ascending=False).head(8) if not pipeline_df.empty else pd.DataFrame()
+
+    for ri, (_, row) in enumerate(df_funded.iterrows()):
+        ry = header_y + 0.4 + ri * 0.52
+        bg = LIGHT_RGB if ri % 2 == 0 else BLANC_RGB
+        client_name = ("Client {:02d}".format(ri+1) if mode_comex
+                       else str(row.get("nom_client","—"))[:22])
+        row_vals = [
+            str(ri + 1),
+            client_name,
+            str(row.get("fonds","—"))[:16],
+            str(row.get("type_client","—")),
+            str(row.get("region","—")),
+            fmt_m(float(row.get("funded_aum", 0))),
+            str(row.get("sales_owner","—"))[:14],
+        ]
+        for vi, (val, cx, cw) in enumerate(zip(row_vals, col_x, col_widths)):
+            _rect(s2, cx, ry, cw, 0.48, bg)
+            clr = CIEL_RGB if vi == 5 else MARINE_RGB
+            fw  = True  if vi == 5 else False
+            _text(s2, val, cx+0.05, ry+0.1, cw-0.1, 0.3, 9, bold=fw, color=clr)
+
+    if df_funded.empty:
+        _text(s2, "Aucun deal Funded enregistré.", 0.4, 1.6, 12.5, 0.4, 11, color=GREY_RGB)
+
+    _rect(s2, 0, 7.1, 13.33, 0.4, LIGHT_RGB)
+    _text(s2, "Document à usage interne — Confidentiel — Amundi Asset Management",
+          0.5, 7.15, 12.0, 0.3, 8, color=GREY_RGB, align=PP_ALIGN.CENTER)
 
     buf = io.BytesIO()
     prs.save(buf)
@@ -1150,71 +1293,157 @@ with st.sidebar:
         st.error("Backup Excel : {}".format(e_xl))
 
     st.divider()
-    st.markdown('<div style="color:#4a8fbd;font-size:0.67rem;font-weight:700;'
-                'text-transform:uppercase;letter-spacing:1px;margin-bottom:5px;">Export PDF</div>',
+    st.markdown('<div style="color:#f07d00;font-size:0.67rem;font-weight:700;'
+                'text-transform:uppercase;letter-spacing:1px;margin-bottom:5px;">Export Hub</div>',
                 unsafe_allow_html=True)
 
-    fonds_perimetre = st.multiselect("Perimetre de l'export", options=FONDS, default=FONDS,
+    fonds_perimetre = st.multiselect("Périmètre de l'export", options=FONDS, default=FONDS,
                                      key="fonds_perimetre_select")
     _filtre_effectif = (fonds_perimetre
                         if (fonds_perimetre and len(fonds_perimetre) < len(FONDS))
                         else None)
-    mode_comex = st.toggle("Mode Comex — Anonymisation", value=False)
-
-    st.markdown('<div style="color:#8ab8d8;font-size:0.64rem;font-weight:600;'
-                'text-transform:uppercase;letter-spacing:0.8px;margin:8px 0 4px 0;">Sections</div>',
-                unsafe_allow_html=True)
-    include_top10    = st.checkbox("Top 10 Inflows", value=True)
-    include_outflows = st.checkbox("Top 10 Outflows (Redeemed)", value=False, disabled=not include_top10)
-    include_perf_pdf = st.checkbox("Performance NAV", value=True)
+    mode_comex = st.toggle("Mode Comex — Anonymisation", value=False, key="hub_mode_comex")
 
     if fonds_perimetre and len(fonds_perimetre) < len(FONDS):
         st.markdown("<div>{}</div>".format(" ".join(
             '<span class="perimetre-badge">{}</span>'.format(f) for f in fonds_perimetre)),
             unsafe_allow_html=True)
     elif not fonds_perimetre:
-        st.warning("Selectionnez au moins un fonds.")
+        st.warning("Sélectionnez au moins un fonds.")
+
+    hub_format = st.radio(
+        "Format du rapport",
+        ["PDF", "PPTX", "Email"],
+        horizontal=True,
+        key="hub_format_radio"
+    )
+
+    # PDF-only options
+    if hub_format == "PDF":
+        st.markdown('<div style="color:#8ab8d8;font-size:0.62rem;font-weight:600;'
+                    'text-transform:uppercase;letter-spacing:0.7px;margin:6px 0 3px 0;">Sections PDF</div>',
+                    unsafe_allow_html=True)
+        include_top10    = st.checkbox("Top 10 Inflows",     value=True,  key="hub_top10")
+        include_outflows = st.checkbox("Top 10 Outflows",    value=False, key="hub_outflows",
+                                       disabled=not include_top10)
+        include_perf_pdf = st.checkbox("Performance NAV",    value=True,  key="hub_perf_nav")
+    else:
+        include_top10 = True; include_outflows = False; include_perf_pdf = False
 
     perf_data_pdf   = st.session_state.get("perf_data",   None)
     nav_base100_pdf = st.session_state.get("nav_base100", None)
-    if perf_data_pdf is not None:
-        st.caption("NAV chargee : {} fonds.".format(len(perf_data_pdf)))
+    if perf_data_pdf is not None and hub_format == "PDF":
+        st.caption("NAV chargée : {} fonds.".format(len(perf_data_pdf)))
 
-    if not fonds_perimetre:
-        st.button("Generer le rapport PDF", key="sidebar_pdf_disabled", disabled=True, use_container_width=True)
-    elif st.button("Generer le rapport PDF", key="sidebar_pdf_btn", use_container_width=True):
-        with st.spinner("Generation en cours..."):
+    # ── Single "Générer le Rapport" button ────────────────────────────────────
+    _btn_disabled = not fonds_perimetre
+    if _btn_disabled:
+        st.button("Générer le Rapport", key="hub_gen_btn_disabled",
+                  disabled=True, use_container_width=True)
+    elif st.button("Générer le Rapport", key="hub_gen_btn", use_container_width=True):
+        with st.spinner("Génération en cours…"):
             try:
-                pipeline_pdf   = db.get_pipeline_with_clients(fonds_filter=_filtre_effectif)
-                kpis_pdf       = db.get_kpis(fonds_filter=_filtre_effectif)
-                aum_region_pdf = db.get_aum_by_region(fonds_filter=_filtre_effectif)
-                pf_pdf = perf_data_pdf
-                nb_pdf = nav_base100_pdf
-                if pf_pdf is not None and _filtre_effectif and "Fonds" in pf_pdf.columns:
-                    pf_pdf = pf_pdf[pf_pdf["Fonds"].isin(_filtre_effectif)]
-                if nb_pdf is not None and _filtre_effectif and hasattr(nb_pdf,"columns"):
-                    cols_k = [c for c in nb_pdf.columns if c in _filtre_effectif]
-                    nb_pdf = nb_pdf[cols_k] if cols_k else None
-                _include_perf = (include_perf_pdf and pf_pdf is not None
-                                 and hasattr(pf_pdf,"empty") and not pf_pdf.empty)
-                pdf_bytes = pdf_gen.generate_pdf(
-                    pipeline_df=pipeline_pdf, kpis=kpis_pdf,
-                    aum_by_region=aum_region_pdf, mode_comex=mode_comex,
-                    perf_data=pf_pdf, nav_base100_df=nb_pdf,
-                    fonds_perimetre=fonds_perimetre,
-                    include_top10=include_top10, include_outflows=include_outflows,
-                    include_perf=_include_perf)
-                fname = "report{}_{}.pdf".format(
-                    "_comex" if mode_comex else "", date.today().isoformat())
-                st.download_button("Telecharger le rapport", data=pdf_bytes,
-                                   file_name=fname, mime="application/pdf",
+                pipeline_hub = db.get_pipeline_with_clients(fonds_filter=_filtre_effectif)
+                kpis_hub     = db.get_kpis(fonds_filter=_filtre_effectif)
+
+                if hub_format == "PDF":
+                    aum_region_pdf = db.get_aum_by_region(fonds_filter=_filtre_effectif)
+                    pf_pdf = perf_data_pdf
+                    nb_pdf = nav_base100_pdf
+                    if pf_pdf is not None and _filtre_effectif and "Fonds" in pf_pdf.columns:
+                        pf_pdf = pf_pdf[pf_pdf["Fonds"].isin(_filtre_effectif)]
+                    if nb_pdf is not None and _filtre_effectif and hasattr(nb_pdf, "columns"):
+                        cols_k = [c for c in nb_pdf.columns if c in _filtre_effectif]
+                        nb_pdf = nb_pdf[cols_k] if cols_k else None
+                    _include_perf = (include_perf_pdf and pf_pdf is not None
+                                     and hasattr(pf_pdf, "empty") and not pf_pdf.empty)
+                    pdf_bytes = pdf_gen.generate_pdf(
+                        pipeline_df=pipeline_hub, kpis=kpis_hub,
+                        aum_by_region=aum_region_pdf, mode_comex=mode_comex,
+                        perf_data=pf_pdf, nav_base100_df=nb_pdf,
+                        fonds_perimetre=fonds_perimetre,
+                        include_top10=include_top10, include_outflows=include_outflows,
+                        include_perf=_include_perf)
+                    fname_pdf = "report{}_{}.pdf".format(
+                        "_comex" if mode_comex else "", date.today().isoformat())
+                    st.download_button("Télécharger le PDF", data=pdf_bytes,
+                                       file_name=fname_pdf, mime="application/pdf",
+                                       key="hub_dl_pdf", use_container_width=True)
+                    st.success("PDF généré.")
+
+                elif hub_format == "PPTX":
+                    pptx_bytes = generate_global_pptx(kpis_hub, pipeline_hub,
+                                                       mode_comex=mode_comex)
+                    fname_pptx = "rapport_global{}_{}.pptx".format(
+                        "_comex" if mode_comex else "", date.today().isoformat())
+                    st.download_button(
+                        "Télécharger le PPTX", data=pptx_bytes,
+                        file_name=fname_pptx,
+                        mime="application/vnd.openxmlformats-officedocument.presentationml.presentation",
+                        key="hub_dl_pptx", use_container_width=True)
+                    st.success("PPTX généré.")
+
+                elif hub_format == "Email":
+                    # Build email summary
+                    _aum_f   = fmt_m(kpis_hub.get("total_funded", 0))
+                    _pip_a   = fmt_m(kpis_hub.get("pipeline_actif", 0))
+                    _wp      = fmt_m(kpis_hub.get("weighted_pipeline", 0))
+                    _taux    = "{:.1f}%".format(kpis_hub.get("taux_conversion", 0))
+                    _nb_f    = kpis_hub.get("nb_funded", 0)
+                    _nb_l    = kpis_hub.get("nb_lost", 0)
+                    _nb_a    = kpis_hub.get("nb_deals_actifs", 0)
+                    _perims  = ", ".join(fonds_perimetre) if fonds_perimetre else "Tous les fonds"
+                    _comex_note = " *(noms masqués — Mode Comex)*" if mode_comex else ""
+
+                    md_summary = """
+**Rapport Portfolio — {}{}**
+
+| KPI | Valeur |
+|-----|--------|
+| AUM Financé Total | {} |
+| Pipeline Actif (Smart AUM) | {} |
+| Pipeline Pondéré | {} |
+| Taux de Conversion | {} |
+| Deals Funded | {} |
+| Deals Actifs | {} |
+| Deals Perdus | {} |
+
+**Périmètre :** {}
+
+---
+*Généré automatiquement par le CRM Asset Management — Amundi Edition v15.0*
+""".format(date.today().strftime("%d/%m/%Y"), _comex_note,
+           _aum_f, _pip_a, _wp, _taux, _nb_f, _nb_a, _nb_l, _perims)
+
+                    st.markdown(md_summary)
+
+                    # Build mailto URL
+                    import urllib.parse
+                    _subject  = "Rapport Portfolio — {}{}".format(
+                        date.today().strftime("%d/%m/%Y"),
+                        " [COMEX]" if mode_comex else "")
+                    _body  = "Bonjour,\n\nVeuillez trouver ci-dessous la synthese du portfolio :\n\n"
+                    _body += "AUM Finance Total : {}\n".format(_aum_f)
+                    _body += "Pipeline Actif    : {}\n".format(_pip_a)
+                    _body += "Pipeline Pondere  : {}\n".format(_wp)
+                    _body += "Taux Conversion   : {}\n".format(_taux)
+                    _body += "Deals Funded      : {}\n".format(_nb_f)
+                    _body += "Deals Actifs      : {}\n".format(_nb_a)
+                    _body += "Deals Perdus      : {}\n\n".format(_nb_l)
+                    _body += "Perimetre : {}\n\n".format(_perims)
+                    _body += "--\nCRM Asset Management — Amundi Edition v15.0"
+                    mailto_url = "mailto:?subject={}&body={}".format(
+                        urllib.parse.quote(_subject),
+                        urllib.parse.quote(_body))
+                    st.link_button("Ouvrir dans Outlook / Gmail",
+                                   url=mailto_url,
                                    use_container_width=True)
-                st.success("Rapport genere.")
+
             except Exception as e:
-                st.error("Erreur : {}".format(e))
+                st.error("Erreur génération : {}".format(e))
 
     st.divider()
-    st.caption("Version 14.0 — Amundi Edition — Decision Support | Account Review | Whitespace")
+    st.caption("Version 15.0 — Amundi Edition — Universal Export Hub")
 
 
 # ---------------------------------------------------------------------------
@@ -1407,20 +1636,7 @@ with tab_crm:
                                                  db.get_activities(client_id=sel_id),
                                                  _ws)
 
-                    # ── Account Review PPTX Download ─────────────────
-                    _grp_summary = db.get_client_group_summary(sel_id)
-                    _pptx_bytes  = generate_account_review_pptx(
-                        sel.to_dict(), _grp_summary,
-                        db.get_contacts(sel_id),
-                        db.get_activities(client_id=sel_id))
-                    st.download_button(
-                        "Account Review (.pptx)",
-                        data=_pptx_bytes,
-                        file_name="account_review_{}_{}.pptx".format(
-                            sel_nom.replace(" ","_"), date.today().isoformat()),
-                        mime="application/vnd.openxmlformats-officedocument.presentationml.presentation",
-                        key="crm_pptx_{}".format(sel_id),
-                        use_container_width=True)
+                    # PPTX export → Universal Export Hub in sidebar
 
                     # ── Corporate Structure block ─────────────────────────
                     has_struct = sel_par or filiales
