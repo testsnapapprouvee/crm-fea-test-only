@@ -92,9 +92,11 @@ def _fonds_clause(fonds_filter, alias="p"):
 def _clean_pipeline_df(df):
     df = df.copy()
     # Always convert AUM columns first — even on empty DataFrames
+    # Force .astype(str) BEFORE pd.to_numeric to handle datetime.time objects
+    # from malformed Excel cells (fix: float() argument must be a real number, not datetime.time)
     for col in _AUM_COLS:
         if col in df.columns:
-            df[col] = pd.to_numeric(df[col], errors="coerce").fillna(0.0).astype("float64")
+            df[col] = pd.to_numeric(df[col].astype(str), errors="coerce").fillna(0.0).astype("float64")
     if df.empty:
         return df
     if "next_action_date" in df.columns:
@@ -1391,11 +1393,19 @@ def upsert_pipeline_from_df(df):
         raison = str(row.get("raison_perte", "") or "").strip() or None
         conc   = str(row.get("concurrent_choisi", "") or "").strip() or None
         next_a = str(row.get("next_action_date", "") or "").strip() or None
-        t_aum  = float(row.get("target_aum_initial", 0) or 0)
-        r_aum  = float(row.get("revised_aum", 0) or 0)
-        f_aum  = float(row.get("funded_aum", 0) or 0)
+
+        def _safe_float(val, default=0.0):
+            """Convert any value (including datetime.time) to float safely."""
+            try:
+                return float(pd.to_numeric(str(val), errors="coerce") or default)
+            except Exception:
+                return float(default)
+
+        t_aum  = _safe_float(row.get("target_aum_initial", 0))
+        r_aum  = _safe_float(row.get("revised_aum", 0))
+        f_aum  = _safe_float(row.get("funded_aum", 0))
         sales  = str(row.get("sales_owner", "Non assigne") or "Non assigne").strip()
-        prob   = float(row.get("closing_probability", 50) or 50)
+        prob   = _safe_float(row.get("closing_probability", 50), default=50.0)
 
         # ── 4. Auto-creer le sales owner s'il est inconnu ────────────────────
         if sales and sales != "Non assigne":
