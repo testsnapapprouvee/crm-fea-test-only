@@ -16,6 +16,8 @@ from pptx import Presentation
 from pptx.util import Inches, Pt, Emu
 from pptx.dml.color import RGBColor
 from pptx.enum.text import PP_ALIGN
+from pptx.chart.data import CategoryChartData
+from pptx.enum.chart import XL_CHART_TYPE
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
@@ -423,6 +425,93 @@ def generate_global_pptx(kpis: dict, pipeline_df, mode_comex: bool = False) -> b
     _rect(s2, 0, 7.1, 13.33, 0.4, LIGHT_RGB)
     _text(s2, "Document a usage interne — Confidentiel — Asset Management CRM",
           0.5, 7.15, 12.0, 0.3, 8, color=GREY_RGB, align=PP_ALIGN.CENTER)
+
+    # ── SLIDE 3 — ANALYSES GRAPHIQUES (graphiques natifs PowerPoint) ─────────
+    s3 = prs.slides.add_slide(blank_layout)
+    _rect(s3, 0, 0, 13.33, 0.55, MARINE_RGB)
+    _text(s3, "ANALYSES GRAPHIQUES — AUM PAR TYPE & PAR FONDS",
+          0.4, 0.1, 10.0, 0.38, 11, bold=True, color=BLANC_RGB)
+    _text(s3, date.today().strftime("%d/%m/%Y"), 11.0, 0.1, 2.0, 0.38,
+          11, color=_rgb("#7ab8d8"), align=PP_ALIGN.RIGHT)
+    _rect(s3, 0, 7.1, 13.33, 0.4, LIGHT_RGB)
+    _text(s3, "Document a usage interne — Confidentiel — Asset Management CRM",
+          0.5, 7.15, 12.0, 0.3, 8, color=GREY_RGB, align=PP_ALIGN.CENTER)
+
+    # Sous-titres colonnes
+    _text(s3, "AUM Finance par Type de Client",
+          0.4, 0.7, 6.0, 0.35, 9, bold=True, color=GREY_RGB)
+    _text(s3, "AUM Finance par Fonds",
+          7.0, 0.7, 6.0, 0.35, 9, bold=True, color=GREY_RGB)
+
+    # ── Graphique 1 : Pie Chart — AUM par Type de Client ─────────────────────
+    _aum_by_type = kpis.get("aum_by_type", {})
+    _aum_by_type_clean = {k: v for k, v in _aum_by_type.items() if v and float(v) > 0}
+    if _aum_by_type_clean:
+        try:
+            _pie_data = CategoryChartData()
+            _pie_data.categories = list(_aum_by_type_clean.keys())
+            _pie_data.add_series(
+                "AUM Finance (M EUR)",
+                [round(float(v) / 1_000_000, 2) for v in _aum_by_type_clean.values()]
+            )
+            _pie_frame = s3.shapes.add_chart(
+                XL_CHART_TYPE.PIE,
+                Inches(0.3), Inches(1.1), Inches(6.2), Inches(5.7),
+                _pie_data
+            )
+            _pie_chart = _pie_frame.chart
+            _pie_chart.has_legend = True
+            _pie_chart.legend.position = 2   # xlBottom = 2
+            _pie_chart.legend.include_in_layout = False
+            _pie_plot = _pie_chart.plots[0]
+            _pie_plot.has_data_labels = True
+            _pie_dls = _pie_plot.data_labels
+            _pie_dls.show_percentage = True
+            _pie_dls.show_category_name = True
+            _pie_dls.show_value = False
+        except Exception:
+            _text(s3, "Graphique indisponible (donnees insuffisantes).",
+                  0.4, 2.5, 6.0, 0.4, 10, color=GREY_RGB)
+    else:
+        _text(s3, "Aucune donnee Funded disponible.",
+              0.4, 2.5, 6.0, 0.4, 10, color=GREY_RGB)
+
+    # ── Graphique 2 : Column Chart — AUM par Fonds ────────────────────────────
+    _aum_by_fonds = kpis.get("aum_by_fonds", {})
+    _aum_by_fonds_clean = {k: v for k, v in _aum_by_fonds.items() if v and float(v) > 0}
+    if _aum_by_fonds_clean:
+        try:
+            _bar_data = CategoryChartData()
+            _bar_data.categories = list(_aum_by_fonds_clean.keys())
+            _bar_data.add_series(
+                "AUM Finance (M EUR)",
+                [round(float(v) / 1_000_000, 2) for v in _aum_by_fonds_clean.values()]
+            )
+            _bar_frame = s3.shapes.add_chart(
+                XL_CHART_TYPE.COLUMN_CLUSTERED,
+                Inches(6.9), Inches(1.1), Inches(6.1), Inches(5.7),
+                _bar_data
+            )
+            _bar_chart = _bar_frame.chart
+            _bar_chart.has_legend = False
+            _bar_plot = _bar_chart.plots[0]
+            _bar_plot.has_data_labels = True
+            _bar_dls = _bar_plot.data_labels
+            _bar_dls.show_value = True
+            _bar_dls.show_category_name = False
+            # Colorier les barres en bleu ciel
+            try:
+                _bar_series = _bar_chart.series[0]
+                _bar_series.format.fill.solid()
+                _bar_series.format.fill.fore_color.rgb = RGBColor(0x01, 0x9e, 0xe1)
+            except Exception:
+                pass
+        except Exception:
+            _text(s3, "Graphique indisponible (donnees insuffisantes).",
+                  7.0, 2.5, 6.0, 0.4, 10, color=GREY_RGB)
+    else:
+        _text(s3, "Aucune donnee Funded disponible.",
+              7.0, 2.5, 6.0, 0.4, 10, color=GREY_RGB)
 
     buf = io.BytesIO()
     prs.save(buf)
@@ -1242,13 +1331,79 @@ def dialog_meeting_brief(client_data: dict, group_summary: dict,
 @st.dialog("Gérer les Commerciaux", width="large")
 def dialog_manage_sales():
     st_team = db.get_sales_team()
-    if not st_team.empty:
-        st.dataframe(st_team[["nom","marche"]], hide_index=True, use_container_width=True)
+    MARCHES_OPTIONS = ["GCC", "EMEA", "APAC", "Americas", "Nordics", "Global"]
+
+    st.markdown("**Equipe commerciale actuelle**")
+    if st_team.empty:
+        st.info("Aucun commercial enregistré.")
+    else:
+        # data_editor : modification inline du nom et du marché
+        edited_df = st.data_editor(
+            st_team[["id", "nom", "marche"]].copy(),
+            column_config={
+                "id":     st.column_config.NumberColumn("ID", disabled=True, width="small"),
+                "nom":    st.column_config.TextColumn("Nom", width="medium"),
+                "marche": st.column_config.SelectboxColumn(
+                    "Marché", options=MARCHES_OPTIONS, width="medium"),
+            },
+            hide_index=True,
+            use_container_width=True,
+            num_rows="fixed",
+            key="sales_editor"
+        )
+        col_save, col_spacer = st.columns([1, 3])
+        with col_save:
+            if st.button("Enregistrer les modifications", key="dlg_sales_save",
+                         use_container_width=True, type="primary"):
+                errors = []
+                for _, edit_row in edited_df.iterrows():
+                    orig = st_team[st_team["id"] == edit_row["id"]]
+                    if orig.empty:
+                        continue
+                    orig_nom    = str(orig.iloc[0]["nom"])
+                    orig_marche = str(orig.iloc[0]["marche"])
+                    new_nom     = str(edit_row["nom"]).strip()
+                    new_marche  = str(edit_row["marche"]).strip()
+                    if new_nom and (new_nom != orig_nom or new_marche != orig_marche):
+                        ok, err = db.update_sales_member(
+                            int(edit_row["id"]), new_nom, new_marche)
+                        if not ok:
+                            errors.append("ID {}: {}".format(edit_row["id"], err))
+                if errors:
+                    st.error("Erreurs : " + " | ".join(errors))
+                else:
+                    st.success("Modifications enregistrées.")
+                    st.rerun()
+
+        # Suppression individuelle
+        st.markdown("**Supprimer un commercial**")
+        sales_names = st_team["nom"].tolist()
+        del_nom = st.selectbox(
+            "Sélectionner le commercial à supprimer",
+            options=[""] + sales_names,
+            key="dlg_sales_del_sel"
+        )
+        if del_nom:
+            st.warning(
+                "La suppression de **{}** remettra ses deals "
+                "pipeline à 'Non assigne'.".format(del_nom))
+            if st.button("Confirmer la suppression", key="dlg_sales_del_confirm",
+                         type="secondary", use_container_width=True):
+                _del_id = int(
+                    st_team[st_team["nom"] == del_nom].iloc[0]["id"])
+                ok, err = db.delete_sales_member(_del_id)
+                if ok:
+                    st.success("Commercial supprimé.")
+                    st.rerun()
+                else:
+                    st.error("Erreur : {}".format(err))
+
+    st.divider()
     st.markdown("**Ajouter un commercial**")
     with st.form("dlg_add_sales", clear_on_submit=True):
         nc1, nc2 = st.columns(2)
         with nc1: new_sales_nom    = st.text_input("Nom")
-        with nc2: new_sales_marche = st.selectbox("Marché", ["GCC","EMEA","APAC","Americas","Nordics","Global"])
+        with nc2: new_sales_marche = st.selectbox("Marché", MARCHES_OPTIONS)
         if st.form_submit_button("Ajouter", use_container_width=True):
             if new_sales_nom.strip():
                 ok = db.add_sales_member(new_sales_nom.strip(), new_sales_marche)
@@ -1297,14 +1452,20 @@ with st.sidebar:
                 'text-transform:uppercase;letter-spacing:1px;margin-bottom:5px;">Export Hub</div>',
                 unsafe_allow_html=True)
 
-    fonds_perimetre = st.multiselect("Périmètre de l'export", options=FONDS, default=FONDS,
-                                     key="fonds_perimetre_select")
+    _dyn_sidebar   = db.get_dynamic_filters()
+    _fonds_dyn_sb  = _dyn_sidebar.get("fonds", FONDS)
+    fonds_perimetre = st.multiselect(
+        "Périmètre de l'export",
+        options=_fonds_dyn_sb,
+        default=_fonds_dyn_sb,
+        key="fonds_perimetre_select"
+    )
     _filtre_effectif = (fonds_perimetre
-                        if (fonds_perimetre and len(fonds_perimetre) < len(FONDS))
+                        if (fonds_perimetre and len(fonds_perimetre) < len(_fonds_dyn_sb))
                         else None)
     mode_comex = st.toggle("Mode Comex — Anonymisation", value=False, key="hub_mode_comex")
 
-    if fonds_perimetre and len(fonds_perimetre) < len(FONDS):
+    if fonds_perimetre and len(fonds_perimetre) < len(_fonds_dyn_sb):
         st.markdown("<div>{}</div>".format(" ".join(
             '<span class="perimetre-badge">{}</span>'.format(f) for f in fonds_perimetre)),
             unsafe_allow_html=True)
@@ -1448,37 +1609,6 @@ with st.sidebar:
 
                     # ── Rendu Markdown pour prévisualisation ──────────────────
                     _md_preview = (
-                        "**NOTE DE SYNTHESE — PORTFOLIO COMMERCIAL**  \n"
-                        "**Date :** {}{}  \n"
-                        "**Perimetre :** {}\n\n"
-                        "---\n\n"
-                        "**I. SYNTHESE GLOBALE**\n\n"
-                        "A la date du {date}, les encours finances s'elevent a **{aum_f}**, "
-                        "repartis sur {nb_f} mandat(s) consolide(s). "
-                        "Le pipeline commercial actif atteint **{pip_a}** ({nb_a} deal(s) en cours), "
-                        "soit un pipeline pondere de **{wp}** apres application des probabilites de closing. "
-                        "Le taux de conversion historique s'etablit a **{taux}** "
-                        "({nb_f} deals finances, {nb_l} deals perdus).\n\n"
-                        "---\n\n"
-                        "**II. ALERTES OPERATIONNELLES** ({nb_ov} action(s) en retard)\n\n"
-                        "{alertes}\n\n"
-                        "---\n\n"
-                        "**III. TOP OPPORTUNITES — Due Diligence & Soft Commit**\n\n"
-                        "{top_opp}\n\n"
-                        "---\n\n"
-                        "*Document genere automatiquement par le CRM Asset Management — Usage interne strictement confidentiel.*"
-                    ).format(
-                        date=_date_str, comex=_comex_note,
-                        perim=_perims,
-                        aum_f=_aum_f, pip_a=_pip_a, wp=_wp, taux=_taux,
-                        nb_f=_nb_f, nb_a=_nb_a, nb_l=_nb_l,
-                        nb_ov=_alertes_nb,
-                        alertes=_alertes_txt if _alertes_nb > 0 else "Aucune action en retard.",
-                        top_opp=_top_opp_txt)
-                    _md_preview = _md_preview.replace(
-                        "**Date :** {}{}".format(_date_str, _comex_note),
-                        "**Date :** {}{} ".format(_date_str, _comex_note))
-                    _md_preview = (
                         "**NOTE DE SYNTHESE — PORTFOLIO COMMERCIAL**\n\n"
                         "**Date :** {date}{comex}  \n"
                         "**Perimetre :** {perim}\n\n"
@@ -1494,18 +1624,26 @@ with st.sidebar:
                         "**II. ALERTES OPERATIONNELLES** ({nb_ov} action(s) en retard)\n\n"
                         "{alertes}\n\n"
                         "---\n\n"
-                        "**III. TOP OPPORTUNITES — Due Diligence & Soft Commit**\n\n"
+                        "**III. TOP OPPORTUNITES — Due Diligence et Soft Commit**\n\n"
                         "{top_opp}\n\n"
                         "---\n\n"
                         "*Document genere automatiquement par le CRM Asset Management — "
                         "Usage interne strictement confidentiel.*"
                     ).format(
-                        date=_date_str, comex=_comex_note, perim=_perims,
-                        aum_f=_aum_f, pip_a=_pip_a, wp=_wp, taux=_taux,
-                        nb_f=_nb_f, nb_a=_nb_a, nb_l=_nb_l,
+                        date=_date_str,
+                        comex=_comex_note,
+                        perim=_perims,
+                        aum_f=_aum_f,
+                        pip_a=_pip_a,
+                        wp=_wp,
+                        taux=_taux,
+                        nb_f=_nb_f,
+                        nb_a=_nb_a,
+                        nb_l=_nb_l,
                         nb_ov=_alertes_nb,
                         alertes=_alertes_txt if _alertes_nb > 0 else "Aucune action en retard.",
-                        top_opp=_top_opp_txt)
+                        top_opp=_top_opp_txt,
+                    )
                     st.markdown(_md_preview)
 
                     # ── Corps email pour mailto ───────────────────────────────
@@ -1947,10 +2085,20 @@ with tab_pipeline:
             st.session_state["pipe_show_filters"] = not st.session_state.get("pipe_show_filters", False)
 
     if st.session_state.get("pipe_show_filters", False):
+        _dyn = db.get_dynamic_filters()
+        _dyn_statuts  = _dyn.get("statuts", STATUTS)
+        _dyn_fonds    = _dyn.get("fonds",   FONDS)
+        _dyn_regions  = _dyn.get("regions", REGIONS)
+        # S'assurer que les statuts actifs par défaut existent dans la liste dynamique
+        _default_statuts = [s for s in STATUTS_ACTIFS if s in _dyn_statuts]
         fc1, fc2, fc3 = st.columns(3)
-        with fc1: filt_statuts = st.multiselect("Statuts", STATUTS, default=STATUTS_ACTIFS, key="pipe_filt_statuts")
-        with fc2: filt_fonds   = st.multiselect("Fonds", FONDS, key="pipe_filt_fonds")
-        with fc3: filt_regions = st.multiselect("Regions", REGIONS, key="pipe_filt_regions")
+        with fc1: filt_statuts = st.multiselect("Statuts", _dyn_statuts,
+                                                 default=_default_statuts,
+                                                 key="pipe_filt_statuts")
+        with fc2: filt_fonds   = st.multiselect("Fonds",   _dyn_fonds,
+                                                 key="pipe_filt_fonds")
+        with fc3: filt_regions = st.multiselect("Regions", _dyn_regions,
+                                                 key="pipe_filt_regions")
     else:
         filt_statuts = STATUTS_ACTIFS
         filt_fonds   = []
