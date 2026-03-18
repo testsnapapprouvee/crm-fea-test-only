@@ -2127,7 +2127,7 @@ with tab_pipeline:
     if "closing_probability" in df_display.columns:
         df_display["closing_probability"] = df_display["closing_probability"].fillna(50)
 
-    cols_show = ["id","nom_client","type_client","region","fonds","statut",
+    cols_show = ["id","nom_client","type_client","region","country","fonds","statut",
                  "aum_pipeline_fmt","funded_aum_fmt",
                  "closing_probability","raison_perte","next_action_date","sales_owner","derniere_activite"]
 
@@ -2139,6 +2139,7 @@ with tab_pipeline:
             "nom_client":          st.column_config.TextColumn("Client"),
             "type_client":         st.column_config.TextColumn("Type", width="small"),
             "region":              st.column_config.TextColumn("Region", width="small"),
+            "country":             st.column_config.TextColumn("Pays", width="small"),
             "fonds":               st.column_config.TextColumn("Fonds"),
             "statut":              st.column_config.TextColumn("Statut"),
             "aum_pipeline_fmt":    st.column_config.TextColumn("AUM Pipeline"),
@@ -2226,7 +2227,7 @@ with tab_pipeline:
             font_color=MARINE, font_size=11,
             margin=dict(l=10, r=10, t=30, b=10),
             funnelmode="stack")
-        st.plotly_chart(fig_funnel, use_container_width=True, config={"displayModeBar": False})
+        st.plotly_chart(fig_funnel, use_container_width=True, config={"displayModeBar": False}, key="chart_funnel")
         st.caption("AUM Pipeline = AUM Revise si > 0, sinon AUM Cible. Deals actifs uniquement.")
     else:
         st.info("Aucun deal actif pour le graphique entonnoir.")
@@ -2279,7 +2280,7 @@ with tab_pipeline:
             xaxis_showgrid=False, xaxis_tickangle=-15,
             yaxis_showgrid=True, yaxis_gridcolor=GRIS,
             margin=dict(l=10, r=10, t=30, b=10))
-        st.plotly_chart(fig_grp, use_container_width=True, config={"displayModeBar": False})
+        st.plotly_chart(fig_grp, use_container_width=True, config={"displayModeBar": False}, key="chart_grp")
         st.caption("Vue croisee Fonds x Statut — deals actifs uniquement.")
     else:
         st.info("Aucune donnee disponible pour la vue croisee Fonds / Statut.")
@@ -2454,7 +2455,7 @@ with tab_dash:
                                    font_color=MARINE, showlegend=True,
                                    legend_x=1.02, legend_y=0.5, legend_font_size=9,
                                    margin=dict(l=0, r=80, t=36, b=10))
-            st.plotly_chart(fig_type, use_container_width=True, config={"displayModeBar": False})
+            st.plotly_chart(fig_type, use_container_width=True, config={"displayModeBar": False}, key="chart_pie_type")
     with gcol2:
         st.markdown("#### Par Région")
         aum_reg_dash = db.get_aum_by_region()
@@ -2471,7 +2472,7 @@ with tab_dash:
                                   font_color=MARINE, showlegend=True,
                                   legend_x=1.02, legend_y=0.5, legend_font_size=9,
                                   margin=dict(l=0, r=80, t=36, b=10))
-            st.plotly_chart(fig_reg, use_container_width=True, config={"displayModeBar": False})
+            st.plotly_chart(fig_reg, use_container_width=True, config={"displayModeBar": False}, key="chart_pie_reg")
     with gcol3:
         st.markdown("#### AUM par Fonds")
         abf = kpis.get("aum_by_fonds", {})
@@ -2486,7 +2487,7 @@ with tab_dash:
                                     font_color=MARINE, xaxis_showgrid=True, xaxis_gridcolor=GRIS,
                                     yaxis=dict(autorange="reversed", automargin=True),
                                     margin=dict(l=180, r=20, t=36, b=10))
-            st.plotly_chart(fig_fonds, use_container_width=True, config={"displayModeBar": False})
+            st.plotly_chart(fig_fonds, use_container_width=True, config={"displayModeBar": False}, key="chart_bar_fonds")
 
     st.divider()
     _td_col1, _td_col2 = st.columns([3, 1])
@@ -2588,7 +2589,7 @@ with tab_dash:
             xaxis_title="AUM Finance (EUR)",
             yaxis=dict(automargin=True, tickfont=dict(size=10)),
             margin=dict(l=10, r=20, t=30, b=10))
-        st.plotly_chart(fig_tc, use_container_width=True, config={"displayModeBar": False})
+        st.plotly_chart(fig_tc, use_container_width=True, config={"displayModeBar": False}, key="chart_tc")
         st.caption(
             "AUM Finance consolide par client — top {} clients. "
             "Chaque segment represente la contribution d'un fonds aux encours totaux du client.".format(
@@ -2635,7 +2636,7 @@ with tab_dash:
                 yaxis_tickformat=".2s", yaxis_title="AUM Pondéré (€)",
                 margin=dict(l=10, r=10, t=10, b=10))
             st.plotly_chart(fig_cf, use_container_width=True,
-                            config={"displayModeBar": False})
+                            config={"displayModeBar": False}, key="chart_cf")
             st.caption("AUM pondéré = AUM Pipeline × Probabilité de closing. Répartition par mois de Next Action.")
 
     with ds_col2:
@@ -2684,6 +2685,8 @@ with tab_dash:
 with tab_sales:
     st.markdown('<div class="section-title">Sales Tracking</div>',
                 unsafe_allow_html=True)
+    if st.button("Gérer l'équipe commerciale", key="btn_manage_sales_tab"):
+        dialog_manage_sales()
     df_sm = db.get_sales_metrics()
     df_na = db.get_next_actions_by_sales(days_ahead=30)
 
@@ -2732,7 +2735,7 @@ with tab_sales:
                 legend_bgcolor=BLANC, legend_bordercolor=GRIS, legend_borderwidth=1,
                 xaxis_showgrid=False, yaxis_showgrid=True, yaxis_gridcolor=GRIS,
                 margin=dict(l=10, r=10, t=20, b=10))
-            st.plotly_chart(fig_sales, use_container_width=True, config={"displayModeBar": False})
+            st.plotly_chart(fig_sales, use_container_width=True, config={"displayModeBar": False}, key="chart_sales")
 
         st.divider()
         st.markdown("#### Strategic Analysis — Fund Breakdown by Market")
@@ -2782,7 +2785,7 @@ with tab_sales:
                 yaxis_showgrid=True, yaxis_gridcolor=GRIS,
                 yaxis_title="AUM (EUR)", yaxis_tickformat=".2s",
                 margin=dict(l=10, r=10, t=20, b=10))
-            st.plotly_chart(fig_si, use_container_width=True, config={"displayModeBar": False})
+            st.plotly_chart(fig_si, use_container_width=True, config={"displayModeBar": False}, key="chart_si")
             with st.expander("Tableau détaillé Marché × Fonds", expanded=False):
                 pivot_si = df_mfb.pivot_table(
                     index="marche", columns="fonds", values="aum",
@@ -3167,7 +3170,7 @@ with tab_perf:
                 legend_font_size=10, xaxis_showgrid=False,
                 yaxis_showgrid=True, yaxis_gridcolor=GRIS,
                 margin=dict(l=10, r=10, t=40, b=10))
-            st.plotly_chart(fig_nav, use_container_width=True, config={"displayModeBar": True})
+            st.plotly_chart(fig_nav, use_container_width=True, config={"displayModeBar": True}, key="chart_nav")
 
             today_ts  = pd.Timestamp(date.today())
             one_m_ago = today_ts - pd.DateOffset(months=1)
@@ -3258,7 +3261,7 @@ with tab_perf:
                                           xaxis_showgrid=False, yaxis_showgrid=True,
                                           yaxis_gridcolor=GRIS, margin=dict(l=10,r=10,t=36,b=10))
                     st.plotly_chart(fig_ytd, use_container_width=True,
-                                    config={"displayModeBar": False})
+                                    config={"displayModeBar": False}, key="chart_ytd")
 
         except Exception as e:
             st.error("Erreur traitement NAV : {}".format(e))
