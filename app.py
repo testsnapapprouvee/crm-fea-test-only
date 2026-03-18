@@ -426,22 +426,54 @@ def generate_global_pptx(kpis: dict, pipeline_df, mode_comex: bool = False) -> b
 
     # ── SLIDE 3+ — ANALYSES GRAPHIQUES VIA PLOTLY/KALEIDO ────────────────────
     # Génère les figures Plotly du Dashboard et les insère en PNG haute définition.
-    def _add_plotly_slide(prs, fig, title_text, subtitle_text=""):
-        """Convertit une figure Plotly en PNG via kaleido et l'insère dans une slide."""
+    def _add_plotly_slide(prs, fig, title_text, subtitle_text="", legend_items=None):
+        """
+        Convertit une figure Plotly en PNG via kaleido et l'insère dans une slide.
+        - Purifie le graphique AVANT to_image (supprime titre, légende, marges).
+        - Restitue le titre et la légende NATIVEMENT via des textbox PowerPoint.
+        """
         s = prs.slides.add_slide(blank_layout)
+        # ── Header institutionnel ──
         _rect(s, 0, 0, 13.33, 0.55, MARINE_RGB)
         _text(s, title_text, 0.4, 0.1, 10.0, 0.38, 11, bold=True, color=BLANC_RGB)
         _text(s, date.today().strftime("%d/%m/%Y"), 11.0, 0.1, 2.0, 0.38,
               11, color=_rgb("#7ab8d8"), align=PP_ALIGN.RIGHT)
+        # ── Sous-titre / légende textuelle ──
+        _img_top = 0.62
         if subtitle_text:
-            _text(s, subtitle_text, 0.4, 0.65, 12.5, 0.35, 9, color=GREY_RGB)
+            _text(s, subtitle_text, 0.4, 0.58, 12.5, 0.28, 8, color=GREY_RGB)
+            _img_top = 0.90
+        # ── Légende native PPT (si fournie) ──
+        if legend_items:
+            _leg_x = 0.35
+            for _leg_lbl, _leg_hex in legend_items[:8]:
+                _rect(s, _leg_x, _img_top, 0.14, 0.14, _rgb(_leg_hex))
+                _text(s, _leg_lbl, _leg_x + 0.18, _img_top - 0.01, 1.4, 0.18,
+                      7, color=GREY_RGB)
+                _leg_x += min(1.65, 13.0 / max(len(legend_items), 1))
+            _img_top += 0.22
+        # ── Footer ──
         _rect(s, 0, 7.1, 13.33, 0.4, LIGHT_RGB)
         _text(s, "Document a usage interne — Confidentiel — Asset Management CRM",
               0.5, 7.15, 12.0, 0.3, 8, color=GREY_RGB, align=PP_ALIGN.CENTER)
+        # ── Image Plotly — purifiée avant export ──
         try:
-            img_bytes = fig.to_image(format="png", engine="kaleido", width=950, height=420)
+            import copy as _copy
+            _fig_clean = _copy.deepcopy(fig)
+            _fig_clean.update_layout(
+                title="",
+                margin=dict(l=10, r=10, t=10, b=10),
+                showlegend=False,
+            )
+            _img_h_in = 7.1 - _img_top - 0.05
+            _img_h_px = int(_img_h_in / 7.5 * 750)
+            img_bytes = _fig_clean.to_image(
+                format="png", engine="kaleido", width=950, height=max(_img_h_px, 280))
             img_stream = io.BytesIO(img_bytes)
-            s.shapes.add_picture(img_stream, Inches(0.3), Inches(0.75), Inches(12.7), Inches(6.1))
+            s.shapes.add_picture(
+                img_stream,
+                Inches(0.3), Inches(_img_top),
+                Inches(12.7), Inches(_img_h_in))
         except Exception as _e:
             _text(s, "Graphique indisponible : {}".format(str(_e)[:80]),
                   0.4, 3.5, 12.5, 0.5, 10, color=GREY_RGB)
@@ -2282,21 +2314,42 @@ with tab_pipeline:
     # ── VISUALISATION 2 : Grouped Bar — AUM par Fonds et par Statut ──────────
     st.markdown("#### AUM Pipeline par Fonds et par Statut")
     _grp_horizon = st.radio(
-        "Horizon (Next Action)",
-        ["Tous", "30 jours", "3 mois", "6 mois"],
+        "Activite recente",
+        ["Tout l'historique", "1 Mois", "1 Trimestre", "6 Mois", "1 An"],
         horizontal=True,
         key="grp_horizon_radio")
     _df_grp = df_viz_raw[df_viz_raw["statut"].isin(_statut_funnel_order)].copy()
-    # Appliquer le filtre horizon sur next_action_date
-    if _grp_horizon != "Tous":
-        _today_grp = date.today()
-        _horizon_days = {"30 jours": 30, "3 mois": 91, "6 mois": 182}[_grp_horizon]
-        _limit_grp = _today_grp + timedelta(days=_horizon_days)
-        def _in_horizon(nad):
-            if isinstance(nad, date):
-                return _today_grp <= nad <= _limit_grp
-            return False
-        _df_grp = _df_grp[_df_grp["next_action_date"].apply(_in_horizon)]
+    # Filtre EN ARRIÈRE : deals ayant eu une activite dans la periode passee
+    if _grp_horizon != "Tout l'historique":
+        _today_grp  = date.today()
+        _lookback   = {"1 Mois": 30, "1 Trimestre": 91, "6 Mois": 182, "1 An": 365}[_grp_horizon]
+        _cutoff_grp = _today_grp - timedelta(days=_lookback)
+        # Récupère la date MAX d'activite par pipeline_id via derniere_activite du df complet
+        _df_la = db.get_pipeline_with_last_activity()
+        # Extraire la date depuis la colonne derniere_activite si disponible
+        # Alternativement, utiliser une requête directe sur les activites
+        _conn_g = db.get_connection()
+        try:
+            import pandas as _pd_g
+            _df_act_dates = _pd_g.read_sql_query(
+                "SELECT p.id AS pipeline_id, MAX(a.date) AS last_act_date"
+                " FROM pipeline p"
+                " LEFT JOIN activites a ON a.client_id = p.client_id"
+                " GROUP BY p.id",
+                _conn_g)
+        finally:
+            _conn_g.close()
+        if not _df_act_dates.empty and "id" in _df_grp.columns:
+            _df_act_dates["last_act_date"] = pd.to_datetime(
+                _df_act_dates["last_act_date"], errors="coerce")
+            _df_grp = _df_grp.merge(
+                _df_act_dates.rename(columns={"pipeline_id": "id"}),
+                on="id", how="left")
+            _df_grp = _df_grp[
+                _df_grp["last_act_date"].notna() &
+                (_df_grp["last_act_date"].dt.date >= _cutoff_grp)
+            ]
+            _df_grp = _df_grp.drop(columns=["last_act_date"], errors="ignore")
     _df_grp["_aum_p"] = _df_grp.apply(
         lambda r: float(r["revised_aum"]) if float(r.get("revised_aum", 0) or 0) > 0
                   else float(r.get("target_aum_initial", 0) or 0), axis=1)
@@ -2473,7 +2526,16 @@ with tab_dash:
                 with tab_s:
                     _content_statut(s, _filtre_effectif)
 
-    df_overdue = db.get_overdue_actions()
+    # ── Alertes opérationnelles — filtrées avec les mêmes variables que le dashboard ──
+    df_overdue = db.get_overdue_actions(fonds_filter=_filtre_effectif)
+    # Appliquer filtre région si actif (même variable que le reste du dashboard)
+    if not df_overdue.empty:
+        _pipe_filt_regions_dash = st.session_state.get("pipe_filt_regions", [])
+        _pipe_filt_statuts_dash = st.session_state.get("pipe_filt_statuts", [])
+        if _pipe_filt_regions_dash and "region" in df_overdue.columns:
+            df_overdue = df_overdue[df_overdue.get("region", pd.Series(dtype=str)).isin(
+                _pipe_filt_regions_dash)] if "region" in df_overdue.columns else df_overdue
+        # Pas de filtre statut sur les alertes (elles sont déjà exclues Lost/Funded/Redeemed)
     if not df_overdue.empty:
         today = date.today()
         alertes_html = ""
@@ -2739,16 +2801,35 @@ with tab_dash:
             _z_clean = [[0.0 if (v is None or (isinstance(v, float) and np.isnan(v)))
                          else float(v) for v in row] for row in _z_raw]
 
-            # Textes de survol lisibles
+            # Données pipeline actif pour enrichir le hover : AUM Pipeline par client x fonds
+            _ws_pipe_all = db.get_pipeline_with_clients()
+            _ws_pipe_actif = _ws_pipe_all[
+                _ws_pipe_all["statut"].isin(
+                    ["Prospect", "Initial Pitch", "Due Diligence", "Soft Commit"])
+            ].copy()
+            _ws_pipe_actif["_aum_p"] = _ws_pipe_actif.apply(
+                lambda r: float(r["revised_aum"]) if float(r.get("revised_aum", 0) or 0) > 0
+                          else float(r.get("target_aum_initial", 0) or 0), axis=1)
+            _ws_pipe_dict = {}
+            for _, _rp in (_ws_pipe_actif.groupby(["nom_client", "fonds"])["_aum_p"]
+                           .sum().reset_index().iterrows()):
+                _ws_pipe_dict[(_rp["nom_client"], _rp["fonds"])] = _rp["_aum_p"]
+
+            # Hover propre : "Client : X | Fonds : Y | AUM Finance : ... | AUM Pipeline : ..."
             _hover = [[
-                "{client} / {fonds}<br>AUM Finance : {aum}".format(
-                    client=_ws_clients[ri], fonds=_ws_fonds[ci],
-                    aum=fmt_m(_z_clean[ri][ci]) if _z_clean[ri][ci] > 0 else "Opportunite")
+                "Client : {client}<br>Fonds : {fonds}<br>"
+                "AUM Finance : {aum_f}<br>AUM Pipeline : {aum_p}".format(
+                    client=_ws_clients[ri],
+                    fonds=_ws_fonds[ci],
+                    aum_f=(fmt_m(_z_clean[ri][ci]) if _z_clean[ri][ci] > 0 else "Non investi"),
+                    aum_p=(fmt_m(_ws_pipe_dict.get((_ws_clients[ri], _ws_fonds[ci]), 0.0))
+                           if _ws_pipe_dict.get((_ws_clients[ri], _ws_fonds[ci]), 0.0) > 0
+                           else "—"))
                 for ci in range(len(_ws_fonds))]
                 for ri in range(len(_ws_clients))]
 
-            # Texte affiché dans les cases
-            _text_ws = [[fmt_m(_z_clean[ri][ci]) if _z_clean[ri][ci] > 0 else "—"
+            # Texte affiché dans les cases (AUM si investi, vide si opportunite)
+            _text_ws = [[fmt_m(_z_clean[ri][ci]) if _z_clean[ri][ci] > 0 else ""
                          for ci in range(len(_ws_fonds))]
                         for ri in range(len(_ws_clients))]
 
@@ -2758,26 +2839,44 @@ with tab_dash:
                 y=_ws_clients,
                 text=_text_ws,
                 texttemplate="%{text}",
-                textfont=dict(size=8, color=BLANC),
+                textfont=dict(size=8, color="#ffffff"),
                 hovertext=_hover,
                 hovertemplate="%{hovertext}<extra></extra>",
-                colorscale=[[0.0, "#f5f5f5"], [0.001, "#9ecae1"],
-                            [0.2, "#4a8fbd"], [0.5, "#1a5e8a"], [1.0, "#001c4b"]],
+                # 0 (vide) = gris tres clair, >0 = degradé bleu institutionnel
+                colorscale=[
+                    [0.0,   "#f0f4f8"],
+                    [0.001, "#c6dff0"],
+                    [0.15,  "#6baed6"],
+                    [0.40,  "#2171b5"],
+                    [0.70,  "#1a5e8a"],
+                    [1.0,   "#001c4b"],
+                ],
                 zmin=0,
-                showscale=False,
+                showscale=True,
+                colorbar=dict(
+                    title=dict(text="AUM (EUR)", font=dict(size=9, color=MARINE)),
+                    tickfont=dict(size=8, color=MARINE),
+                    thickness=10,
+                    len=0.8,
+                ),
+                # Grille matricielle stricte
+                xgap=2,
+                ygap=2,
             ))
             fig_ws.update_layout(
-                height=max(280, 22 * len(_ws_clients) + 80),
+                height=max(300, 26 * len(_ws_clients) + 100),
                 paper_bgcolor=BLANC, plot_bgcolor=BLANC,
                 font_color=MARINE, font_size=9,
                 xaxis=dict(side="top", tickangle=-30, automargin=True,
-                           tickfont=dict(size=9)),
+                           tickfont=dict(size=9, color=MARINE), showgrid=False),
                 yaxis=dict(autorange="reversed", automargin=True,
-                           tickfont=dict(size=9)),
-                margin=dict(l=10, r=10, t=50, b=10))
+                           tickfont=dict(size=9, color=MARINE), showgrid=False),
+                margin=dict(l=10, r=60, t=60, b=10))
             st.plotly_chart(fig_ws, use_container_width=True,
                             config={"displayModeBar": False}, key="chart_ws")
-            st.caption("Bleu fonce = AUM Finance eleve. Gris clair = opportunite cross-sell non exploitee.")
+            st.caption(
+                "Bleu fonce = AUM Finance eleve. Gris clair = opportunite cross-sell. "
+                "Survol pour detail AUM Finance et AUM Pipeline.")
 
 
 
@@ -2796,15 +2895,57 @@ with tab_sales:
     if df_sm.empty:
         st.info("Aucune donnée de pipeline disponible.")
     else:
-        n_own  = len(df_sm)
-        n_cols = min(n_own, 3)
+        # ── Recherche multiselect ─────────────────────────────────────────────
+        _all_commerciaux = sorted(df_sm["Commercial"].tolist())
+        _sel_commerciaux = st.multiselect(
+            "Rechercher un commercial",
+            options=_all_commerciaux,
+            default=[],
+            key="sales_search_ms",
+            placeholder="Laisser vide pour afficher tous les commerciaux"
+        )
+        df_sm_show = (df_sm[df_sm["Commercial"].isin(_sel_commerciaux)].copy()
+                      if _sel_commerciaux else df_sm.copy())
+
+        # ── Enrichissement analytique : Produit Phare & Marché Clé ───────────
+        _df_enrich = db.get_pipeline_with_clients()
+        _produit_phare_map = {}
+        _marche_cle_map    = {}
+        if not _df_enrich.empty:
+            # AUM total par (sales_owner, fonds) — toutes lignes
+            _enr = _df_enrich.copy()
+            _enr["_aum_tot"] = _enr.apply(
+                lambda r: float(r["funded_aum"]) if r["statut"] == "Funded"
+                          else (float(r["revised_aum"]) if float(r.get("revised_aum", 0) or 0) > 0
+                                else float(r.get("target_aum_initial", 0) or 0)), axis=1)
+            _aum_sf = _enr.groupby(["sales_owner", "fonds"])["_aum_tot"].sum().reset_index()
+            _reg_sf = (_enr[_enr["region"].str.strip() != ""]
+                       .groupby(["sales_owner", "region"])
+                       .size().reset_index(name="n"))
+            for _ow in _all_commerciaux:
+                _sub_a = _aum_sf[_aum_sf["sales_owner"] == _ow]
+                if not _sub_a.empty and _sub_a["_aum_tot"].max() > 0:
+                    _produit_phare_map[_ow] = _sub_a.loc[_sub_a["_aum_tot"].idxmax(), "fonds"]
+                else:
+                    _produit_phare_map[_ow] = "—"
+                _sub_r = _reg_sf[_reg_sf["sales_owner"] == _ow]
+                if not _sub_r.empty:
+                    _marche_cle_map[_ow] = _sub_r.loc[_sub_r["n"].idxmax(), "region"]
+                else:
+                    _marche_cle_map[_ow] = "—"
+
+        n_own  = len(df_sm_show)
+        n_cols = min(max(n_own, 1), 3)
         s_cols = st.columns(n_cols, gap="medium")
-        for i, (_, row) in enumerate(df_sm.iterrows()):
-            retard_val  = int(row.get("Retards",0))
+        for i, (_, row) in enumerate(df_sm_show.iterrows()):
+            retard_val  = int(row.get("Retards", 0))
             retard_html = (
                 '<span class="badge-retard">RETARD : {}</span>'.format(retard_val)
                 if retard_val > 0
                 else '<span style="color:{};font-size:0.74rem;font-weight:600;">A jour</span>'.format(CIEL))
+            _owner_nm = row["Commercial"]
+            _ph = _produit_phare_map.get(_owner_nm, "—")
+            _mk = _marche_cle_map.get(_owner_nm, "—")
             with s_cols[i % n_cols]:
                 st.markdown(
                     '<div class="sales-card">'
@@ -2816,10 +2957,17 @@ with tab_sales:
                     '<div><div class="sales-metric">Pipeline Actif</div><div class="sales-metric-val">{pipe}</div></div>'
                     '<div><div class="sales-metric">Actifs / Perdus</div><div class="sales-metric-val">{actifs} / {perdus}</div></div>'
                     '<div><div class="sales-metric">Alertes</div><div style="margin-top:2px;">{retard}</div></div>'
+                    '<div style="grid-column:1/3;border-top:1px solid #e8e8e8;padding-top:6px;margin-top:4px;">'
+                    '<div class="sales-metric">Produit Phare</div>'
+                    '<div style="font-size:0.83rem;font-weight:700;color:{ciel};">{ph}</div></div>'
+                    '<div style="grid-column:1/3;">'
+                    '<div class="sales-metric">Marche Cle</div>'
+                    '<div style="font-size:0.83rem;font-weight:700;color:{marine};">{mk}</div></div>'
                     '</div></div><br>'.format(
-                        name=row["Commercial"], nb=int(row["Nb_Deals"]), funded=int(row["Funded"]),
+                        name=_owner_nm, nb=int(row["Nb_Deals"]), funded=int(row["Funded"]),
                         aum=fmt_m(float(row["AUM_Finance"])), pipe=fmt_m(float(row["Pipeline_Actif"])),
-                        actifs=int(row["Actifs"]), perdus=int(row["Perdus"]), retard=retard_html),
+                        actifs=int(row["Actifs"]), perdus=int(row["Perdus"]), retard=retard_html,
+                        ph=_ph, mk=_mk, ciel=CIEL, marine=MARINE),
                     unsafe_allow_html=True)
 
         st.divider()
