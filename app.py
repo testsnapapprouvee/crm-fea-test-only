@@ -1,5 +1,5 @@
 # =============================================================================
-# app.py — CRM Asset Management — Amundi Edition  v15.0 — Universal Export Hub
+# app.py — CRM Asset Management  v15.0 — Universal Export Hub
 # Architecture : Full Modal (@st.dialog) + Split-Screen CRM
 # Session-state keys are namespaced per feature to prevent cross-tab conflicts
 # =============================================================================
@@ -185,7 +185,7 @@ def generate_account_review_pptx(client_data: dict, group_summary: dict,
 
     # Footer
     _add_rect(slide1, 0, 7.1, 13.33, 0.4, _rgb("#f0f4f8"))
-    _add_text(slide1, "Document à usage interne — Confidentiel — Amundi Asset Management",
+    _add_text(slide1, "Document a usage interne — Confidentiel — Asset Management CRM",
               0.5, 7.15, 12.0, 0.3,
               font_size=8, bold=False, color_rgb=GREY_RGB, align=PP_ALIGN.CENTER)
 
@@ -277,7 +277,7 @@ def generate_account_review_pptx(client_data: dict, group_summary: dict,
 
     # Footer
     _add_rect(slide2, 0, 7.1, 13.33, 0.4, _rgb("#f0f4f8"))
-    _add_text(slide2, "Document à usage interne — Confidentiel — Amundi Asset Management",
+    _add_text(slide2, "Document a usage interne — Confidentiel — Asset Management CRM",
               0.5, 7.15, 12.0, 0.3,
               font_size=8, bold=False, color_rgb=GREY_RGB, align=PP_ALIGN.CENTER)
 
@@ -333,7 +333,7 @@ def generate_global_pptx(kpis: dict, pipeline_df, mode_comex: bool = False) -> b
     label_comex = " [MODE COMEX — ANONYMISÉ]" if mode_comex else ""
     _text(s1, "RAPPORT GLOBAL — PORTFOLIO PIPELINE" + label_comex,
           0.6, 0.3, 12.0, 0.6, 11, color=CIEL_RGB)
-    _text(s1, "Amundi Asset Management",
+    _text(s1, "Asset Management CRM",
           0.6, 0.85, 12.0, 0.9, 34, bold=True, color=BLANC_RGB)
     _text(s1, date.today().strftime("%d %B %Y").upper(),
           0.6, 1.8, 6.0, 0.5, 11, color=_rgb("#7ab8d8"))
@@ -366,7 +366,7 @@ def generate_global_pptx(kpis: dict, pipeline_df, mode_comex: bool = False) -> b
 
     # Footer
     _rect(s1, 0, 7.1, 13.33, 0.4, LIGHT_RGB)
-    _text(s1, "Document à usage interne — Confidentiel — Amundi Asset Management",
+    _text(s1, "Document a usage interne — Confidentiel — Asset Management CRM",
           0.5, 7.15, 12.0, 0.3, 8, color=GREY_RGB, align=PP_ALIGN.CENTER)
 
     # ── SLIDE 2 — TOP DEALS ──────────────────────────────────────────────────
@@ -421,7 +421,7 @@ def generate_global_pptx(kpis: dict, pipeline_df, mode_comex: bool = False) -> b
         _text(s2, "Aucun deal Funded enregistré.", 0.4, 1.6, 12.5, 0.4, 11, color=GREY_RGB)
 
     _rect(s2, 0, 7.1, 13.33, 0.4, LIGHT_RGB)
-    _text(s2, "Document à usage interne — Confidentiel — Amundi Asset Management",
+    _text(s2, "Document a usage interne — Confidentiel — Asset Management CRM",
           0.5, 7.15, 12.0, 0.3, 8, color=GREY_RGB, align=PP_ALIGN.CENTER)
 
     buf = io.BytesIO()
@@ -1384,7 +1384,8 @@ with st.sidebar:
                     st.success("PPTX généré.")
 
                 elif hub_format == "Email":
-                    # Build email summary
+                    import urllib.parse
+                    # ── Données brutes ────────────────────────────────────────
                     _aum_f   = fmt_m(kpis_hub.get("total_funded", 0))
                     _pip_a   = fmt_m(kpis_hub.get("pipeline_actif", 0))
                     _wp      = fmt_m(kpis_hub.get("weighted_pipeline", 0))
@@ -1393,45 +1394,144 @@ with st.sidebar:
                     _nb_l    = kpis_hub.get("nb_lost", 0)
                     _nb_a    = kpis_hub.get("nb_deals_actifs", 0)
                     _perims  = ", ".join(fonds_perimetre) if fonds_perimetre else "Tous les fonds"
-                    _comex_note = " *(noms masqués — Mode Comex)*" if mode_comex else ""
+                    _date_str = date.today().strftime("%d %B %Y")
+                    _comex_note = " [MODE COMEX — ANONYMISE]" if mode_comex else ""
 
-                    md_summary = """
-**Rapport Portfolio — {}{}**
+                    # ── Section 2 : Alertes Opérationnelles ──────────────────
+                    _df_overdue = db.get_overdue_actions()
+                    _today = date.today()
+                    if _df_overdue.empty:
+                        _alertes_txt = "Aucune action commerciale en retard n'est recensee a ce jour."
+                        _alertes_nb  = 0
+                    else:
+                        _alertes_nb  = len(_df_overdue)
+                        _alertes_lines = []
+                        for _, _ov in _df_overdue.iterrows():
+                            _nad_ov = _ov.get("next_action_date")
+                            _days_l = (_today - _nad_ov).days if isinstance(_nad_ov, date) else 0
+                            _nad_s  = _nad_ov.strftime("%d/%m/%Y") if isinstance(_nad_ov, date) else "—"
+                            _alertes_lines.append(
+                                "  - {client} / {fonds} ({statut}) : action prevue le {nad}"
+                                ", soit un retard de {d} jour(s). Commercial : {owner}.".format(
+                                    client=str(_ov.get("nom_client","—")),
+                                    fonds=str(_ov.get("fonds","—")),
+                                    statut=str(_ov.get("statut","—")),
+                                    nad=_nad_s, d=_days_l,
+                                    owner=str(_ov.get("sales_owner","—"))))
+                        _alertes_txt = "\n".join(_alertes_lines)
 
-| KPI | Valeur |
-|-----|--------|
-| AUM Financé Total | {} |
-| Pipeline Actif (Smart AUM) | {} |
-| Pipeline Pondéré | {} |
-| Taux de Conversion | {} |
-| Deals Funded | {} |
-| Deals Actifs | {} |
-| Deals Perdus | {} |
+                    # ── Section 3 : Top Opportunités (Due Diligence / Soft Commit) ─
+                    _df_top_opp = pipeline_hub[
+                        pipeline_hub["statut"].isin(["Due Diligence", "Soft Commit"])
+                    ].copy()
+                    if not _df_top_opp.empty:
+                        _df_top_opp["_aum_p"] = _df_top_opp.apply(
+                            lambda r: float(r["revised_aum"]) if float(r.get("revised_aum",0) or 0) > 0
+                                      else float(r.get("target_aum_initial",0) or 0), axis=1)
+                        _df_top_opp = _df_top_opp.sort_values("_aum_p", ascending=False).head(3)
+                    _top_opp_lines = []
+                    for _rank, (_, _op) in enumerate(_df_top_opp.iterrows(), 1):
+                        _client_nm = ("Opportunite {:02d}".format(_rank)
+                                      if mode_comex else str(_op.get("nom_client","—")))
+                        _top_opp_lines.append(
+                            "  {rank}. {client} — {fonds} ({statut}) — AUM : {aum}"
+                            " — Commercial : {owner}".format(
+                                rank=_rank, client=_client_nm,
+                                fonds=str(_op.get("fonds","—")),
+                                statut=str(_op.get("statut","—")),
+                                aum=fmt_m(float(_op.get("_aum_p",0))),
+                                owner=str(_op.get("sales_owner","—"))))
+                    if not _top_opp_lines:
+                        _top_opp_txt = "Aucun deal en phase Due Diligence ou Soft Commit a ce jour."
+                    else:
+                        _top_opp_txt = "\n".join(_top_opp_lines)
 
-**Périmètre :** {}
+                    # ── Rendu Markdown pour prévisualisation ──────────────────
+                    _md_preview = (
+                        "**NOTE DE SYNTHESE — PORTFOLIO COMMERCIAL**  \n"
+                        "**Date :** {}{}  \n"
+                        "**Perimetre :** {}\n\n"
+                        "---\n\n"
+                        "**I. SYNTHESE GLOBALE**\n\n"
+                        "A la date du {date}, les encours finances s'elevent a **{aum_f}**, "
+                        "repartis sur {nb_f} mandat(s) consolide(s). "
+                        "Le pipeline commercial actif atteint **{pip_a}** ({nb_a} deal(s) en cours), "
+                        "soit un pipeline pondere de **{wp}** apres application des probabilites de closing. "
+                        "Le taux de conversion historique s'etablit a **{taux}** "
+                        "({nb_f} deals finances, {nb_l} deals perdus).\n\n"
+                        "---\n\n"
+                        "**II. ALERTES OPERATIONNELLES** ({nb_ov} action(s) en retard)\n\n"
+                        "{alertes}\n\n"
+                        "---\n\n"
+                        "**III. TOP OPPORTUNITES — Due Diligence & Soft Commit**\n\n"
+                        "{top_opp}\n\n"
+                        "---\n\n"
+                        "*Document genere automatiquement par le CRM Asset Management — Usage interne strictement confidentiel.*"
+                    ).format(
+                        date=_date_str, comex=_comex_note,
+                        perim=_perims,
+                        aum_f=_aum_f, pip_a=_pip_a, wp=_wp, taux=_taux,
+                        nb_f=_nb_f, nb_a=_nb_a, nb_l=_nb_l,
+                        nb_ov=_alertes_nb,
+                        alertes=_alertes_txt if _alertes_nb > 0 else "Aucune action en retard.",
+                        top_opp=_top_opp_txt)
+                    _md_preview = _md_preview.replace(
+                        "**Date :** {}{}".format(_date_str, _comex_note),
+                        "**Date :** {}{} ".format(_date_str, _comex_note))
+                    _md_preview = (
+                        "**NOTE DE SYNTHESE — PORTFOLIO COMMERCIAL**\n\n"
+                        "**Date :** {date}{comex}  \n"
+                        "**Perimetre :** {perim}\n\n"
+                        "---\n\n"
+                        "**I. SYNTHESE GLOBALE**\n\n"
+                        "A la date du {date}, les encours finances s'elevent a **{aum_f}**, "
+                        "repartis sur {nb_f} mandat(s) consolide(s). "
+                        "Le pipeline commercial actif atteint **{pip_a}** ({nb_a} deal(s) en cours), "
+                        "soit un pipeline pondere de **{wp}** apres application des probabilites de closing. "
+                        "Le taux de conversion historique s'etablit a **{taux}** "
+                        "({nb_f} deals finances, {nb_l} deals perdus).\n\n"
+                        "---\n\n"
+                        "**II. ALERTES OPERATIONNELLES** ({nb_ov} action(s) en retard)\n\n"
+                        "{alertes}\n\n"
+                        "---\n\n"
+                        "**III. TOP OPPORTUNITES — Due Diligence & Soft Commit**\n\n"
+                        "{top_opp}\n\n"
+                        "---\n\n"
+                        "*Document genere automatiquement par le CRM Asset Management — "
+                        "Usage interne strictement confidentiel.*"
+                    ).format(
+                        date=_date_str, comex=_comex_note, perim=_perims,
+                        aum_f=_aum_f, pip_a=_pip_a, wp=_wp, taux=_taux,
+                        nb_f=_nb_f, nb_a=_nb_a, nb_l=_nb_l,
+                        nb_ov=_alertes_nb,
+                        alertes=_alertes_txt if _alertes_nb > 0 else "Aucune action en retard.",
+                        top_opp=_top_opp_txt)
+                    st.markdown(_md_preview)
 
----
-*Généré automatiquement par le CRM Asset Management — Amundi Edition v15.0*
-""".format(date.today().strftime("%d/%m/%Y"), _comex_note,
-           _aum_f, _pip_a, _wp, _taux, _nb_f, _nb_a, _nb_l, _perims)
+                    # ── Corps email pour mailto ───────────────────────────────
+                    _body  = "Madame, Monsieur,\n\n"
+                    _body += "Veuillez trouver ci-apres la note de synthese du portfolio commercial "
+                    _body += "etablie a la date du {}{}.\n\n".format(_date_str, _comex_note)
+                    _body += "I. SYNTHESE GLOBALE\n"
+                    _body += "-" * 40 + "\n"
+                    _body += "Encours finances (AUM) : {}\n".format(_aum_f)
+                    _body += "Pipeline actif         : {} ({} deal(s))\n".format(_pip_a, _nb_a)
+                    _body += "Pipeline pondere       : {}\n".format(_wp)
+                    _body += "Taux de conversion     : {} ({} finances / {} perdus)\n".format(
+                        _taux, _nb_f, _nb_l)
+                    _body += "Perimetre              : {}\n\n".format(_perims)
+                    _body += "II. ALERTES OPERATIONNELLES ({} action(s) en retard)\n".format(_alertes_nb)
+                    _body += "-" * 40 + "\n"
+                    _body += _alertes_txt + "\n\n"
+                    _body += "III. TOP OPPORTUNITES (Due Diligence / Soft Commit)\n"
+                    _body += "-" * 40 + "\n"
+                    _body += _top_opp_txt + "\n\n"
+                    _body += "--\n"
+                    _body += "CRM Asset Management — Note generee automatiquement — Usage interne confidentiel."
 
-                    st.markdown(md_summary)
-
-                    # Build mailto URL
-                    import urllib.parse
-                    _subject  = "Rapport Portfolio — {}{}".format(
+                    _subject = "Note de Synthese Portfolio — {}{}".format(
                         date.today().strftime("%d/%m/%Y"),
                         " [COMEX]" if mode_comex else "")
-                    _body  = "Bonjour,\n\nVeuillez trouver ci-dessous la synthese du portfolio :\n\n"
-                    _body += "AUM Finance Total : {}\n".format(_aum_f)
-                    _body += "Pipeline Actif    : {}\n".format(_pip_a)
-                    _body += "Pipeline Pondere  : {}\n".format(_wp)
-                    _body += "Taux Conversion   : {}\n".format(_taux)
-                    _body += "Deals Funded      : {}\n".format(_nb_f)
-                    _body += "Deals Actifs      : {}\n".format(_nb_a)
-                    _body += "Deals Perdus      : {}\n\n".format(_nb_l)
-                    _body += "Perimetre : {}\n\n".format(_perims)
-                    _body += "--\nCRM Asset Management — Amundi Edition v15.0"
                     mailto_url = "mailto:?subject={}&body={}".format(
                         urllib.parse.quote(_subject),
                         urllib.parse.quote(_body))
@@ -1443,7 +1543,7 @@ with st.sidebar:
                 st.error("Erreur génération : {}".format(e))
 
     st.divider()
-    st.caption("Version 15.0 — Amundi Edition — Universal Export Hub")
+    st.caption("Version 15.0 — Asset Management CRM — Universal Export Hub")
 
 
 # ---------------------------------------------------------------------------
@@ -1940,39 +2040,101 @@ with tab_pipeline:
             unsafe_allow_html=True)
 
     st.divider()
-    st.markdown("#### AUM Pipeline par Deal Actif")
     df_viz_raw = db.get_pipeline_with_clients()
-    # Smart AUM: actifs uniquement, une seule barre = AUM_Pipeline
-    df_viz = df_viz_raw[df_viz_raw["statut"].isin(STATUTS_ACTIFS)].copy()
-    df_viz["aum_pipeline"] = df_viz["revised_aum"].where(
-        df_viz["revised_aum"] > 0, df_viz["target_aum_initial"])
-    df_viz = df_viz[df_viz["aum_pipeline"] > 0].copy()
-    df_viz["x_label"] = df_viz["nom_client"].str[:16] + " – " + df_viz["fonds"].str[:12]
-    df_viz = df_viz.sort_values("aum_pipeline", ascending=False).head(12)
-    if not df_viz.empty:
-        # Color by statut
-        statut_bar_colors = {
-            "Soft Commit": B_MID, "Due Diligence": "#004f8c",
-            "Initial Pitch": B_PAL, "Prospect": "#9ecae1",
+
+    # ── VISUALISATION 1 : Funnel Chart — AUM Pipeline par Statut ─────────────
+    st.markdown("#### Funnel Pipeline — AUM par Statut")
+    _statut_funnel_order = ["Prospect", "Initial Pitch", "Due Diligence", "Soft Commit"]
+    _df_funnel = df_viz_raw[df_viz_raw["statut"].isin(_statut_funnel_order)].copy()
+    _df_funnel["_aum_p"] = _df_funnel.apply(
+        lambda r: float(r["revised_aum"]) if float(r.get("revised_aum", 0) or 0) > 0
+                  else float(r.get("target_aum_initial", 0) or 0), axis=1)
+    _funnel_agg = (
+        _df_funnel.groupby("statut")["_aum_p"].sum()
+        .reindex(_statut_funnel_order, fill_value=0.0)
+        .reset_index()
+    )
+    _funnel_agg.columns = ["statut", "aum"]
+    _funnel_agg = _funnel_agg[_funnel_agg["aum"] > 0]
+    if not _funnel_agg.empty:
+        _funnel_colors = {
+            "Prospect":      "#9ecae1",
+            "Initial Pitch": B_PAL,
+            "Due Diligence": "#004f8c",
+            "Soft Commit":   B_MID,
         }
-        bar_colors = [statut_bar_colors.get(s, B_MID) for s in df_viz["statut"]]
-        fig_viz = go.Figure(go.Bar(
-            x=df_viz["x_label"].tolist(),
-            y=df_viz["aum_pipeline"].tolist(),
-            marker_color=bar_colors,
-            marker_line_color=BLANC, marker_line_width=0.5,
-            text=[fmt_m(v) for v in df_viz["aum_pipeline"]],
-            textposition="outside", textfont_size=9, textfont_color=MARINE,
-            hovertemplate="<b>%{x}</b><br>AUM Pipeline : %{text}<br>Statut : %{customdata}<extra></extra>",
-            customdata=df_viz["statut"].tolist()))
-        fig_viz.update_layout(
-            height=340, paper_bgcolor=BLANC, plot_bgcolor=BLANC,
-            font_color=MARINE, bargap=0.22,
-            xaxis_tickangle=-25, xaxis_showgrid=False,
+        fig_funnel = go.Figure(go.Funnel(
+            y=_funnel_agg["statut"].tolist(),
+            x=_funnel_agg["aum"].tolist(),
+            textinfo="value+percent initial",
+            text=[fmt_m(v) for v in _funnel_agg["aum"]],
+            texttemplate="%{text}",
+            hovertemplate="<b>%{y}</b><br>AUM Pipeline : %{text}<extra></extra>",
+            marker_color=[_funnel_colors.get(s, B_MID) for s in _funnel_agg["statut"]],
+            connector=dict(line=dict(color=GRIS, width=1)),
+        ))
+        fig_funnel.update_layout(
+            height=320, paper_bgcolor=BLANC, plot_bgcolor=BLANC,
+            font_color=MARINE, font_size=11,
+            margin=dict(l=10, r=10, t=30, b=10),
+            funnelmode="stack")
+        st.plotly_chart(fig_funnel, use_container_width=True, config={"displayModeBar": False})
+        st.caption("AUM Pipeline = AUM Revise si > 0, sinon AUM Cible. Deals actifs uniquement.")
+    else:
+        st.info("Aucun deal actif pour le graphique entonnoir.")
+
+    # ── VISUALISATION 2 : Grouped Bar — AUM par Fonds et par Statut ──────────
+    st.markdown("#### AUM Pipeline par Fonds et par Statut")
+    _df_grp = df_viz_raw[df_viz_raw["statut"].isin(_statut_funnel_order)].copy()
+    _df_grp["_aum_p"] = _df_grp.apply(
+        lambda r: float(r["revised_aum"]) if float(r.get("revised_aum", 0) or 0) > 0
+                  else float(r.get("target_aum_initial", 0) or 0), axis=1)
+    _df_grp = _df_grp[_df_grp["_aum_p"] > 0]
+    if not _df_grp.empty:
+        _grp_pivot = (
+            _df_grp.groupby(["fonds", "statut"])["_aum_p"].sum()
+            .reset_index()
+        )
+        _fonds_list  = sorted(_grp_pivot["fonds"].unique().tolist())
+        _statut_list = [s for s in _statut_funnel_order
+                        if s in _grp_pivot["statut"].unique()]
+        _grp_colors  = {
+            "Prospect":      "#9ecae1",
+            "Initial Pitch": B_PAL,
+            "Due Diligence": "#004f8c",
+            "Soft Commit":   B_MID,
+        }
+        fig_grp = go.Figure()
+        for _st in _statut_list:
+            _df_st = _grp_pivot[_grp_pivot["statut"] == _st]
+            _st_map = dict(zip(_df_st["fonds"], _df_st["_aum_p"]))
+            _y_vals = [_st_map.get(f, 0.0) for f in _fonds_list]
+            _txt    = [fmt_m(v) if v > 0 else "" for v in _y_vals]
+            fig_grp.add_trace(go.Bar(
+                name=_st,
+                x=_fonds_list,
+                y=_y_vals,
+                text=_txt,
+                textposition="outside",
+                textfont=dict(size=8, color=MARINE),
+                marker_color=_grp_colors.get(_st, B_MID),
+                marker_line_color=BLANC, marker_line_width=0.5,
+                hovertemplate="<b>{s}</b><br>%{{x}}<br>AUM : %{{customdata}}<extra></extra>".format(
+                    s=_st),
+                customdata=_txt))
+        fig_grp.update_layout(
+            barmode="group", height=340,
+            paper_bgcolor=BLANC, plot_bgcolor=BLANC,
+            font_color=MARINE, bargap=0.18, bargroupgap=0.05,
+            legend_bgcolor=BLANC, legend_bordercolor=GRIS, legend_borderwidth=1,
+            legend_font_size=10,
+            xaxis_showgrid=False, xaxis_tickangle=-15,
             yaxis_showgrid=True, yaxis_gridcolor=GRIS,
             margin=dict(l=10, r=10, t=30, b=10))
-        st.plotly_chart(fig_viz, use_container_width=True, config={"displayModeBar": False})
-        st.caption("AUM Pipeline = AUM Révisé si > 0, sinon AUM Cible. Deals actifs uniquement.")
+        st.plotly_chart(fig_grp, use_container_width=True, config={"displayModeBar": False})
+        st.caption("Vue croisee Fonds x Statut — deals actifs uniquement.")
+    else:
+        st.info("Aucune donnee disponible pour la vue croisee Fonds / Statut.")
 
     df_lp = db.get_pipeline_with_clients()
     df_lp = df_lp[df_lp["statut"].isin(["Lost","Paused"])].copy()
@@ -2220,6 +2382,75 @@ with tab_dash:
         with dt1: _content_funded(_filtre_effectif)
         with dt2: _content_pipeline(_filtre_effectif)
         with dt3: _content_lost(_filtre_effectif)
+
+    # ── TOP CLIENTS CONSOLIDE — Stacked Bar horizontal par Fonds ─────────────
+    st.divider()
+    st.markdown("#### Top Clients — Vue Consolidee (AUM Finance par Fonds)")
+    _df_top_clients_raw = (
+        db.get_pipeline_with_clients()
+        .query("statut == 'Funded' and funded_aum > 0")
+        .copy()
+    )
+    if not _df_top_clients_raw.empty:
+        _df_tc = (
+            _df_top_clients_raw
+            .groupby(["nom_client", "fonds"])["funded_aum"]
+            .sum()
+            .reset_index()
+        )
+        # Identifier les top N clients par AUM Finance total
+        _client_totals = (
+            _df_tc.groupby("nom_client")["funded_aum"].sum()
+            .sort_values(ascending=False)
+            .head(12)
+        )
+        _top_clients = _client_totals.index.tolist()
+        _df_tc = _df_tc[_df_tc["nom_client"].isin(_top_clients)].copy()
+        # Ordonner les clients par AUM total decroissant (Y axis = haut en bas)
+        _client_order = list(reversed(_top_clients))
+        _fonds_present = sorted(_df_tc["fonds"].unique().tolist())
+        fig_tc = go.Figure()
+        for _fi, _fonds in enumerate(_fonds_present):
+            _df_f = _df_tc[_df_tc["fonds"] == _fonds]
+            _fmap = dict(zip(_df_f["nom_client"], _df_f["funded_aum"]))
+            _x_vals = [_fmap.get(c, 0.0) for c in _client_order]
+            _txt    = [fmt_m(v) if v > 0 else "" for v in _x_vals]
+            fig_tc.add_trace(go.Bar(
+                name=_fonds,
+                x=_x_vals,
+                y=_client_order,
+                orientation="h",
+                marker_color=PALETTE[_fi % len(PALETTE)],
+                marker_line_color=BLANC, marker_line_width=0.4,
+                text=_txt,
+                textposition="inside",
+                textfont=dict(size=8, color=BLANC),
+                hovertemplate=(
+                    "<b>%{{y}}</b><br>{fonds}<br>"
+                    "AUM Finance : %{{customdata}}<extra></extra>").format(fonds=_fonds),
+                customdata=_txt))
+        fig_tc.update_layout(
+            barmode="stack",
+            height=max(300, 36 * len(_client_order) + 80),
+            paper_bgcolor=BLANC, plot_bgcolor=BLANC,
+            font_color=MARINE,
+            legend_bgcolor=BLANC, legend_bordercolor=GRIS,
+            legend_borderwidth=1, legend_font_size=10,
+            xaxis_showgrid=True, xaxis_gridcolor=GRIS,
+            xaxis_title="AUM Finance (EUR)",
+            yaxis=dict(automargin=True, tickfont=dict(size=10)),
+            margin=dict(l=10, r=20, t=30, b=10))
+        st.plotly_chart(fig_tc, use_container_width=True, config={"displayModeBar": False})
+        st.caption(
+            "AUM Finance consolide par client — top {} clients. "
+            "Chaque segment represente la contribution d'un fonds aux encours totaux du client.".format(
+                len(_top_clients)))
+    else:
+        st.markdown(
+            '<div style="background:#001c4b04;border:1px dashed #001c4b20;'
+            'padding:18px;text-align:center;">'
+            '<div style="color:{m};font-size:0.84rem;">Aucun deal Funded enregistre.</div>'
+            '</div>'.format(m=MARINE), unsafe_allow_html=True)
 
     # ── DECISION SUPPORT ──────────────────────────────────────────────────
     st.divider()
