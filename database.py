@@ -1,11 +1,11 @@
 # =============================================================================
-# database.py  —  CRM Asset Management  —  Amundi Edition  v15.0
+# database.py  —  CRM Asset Management  v15.0
 # Priorite : STABILITE ABSOLUE — zero helper complexe, SQL plat
 # Charte : #001c4b Marine | #019ee1 Ciel | #f07d00 Orange
 # v15.0 :
 #   - _clean_pipeline_df : conversion AUM avant guard df.empty (fix crash export)
 #   - get_excel_backup   : force pd.to_numeric avant division (fix crash)
-#   - upsert_pipeline_from_df : Ultimate Smart Import (auto-cree clients/sales)
+#   - upsert_pipeline_from_df : Smart Import + Smart Mapper colonnes Excel
 # =============================================================================
 
 import sqlite3
@@ -1073,11 +1073,83 @@ def upsert_pipeline_from_df(df):
       A. nom_client inconnu  -> INSERT INTO clients (type_client='Instit', region='EMEA')
       B. sales_owner inconnu -> INSERT OR IGNORE INTO sales_team (marche='Global')
       Saute une ligne UNIQUEMENT si nom_client est totalement vide.
+    Smart Mapper : standardise les noms de colonnes Excel entrants avant lecture.
     """
+    # ── SMART MAPPER — standardisation des colonnes Excel entrantes ───────────
+    # Convertit les variantes courantes vers les noms canoniques internes.
+    _COLUMN_MAP = {
+        # Client / Company
+        "client":               "nom_client",
+        "company":              "nom_client",
+        "compte":               "nom_client",
+        "nom client":           "nom_client",
+        "nom_du_client":        "nom_client",
+        # AUM Cible
+        "aum cible":            "target_aum_initial",
+        "aum_cible":            "target_aum_initial",
+        "aum target":           "target_aum_initial",
+        "target aum":           "target_aum_initial",
+        "target_aum":           "target_aum_initial",
+        "aum cible (m€)":       "target_aum_initial",
+        "aum_cible_m_eur":      "target_aum_initial",
+        # AUM Révisé
+        "aum revise":           "revised_aum",
+        "aum révisé":           "revised_aum",
+        "aum_revise":           "revised_aum",
+        "aum revised":          "revised_aum",
+        "revised aum":          "revised_aum",
+        "aum revise (m€)":      "revised_aum",
+        "aum_revise_m_eur":     "revised_aum",
+        # AUM Financé
+        "aum finance":          "funded_aum",
+        "aum financé":          "funded_aum",
+        "aum_finance":          "funded_aum",
+        "funded aum":           "funded_aum",
+        "aum finance (m€)":     "funded_aum",
+        "aum_finance_m_eur":    "funded_aum",
+        # Commercial / Sales
+        "commercial":           "sales_owner",
+        "sales":                "sales_owner",
+        "sales owner":          "sales_owner",
+        "sales rep":            "sales_owner",
+        "responsable":          "sales_owner",
+        "chargé d'affaires":    "sales_owner",
+        # Fonds
+        "fund":                 "fonds",
+        "produit":              "fonds",
+        # Statut
+        "status":               "statut",
+        "stage":                "statut",
+        "etape":                "statut",
+        "étape":                "statut",
+        # Next Action
+        "prochaine action":     "next_action_date",
+        "prochaine_action":     "next_action_date",
+        "next action":          "next_action_date",
+        "date action":          "next_action_date",
+        "date_action":          "next_action_date",
+        # Probabilité
+        "probabilite":          "closing_probability",
+        "probabilité":          "closing_probability",
+        "proba":                "closing_probability",
+        "probability":          "closing_probability",
+        "closing probability":  "closing_probability",
+        # Raison perte
+        "raison":               "raison_perte",
+        "raison perte":         "raison_perte",
+        "loss reason":          "raison_perte",
+        # Concurrent
+        "concurrent":           "concurrent_choisi",
+        "competitor":           "concurrent_choisi",
+    }
+
     inserted, updated = 0, 0
     conn = get_connection()
     c = conn.cursor()
+    # Normaliser d'abord en minuscules, puis appliquer le mapping
+    df = df.copy()
     df.columns = [col.lower().strip() for col in df.columns]
+    df.rename(columns=_COLUMN_MAP, inplace=True)
 
     for _, row in df.iterrows():
         # ── 1. Resoudre client_id ─────────────────────────────────────────────
