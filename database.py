@@ -471,6 +471,7 @@ def get_pipeline_with_clients(fonds_filter=None):
     conn = get_connection()
     query = (
         "SELECT p.id, p.client_id, c.nom_client, c.type_client, c.region,"
+        " COALESCE(c.country, '') AS country,"
         " p.fonds, p.statut, p.target_aum_initial, p.revised_aum, p.funded_aum,"
         " p.raison_perte, p.concurrent_choisi, p.next_action_date, p.sales_owner,"
         " COALESCE(p.closing_probability, 50) AS closing_probability"
@@ -488,6 +489,7 @@ def get_pipeline_with_last_activity(fonds_filter=None):
     conn = get_connection()
     query = (
         "SELECT p.id, p.client_id, c.nom_client, c.type_client, c.region,"
+        " COALESCE(c.country, '') AS country,"
         " p.fonds, p.statut, p.target_aum_initial, p.revised_aum, p.funded_aum,"
         " p.raison_perte, p.concurrent_choisi, p.next_action_date, p.sales_owner,"
         " COALESCE(p.closing_probability, 50) AS closing_probability,"
@@ -517,6 +519,7 @@ def get_pipeline_by_statut(statut, fonds_filter=None):
     conn = get_connection()
     query = (
         "SELECT p.id, c.nom_client, c.type_client, c.region,"
+        " COALESCE(c.country, '') AS country,"
         " p.fonds, p.statut,"
         " p.target_aum_initial, p.revised_aum, p.funded_aum,"
         " (CASE WHEN p.revised_aum > 0 THEN p.revised_aum ELSE p.target_aum_initial END) AS aum_pipeline,"
