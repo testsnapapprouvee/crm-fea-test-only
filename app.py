@@ -16,8 +16,6 @@ from pptx import Presentation
 from pptx.util import Inches, Pt, Emu
 from pptx.dml.color import RGBColor
 from pptx.enum.text import PP_ALIGN
-from pptx.chart.data import CategoryChartData
-from pptx.enum.chart import XL_CHART_TYPE
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
@@ -426,92 +424,130 @@ def generate_global_pptx(kpis: dict, pipeline_df, mode_comex: bool = False) -> b
     _text(s2, "Document a usage interne — Confidentiel — Asset Management CRM",
           0.5, 7.15, 12.0, 0.3, 8, color=GREY_RGB, align=PP_ALIGN.CENTER)
 
-    # ── SLIDE 3 — ANALYSES GRAPHIQUES (graphiques natifs PowerPoint) ─────────
-    s3 = prs.slides.add_slide(blank_layout)
-    _rect(s3, 0, 0, 13.33, 0.55, MARINE_RGB)
-    _text(s3, "ANALYSES GRAPHIQUES — AUM PAR TYPE & PAR FONDS",
-          0.4, 0.1, 10.0, 0.38, 11, bold=True, color=BLANC_RGB)
-    _text(s3, date.today().strftime("%d/%m/%Y"), 11.0, 0.1, 2.0, 0.38,
-          11, color=_rgb("#7ab8d8"), align=PP_ALIGN.RIGHT)
-    _rect(s3, 0, 7.1, 13.33, 0.4, LIGHT_RGB)
-    _text(s3, "Document a usage interne — Confidentiel — Asset Management CRM",
-          0.5, 7.15, 12.0, 0.3, 8, color=GREY_RGB, align=PP_ALIGN.CENTER)
-
-    # Sous-titres colonnes
-    _text(s3, "AUM Finance par Type de Client",
-          0.4, 0.7, 6.0, 0.35, 9, bold=True, color=GREY_RGB)
-    _text(s3, "AUM Finance par Fonds",
-          7.0, 0.7, 6.0, 0.35, 9, bold=True, color=GREY_RGB)
-
-    # ── Graphique 1 : Pie Chart — AUM par Type de Client ─────────────────────
-    _aum_by_type = kpis.get("aum_by_type", {})
-    _aum_by_type_clean = {k: v for k, v in _aum_by_type.items() if v and float(v) > 0}
-    if _aum_by_type_clean:
+    # ── SLIDE 3+ — ANALYSES GRAPHIQUES VIA PLOTLY/KALEIDO ────────────────────
+    # Génère les figures Plotly du Dashboard et les insère en PNG haute définition.
+    def _add_plotly_slide(prs, fig, title_text, subtitle_text=""):
+        """Convertit une figure Plotly en PNG via kaleido et l'insère dans une slide."""
+        s = prs.slides.add_slide(blank_layout)
+        _rect(s, 0, 0, 13.33, 0.55, MARINE_RGB)
+        _text(s, title_text, 0.4, 0.1, 10.0, 0.38, 11, bold=True, color=BLANC_RGB)
+        _text(s, date.today().strftime("%d/%m/%Y"), 11.0, 0.1, 2.0, 0.38,
+              11, color=_rgb("#7ab8d8"), align=PP_ALIGN.RIGHT)
+        if subtitle_text:
+            _text(s, subtitle_text, 0.4, 0.65, 12.5, 0.35, 9, color=GREY_RGB)
+        _rect(s, 0, 7.1, 13.33, 0.4, LIGHT_RGB)
+        _text(s, "Document a usage interne — Confidentiel — Asset Management CRM",
+              0.5, 7.15, 12.0, 0.3, 8, color=GREY_RGB, align=PP_ALIGN.CENTER)
         try:
-            _pie_data = CategoryChartData()
-            _pie_data.categories = list(_aum_by_type_clean.keys())
-            _pie_data.add_series(
-                "AUM Finance (M EUR)",
-                [round(float(v) / 1_000_000, 2) for v in _aum_by_type_clean.values()]
-            )
-            _pie_frame = s3.shapes.add_chart(
-                XL_CHART_TYPE.PIE,
-                Inches(0.3), Inches(1.1), Inches(6.2), Inches(5.7),
-                _pie_data
-            )
-            _pie_chart = _pie_frame.chart
-            _pie_chart.has_legend = True
-            _pie_chart.legend.position = 2   # xlBottom = 2
-            _pie_chart.legend.include_in_layout = False
-            _pie_plot = _pie_chart.plots[0]
-            _pie_plot.has_data_labels = True
-            _pie_dls = _pie_plot.data_labels
-            _pie_dls.show_percentage = True
-            _pie_dls.show_category_name = True
-            _pie_dls.show_value = False
-        except Exception:
-            _text(s3, "Graphique indisponible (donnees insuffisantes).",
-                  0.4, 2.5, 6.0, 0.4, 10, color=GREY_RGB)
-    else:
-        _text(s3, "Aucune donnee Funded disponible.",
-              0.4, 2.5, 6.0, 0.4, 10, color=GREY_RGB)
+            img_bytes = fig.to_image(format="png", engine="kaleido", width=950, height=420)
+            img_stream = io.BytesIO(img_bytes)
+            s.shapes.add_picture(img_stream, Inches(0.3), Inches(0.75), Inches(12.7), Inches(6.1))
+        except Exception as _e:
+            _text(s, "Graphique indisponible : {}".format(str(_e)[:80]),
+                  0.4, 3.5, 12.5, 0.5, 10, color=GREY_RGB)
 
-    # ── Graphique 2 : Column Chart — AUM par Fonds ────────────────────────────
-    _aum_by_fonds = kpis.get("aum_by_fonds", {})
-    _aum_by_fonds_clean = {k: v for k, v in _aum_by_fonds.items() if v and float(v) > 0}
-    if _aum_by_fonds_clean:
-        try:
-            _bar_data = CategoryChartData()
-            _bar_data.categories = list(_aum_by_fonds_clean.keys())
-            _bar_data.add_series(
-                "AUM Finance (M EUR)",
-                [round(float(v) / 1_000_000, 2) for v in _aum_by_fonds_clean.values()]
-            )
-            _bar_frame = s3.shapes.add_chart(
-                XL_CHART_TYPE.COLUMN_CLUSTERED,
-                Inches(6.9), Inches(1.1), Inches(6.1), Inches(5.7),
-                _bar_data
-            )
-            _bar_chart = _bar_frame.chart
-            _bar_chart.has_legend = False
-            _bar_plot = _bar_chart.plots[0]
-            _bar_plot.has_data_labels = True
-            _bar_dls = _bar_plot.data_labels
-            _bar_dls.show_value = True
-            _bar_dls.show_category_name = False
-            # Colorier les barres en bleu ciel
-            try:
-                _bar_series = _bar_chart.series[0]
-                _bar_series.format.fill.solid()
-                _bar_series.format.fill.fore_color.rgb = RGBColor(0x01, 0x9e, 0xe1)
-            except Exception:
-                pass
-        except Exception:
-            _text(s3, "Graphique indisponible (donnees insuffisantes).",
-                  7.0, 2.5, 6.0, 0.4, 10, color=GREY_RGB)
-    else:
-        _text(s3, "Aucune donnee Funded disponible.",
-              7.0, 2.5, 6.0, 0.4, 10, color=GREY_RGB)
+    # ── Slide 3 : Funnel Pipeline ─────────────────────────────────────────────
+    _statut_funnel_order_p = ["Prospect", "Initial Pitch", "Due Diligence", "Soft Commit"]
+    _df_funnel_p = pipeline_df[pipeline_df["statut"].isin(_statut_funnel_order_p)].copy()
+    _df_funnel_p["_aum_p"] = _df_funnel_p.apply(
+        lambda r: float(r["revised_aum"]) if float(r.get("revised_aum", 0) or 0) > 0
+                  else float(r.get("target_aum_initial", 0) or 0), axis=1)
+    _funnel_agg_p = (
+        _df_funnel_p.groupby("statut")["_aum_p"].sum()
+        .reindex(_statut_funnel_order_p, fill_value=0.0)
+        .reset_index()
+    )
+    _funnel_agg_p.columns = ["statut", "aum"]
+    _funnel_agg_p = _funnel_agg_p[_funnel_agg_p["aum"] > 0]
+    if not _funnel_agg_p.empty:
+        _fc = {"Prospect": "#9ecae1", "Initial Pitch": "#4a8fbd",
+               "Due Diligence": "#004f8c", "Soft Commit": "#1a5e8a"}
+        _fig_funnel_p = go.Figure(go.Funnel(
+            y=_funnel_agg_p["statut"].tolist(),
+            x=_funnel_agg_p["aum"].tolist(),
+            textinfo="value+percent initial",
+            text=["{:.1f} M\u20ac".format(v / 1_000_000) for v in _funnel_agg_p["aum"]],
+            texttemplate="%{text}",
+            marker_color=[_fc.get(s, "#1a5e8a") for s in _funnel_agg_p["statut"]],
+            connector=dict(line=dict(color="#e8e8e8", width=1))))
+        _fig_funnel_p.update_layout(
+            height=420, paper_bgcolor="#ffffff", plot_bgcolor="#ffffff",
+            font_color="#001c4b", font_size=12,
+            margin=dict(l=20, r=20, t=30, b=20))
+        _add_plotly_slide(prs, _fig_funnel_p, "FUNNEL PIPELINE — AUM PAR STATUT",
+                          "AUM Pipeline = AUM Revise si > 0, sinon AUM Cible")
+
+    # ── Slide 4 : AUM par Fonds et par Statut (Grouped Bar) ──────────────────
+    _df_grp_p = pipeline_df[pipeline_df["statut"].isin(_statut_funnel_order_p)].copy()
+    _df_grp_p["_aum_p"] = _df_grp_p.apply(
+        lambda r: float(r["revised_aum"]) if float(r.get("revised_aum", 0) or 0) > 0
+                  else float(r.get("target_aum_initial", 0) or 0), axis=1)
+    _df_grp_p = _df_grp_p[_df_grp_p["_aum_p"] > 0]
+    if not _df_grp_p.empty:
+        _grp_pivot_p = _df_grp_p.groupby(["fonds", "statut"])["_aum_p"].sum().reset_index()
+        _fonds_list_p = sorted(_grp_pivot_p["fonds"].unique().tolist())
+        _statut_list_p = [s for s in _statut_funnel_order_p if s in _grp_pivot_p["statut"].unique()]
+        _gc = {"Prospect": "#9ecae1", "Initial Pitch": "#4a8fbd",
+               "Due Diligence": "#004f8c", "Soft Commit": "#1a5e8a"}
+        _fig_grp_p = go.Figure()
+        for _st in _statut_list_p:
+            _df_st = _grp_pivot_p[_grp_pivot_p["statut"] == _st]
+            _st_map = dict(zip(_df_st["fonds"], _df_st["_aum_p"]))
+            _y_vals = [_st_map.get(f, 0.0) for f in _fonds_list_p]
+            _fig_grp_p.add_trace(go.Bar(
+                name=_st, x=_fonds_list_p, y=_y_vals,
+                marker_color=_gc.get(_st, "#1a5e8a"),
+                marker_line_color="#ffffff", marker_line_width=0.5))
+        _fig_grp_p.update_layout(
+            barmode="group", height=420,
+            paper_bgcolor="#ffffff", plot_bgcolor="#ffffff",
+            font_color="#001c4b", bargap=0.18, bargroupgap=0.05,
+            legend_bgcolor="#ffffff", legend_bordercolor="#e8e8e8", legend_borderwidth=1,
+            xaxis_showgrid=False, yaxis_showgrid=True, yaxis_gridcolor="#e8e8e8",
+            margin=dict(l=20, r=20, t=30, b=20))
+        _add_plotly_slide(prs, _fig_grp_p, "AUM PIPELINE PAR FONDS ET PAR STATUT",
+                          "Deals actifs uniquement — horizon max")
+
+    # ── Slide 5 : Money in Motion (fig_cf) ───────────────────────────────────
+    _df_cf_p = db.get_expected_cashflows()
+    if not _df_cf_p.empty and _df_cf_p["aum_pondere"].sum() > 0:
+        _months_p = sorted(_df_cf_p["mois"].unique().tolist())
+        _PALETTE_P = ["#1a5e8a", "#001c4b", "#4a8fbd", "#003f7a", "#2c7fb8",
+                      "#004f8c", "#6baed6", "#08519c", "#9ecae1", "#003060"]
+        _fig_cf_p = go.Figure()
+        for _i, _fonds in enumerate(sorted(_df_cf_p["fonds"].unique())):
+            _df_f = _df_cf_p[_df_cf_p["fonds"] == _fonds]
+            _mm = dict(zip(_df_f["mois"], _df_f["aum_pondere"]))
+            _y_vals = [_mm.get(m, 0) for m in _months_p]
+            _fig_cf_p.add_trace(go.Bar(
+                name=_fonds, x=_months_p, y=_y_vals,
+                marker_color=_PALETTE_P[_i % len(_PALETTE_P)],
+                marker_line_color="#ffffff", marker_line_width=0.5))
+        # Trace totaux invisibles pour affichage
+        _totaux = [sum(_mm.get(m, 0) for _df_f in
+                       [_df_cf_p[_df_cf_p["fonds"] == f] for f in _df_cf_p["fonds"].unique()]
+                       for _mm2 in [dict(zip(_df_f["mois"], _df_f["aum_pondere"]))])
+                   for m in _months_p]
+        _tot_by_month = {}
+        for _, _r2 in _df_cf_p.iterrows():
+            _tot_by_month[_r2["mois"]] = _tot_by_month.get(_r2["mois"], 0) + _r2["aum_pondere"]
+        _totaux_vals = [_tot_by_month.get(m, 0) for m in _months_p]
+        _fig_cf_p.add_trace(go.Scatter(
+            x=_months_p, y=_totaux_vals,
+            mode="text",
+            text=["{:.1f}M".format(v / 1_000_000) if v > 0 else "" for v in _totaux_vals],
+            textposition="top center",
+            textfont=dict(size=9, color="#001c4b"),
+            showlegend=False, hoverinfo="skip"))
+        _fig_cf_p.update_layout(
+            barmode="stack", height=420,
+            paper_bgcolor="#ffffff", plot_bgcolor="#ffffff", font_color="#001c4b",
+            legend_bgcolor="#ffffff", legend_bordercolor="#e8e8e8", legend_borderwidth=1,
+            xaxis_showgrid=False, yaxis_showgrid=True, yaxis_gridcolor="#e8e8e8",
+            yaxis_tickformat=".2s", yaxis_title="AUM Pondere (EUR)",
+            margin=dict(l=20, r=20, t=30, b=20))
+        _add_plotly_slide(prs, _fig_cf_p, "MONEY IN MOTION — PROJECTED INFLOWS",
+                          "AUM pondere = AUM Pipeline x Probabilite de closing")
 
     buf = io.BytesIO()
     prs.save(buf)
@@ -1555,7 +1591,13 @@ with st.sidebar:
                     _nb_l    = kpis_hub.get("nb_lost", 0)
                     _nb_a    = kpis_hub.get("nb_deals_actifs", 0)
                     _perims  = ", ".join(fonds_perimetre) if fonds_perimetre else "Tous les fonds"
-                    _date_str = date.today().strftime("%d %B %Y")
+                    # Date en français
+                    _mois_fr = {1:"Janvier",2:"Fevrier",3:"Mars",4:"Avril",5:"Mai",
+                                6:"Juin",7:"Juillet",8:"Aout",9:"Septembre",
+                                10:"Octobre",11:"Novembre",12:"Decembre"}
+                    _today_e = date.today()
+                    _date_str = "{} {} {}".format(
+                        _today_e.day, _mois_fr[_today_e.month], _today_e.year)
                     _comex_note = " [MODE COMEX — ANONYMISE]" if mode_comex else ""
 
                     # ── Section 2 : Alertes Opérationnelles ──────────────────
@@ -1567,7 +1609,8 @@ with st.sidebar:
                     else:
                         _alertes_nb  = len(_df_overdue)
                         _alertes_lines = []
-                        for _, _ov in _df_overdue.iterrows():
+                        # Limiter aux 5 deals en retard les plus importants
+                        for _, _ov in _df_overdue.head(5).iterrows():
                             _nad_ov = _ov.get("next_action_date")
                             _days_l = (_today - _nad_ov).days if isinstance(_nad_ov, date) else 0
                             _nad_s  = _nad_ov.strftime("%d/%m/%Y") if isinstance(_nad_ov, date) else "—"
@@ -1579,6 +1622,10 @@ with st.sidebar:
                                     statut=str(_ov.get("statut","—")),
                                     nad=_nad_s, d=_days_l,
                                     owner=str(_ov.get("sales_owner","—"))))
+                        if _alertes_nb > 5:
+                            _alertes_lines.append(
+                                "  ...et {} autre(s) action(s) necessitant"
+                                " l'attention des equipes.".format(_alertes_nb - 5))
                         _alertes_txt = "\n".join(_alertes_lines)
 
                     # ── Section 3 : Top Opportunités (Due Diligence / Soft Commit) ─
@@ -2234,7 +2281,22 @@ with tab_pipeline:
 
     # ── VISUALISATION 2 : Grouped Bar — AUM par Fonds et par Statut ──────────
     st.markdown("#### AUM Pipeline par Fonds et par Statut")
+    _grp_horizon = st.radio(
+        "Horizon (Next Action)",
+        ["Tous", "30 jours", "3 mois", "6 mois"],
+        horizontal=True,
+        key="grp_horizon_radio")
     _df_grp = df_viz_raw[df_viz_raw["statut"].isin(_statut_funnel_order)].copy()
+    # Appliquer le filtre horizon sur next_action_date
+    if _grp_horizon != "Tous":
+        _today_grp = date.today()
+        _horizon_days = {"30 jours": 30, "3 mois": 91, "6 mois": 182}[_grp_horizon]
+        _limit_grp = _today_grp + timedelta(days=_horizon_days)
+        def _in_horizon(nad):
+            if isinstance(nad, date):
+                return _today_grp <= nad <= _limit_grp
+            return False
+        _df_grp = _df_grp[_df_grp["next_action_date"].apply(_in_horizon)]
     _df_grp["_aum_p"] = _df_grp.apply(
         lambda r: float(r["revised_aum"]) if float(r.get("revised_aum", 0) or 0) > 0
                   else float(r.get("target_aum_initial", 0) or 0), axis=1)
@@ -2415,7 +2477,7 @@ with tab_dash:
     if not df_overdue.empty:
         today = date.today()
         alertes_html = ""
-        for _, row in df_overdue.iterrows():
+        for _, row in df_overdue.head(5).iterrows():
             nad = row.get("next_action_date")
             days_late = (today - nad).days if isinstance(nad, date) else 0
             nad_str   = nad.isoformat() if isinstance(nad, date) else "—"
@@ -2627,6 +2689,21 @@ with tab_dash:
                     marker_line_color=BLANC, marker_line_width=0.5,
                     hovertemplate="<b>{}</b><br>%{{x}}<br>%{{customdata}}<extra></extra>".format(fonds),
                     customdata=[fmt_m(v) for v in y_vals]))
+            # ── Trace invisible pour afficher le Total au-dessus de chaque barre ──
+            _cf_totaux = {}
+            for _, _r in df_cf.iterrows():
+                _cf_totaux[_r["mois"]] = _cf_totaux.get(_r["mois"], 0.0) + _r["aum_pondere"]
+            _cf_total_vals = [_cf_totaux.get(m, 0.0) for m in all_months]
+            fig_cf.add_trace(go.Scatter(
+                x=all_months,
+                y=_cf_total_vals,
+                mode="text",
+                text=[fmt_m(v) if v > 0 else "" for v in _cf_total_vals],
+                textposition="top center",
+                textfont=dict(size=9, color=MARINE),
+                showlegend=False,
+                hoverinfo="skip",
+                name="Total"))
             fig_cf.update_layout(
                 barmode="stack", height=280,
                 paper_bgcolor=BLANC, plot_bgcolor=BLANC, font_color=MARINE,
@@ -2634,7 +2711,7 @@ with tab_dash:
                 legend_font_size=9,
                 xaxis_showgrid=False, yaxis_showgrid=True, yaxis_gridcolor=GRIS,
                 yaxis_tickformat=".2s", yaxis_title="AUM Pondéré (€)",
-                margin=dict(l=10, r=10, t=10, b=10))
+                margin=dict(l=10, r=10, t=28, b=10))
             st.plotly_chart(fig_cf, use_container_width=True,
                             config={"displayModeBar": False}, key="chart_cf")
             st.caption("AUM pondéré = AUM Pipeline × Probabilité de closing. Répartition par mois de Next Action.")
@@ -2649,32 +2726,58 @@ with tab_dash:
                 '<div style="color:{m};font-size:0.84rem;">Aucune donnée disponible.</div>'
                 '</div>'.format(m=MARINE), unsafe_allow_html=True)
         else:
-            # Build HTML table
-            fonds_cols = df_ws.columns.tolist()
-            tbl = ('<table style="width:100%;border-collapse:collapse;font-size:0.70rem;">'
-                   '<thead><tr style="background:{m};color:#fff;">'.format(m=MARINE))
-            tbl += '<th style="padding:5px 6px;text-align:left;">Client</th>'
-            for f in fonds_cols:
-                tbl += '<th style="padding:5px 4px;text-align:center;max-width:60px;word-break:break-word;">{}</th>'.format(f[:8])
-            tbl += '</tr></thead><tbody>'
-            for i, (client_nm, row) in enumerate(df_ws.iterrows()):
-                bg = "#f4f8fc" if i % 2 == 0 else BLANC
-                tbl += '<tr style="background:{};">'.format(bg)
-                tbl += '<td style="padding:4px 6px;font-weight:600;color:{m};white-space:nowrap;max-width:110px;overflow:hidden;text-overflow:ellipsis;">{c}</td>'.format(
-                    m=MARINE, c=str(client_nm)[:16])
-                for f in fonds_cols:
-                    val = row[f]
-                    if pd.isna(val) or val == 0:
-                        # Whitespace — opportunity
-                        cell = '<td style="text-align:center;padding:3px;background:#fef6f0;">'                                '<span style="color:#f07d00;font-weight:700;font-size:0.65rem;">—</span></td>'
-                    else:
-                        cell = '<td style="text-align:center;padding:3px;background:#e6f4ea;">'                                '<span style="color:#22a062;font-weight:700;font-size:0.68rem;">{}</span></td>'.format(
-                                   fmt_m(val))
-                    tbl += cell
-                tbl += '</tr>'
-            tbl += '</tbody></table>'
-            st.markdown(tbl, unsafe_allow_html=True)
-            st.caption("Vert = investi (AUM Funded). Orange — = opportunité cross-sell.")
+            # Top 20 clients par AUM total pour garder la heatmap lisible
+            _ws_clients = df_ws.index.tolist()
+            if len(_ws_clients) > 20:
+                _aum_totals = df_ws.fillna(0).sum(axis=1).sort_values(ascending=False)
+                _ws_clients = _aum_totals.head(20).index.tolist()
+            _ws_fonds   = df_ws.columns.tolist()
+            _ws_sub     = df_ws.loc[_ws_clients, _ws_fonds]
+
+            # Construction de la matrice z : NaN → 0 (opportunité), valeur → AUM
+            _z_raw   = _ws_sub.values.tolist()
+            _z_clean = [[0.0 if (v is None or (isinstance(v, float) and np.isnan(v)))
+                         else float(v) for v in row] for row in _z_raw]
+
+            # Textes de survol lisibles
+            _hover = [[
+                "{client} / {fonds}<br>AUM Finance : {aum}".format(
+                    client=_ws_clients[ri], fonds=_ws_fonds[ci],
+                    aum=fmt_m(_z_clean[ri][ci]) if _z_clean[ri][ci] > 0 else "Opportunite")
+                for ci in range(len(_ws_fonds))]
+                for ri in range(len(_ws_clients))]
+
+            # Texte affiché dans les cases
+            _text_ws = [[fmt_m(_z_clean[ri][ci]) if _z_clean[ri][ci] > 0 else "—"
+                         for ci in range(len(_ws_fonds))]
+                        for ri in range(len(_ws_clients))]
+
+            fig_ws = go.Figure(go.Heatmap(
+                z=_z_clean,
+                x=_ws_fonds,
+                y=_ws_clients,
+                text=_text_ws,
+                texttemplate="%{text}",
+                textfont=dict(size=8, color=BLANC),
+                hovertext=_hover,
+                hovertemplate="%{hovertext}<extra></extra>",
+                colorscale=[[0.0, "#f5f5f5"], [0.001, "#9ecae1"],
+                            [0.2, "#4a8fbd"], [0.5, "#1a5e8a"], [1.0, "#001c4b"]],
+                zmin=0,
+                showscale=False,
+            ))
+            fig_ws.update_layout(
+                height=max(280, 22 * len(_ws_clients) + 80),
+                paper_bgcolor=BLANC, plot_bgcolor=BLANC,
+                font_color=MARINE, font_size=9,
+                xaxis=dict(side="top", tickangle=-30, automargin=True,
+                           tickfont=dict(size=9)),
+                yaxis=dict(autorange="reversed", automargin=True,
+                           tickfont=dict(size=9)),
+                margin=dict(l=10, r=10, t=50, b=10))
+            st.plotly_chart(fig_ws, use_container_width=True,
+                            config={"displayModeBar": False}, key="chart_ws")
+            st.caption("Bleu fonce = AUM Finance eleve. Gris clair = opportunite cross-sell non exploitee.")
 
 
 
@@ -2825,7 +2928,12 @@ with tab_sales:
                     '</div>'.format(
                         dot=dot, timing=timing, marine=MARINE, ciel=CIEL,
                         client=row.get("nom_client",""), fonds=row.get("fonds",""),
-                        statut=row.get("statut",""), aum=fmt_m(float(row.get("revised_aum",0) or 0) if float(row.get("revised_aum",0) or 0) > 0 else float(row.get("target_aum_initial",0) or 0)),
+                        statut=row.get("statut",""),
+                        aum=("N/C" if (float(row.get("revised_aum", 0) or 0) == 0
+                                       and float(row.get("target_aum_initial", 0) or 0) == 0)
+                             else fmt_m(float(row.get("revised_aum", 0) or 0)
+                                       if float(row.get("revised_aum", 0) or 0) > 0
+                                       else float(row.get("target_aum_initial", 0) or 0))),
                         owner=row.get("sales_owner","")), unsafe_allow_html=True)
 
 
@@ -3027,9 +3135,11 @@ with tab_settings:
         if import_type == "Clients":
             st.info("Colonnes : nom_client, type_client, region")
         else:
-            st.info("Colonnes : nom_client, fonds, statut, target_aum_initial, "
-                    "revised_aum, funded_aum, raison_perte, concurrent_choisi, "
-                    "next_action_date, sales_owner")
+            st.info(
+                "Colonnes supportees : nom_client, type_client, region, country, fonds, statut, "
+                "target_aum_initial, revised_aum, funded_aum, closing_probability, "
+                "raison_perte, concurrent_choisi, next_action_date, sales_owner"
+            )
         if uploaded_file:
             try:
                 df_imp = (pd.read_csv(uploaded_file) if uploaded_file.name.endswith(".csv")
