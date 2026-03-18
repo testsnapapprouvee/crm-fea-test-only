@@ -1,11 +1,12 @@
 # =============================================================================
-# database.py  —  CRM Asset Management  v15.0
+# database.py  —  CRM Asset Management  v16.0
 # Priorite : STABILITE ABSOLUE — zero helper complexe, SQL plat
 # Charte : #001c4b Marine | #019ee1 Ciel | #f07d00 Orange
-# v15.0 :
-#   - _clean_pipeline_df : conversion AUM avant guard df.empty (fix crash export)
-#   - get_excel_backup   : force pd.to_numeric avant division (fix crash)
-#   - upsert_pipeline_from_df : Smart Import + Smart Mapper colonnes Excel
+# v16.0 :
+#   - init_db : schema relaxe — suppression des CHECK restrictifs + migration
+#   - get_dynamic_filters : SELECT DISTINCT region/fonds/statut depuis la DB
+#   - update_sales_member / delete_sales_member : CRUD complet equipe commerciale
+#   - upsert_pipeline_from_df : zero fake data — region/type lus depuis Excel
 # =============================================================================
 
 import sqlite3
@@ -114,23 +115,96 @@ def _clean_pipeline_df(df):
 # INIT DB
 # ---------------------------------------------------------------------------
 
+def _migrate_relaxed_schema(conn):
+    """
+    Migration one-shot : supprime les CHECK restrictifs sur clients et pipeline
+    en recréant les tables si nécessaire (SQLite ne supporte pas DROP CONSTRAINT).
+    La migration est idempotente — elle détecte si elle a déjà été appliquée.
+    """
+    c = conn.cursor()
+    # Inspecter le schéma actuel de la table clients
+    c.execute("SELECT sql FROM sqlite_master WHERE type='table' AND name='clients'")
+    row = c.fetchone()
+    if row and row[0] and ("CHECK(type_client IN" in row[0] or "CHECK(region IN" in row[0]):
+        # Recréation de la table clients sans CHECK restrictifs
+        c.executescript("""
+            PRAGMA foreign_keys = OFF;
+            CREATE TABLE IF NOT EXISTS clients_new (
+                id          INTEGER PRIMARY KEY AUTOINCREMENT,
+                nom_client  TEXT NOT NULL UNIQUE,
+                type_client TEXT NOT NULL DEFAULT '',
+                region      TEXT NOT NULL DEFAULT '',
+                created_at  DATETIME DEFAULT CURRENT_TIMESTAMP,
+                parent_id   INTEGER REFERENCES clients_new(id) ON DELETE SET NULL,
+                tier        TEXT DEFAULT 'Tier 2',
+                kyc_status  TEXT DEFAULT 'En cours',
+                product_interests TEXT DEFAULT '',
+                country     TEXT DEFAULT ''
+            );
+            INSERT OR IGNORE INTO clients_new
+                SELECT id, nom_client, type_client, region, created_at,
+                       parent_id, tier, kyc_status, product_interests, country
+                FROM clients;
+            DROP TABLE clients;
+            ALTER TABLE clients_new RENAME TO clients;
+            PRAGMA foreign_keys = ON;
+        """)
+        conn.commit()
+
+    # Inspecter le schéma actuel de la table pipeline
+    c.execute("SELECT sql FROM sqlite_master WHERE type='table' AND name='pipeline'")
+    row_p = c.fetchone()
+    if row_p and row_p[0] and "CHECK(fonds IN" in row_p[0]:
+        c.executescript("""
+            PRAGMA foreign_keys = OFF;
+            CREATE TABLE IF NOT EXISTS pipeline_new (
+                id                   INTEGER PRIMARY KEY AUTOINCREMENT,
+                client_id            INTEGER NOT NULL,
+                fonds                TEXT NOT NULL DEFAULT '',
+                statut               TEXT NOT NULL DEFAULT 'Prospect',
+                target_aum_initial   REAL DEFAULT 0,
+                revised_aum          REAL DEFAULT 0,
+                funded_aum           REAL DEFAULT 0,
+                raison_perte         TEXT,
+                concurrent_choisi    TEXT,
+                next_action_date     DATE,
+                sales_owner          TEXT NOT NULL DEFAULT 'Non assigne',
+                closing_probability  REAL DEFAULT 50,
+                created_at           DATETIME DEFAULT CURRENT_TIMESTAMP,
+                updated_at           DATETIME DEFAULT CURRENT_TIMESTAMP,
+                FOREIGN KEY (client_id) REFERENCES clients(id) ON DELETE CASCADE
+            );
+            INSERT OR IGNORE INTO pipeline_new
+                SELECT id, client_id, fonds, statut,
+                       target_aum_initial, revised_aum, funded_aum,
+                       raison_perte, concurrent_choisi, next_action_date,
+                       sales_owner, closing_probability, created_at, updated_at
+                FROM pipeline;
+            DROP TABLE pipeline;
+            ALTER TABLE pipeline_new RENAME TO pipeline;
+            PRAGMA foreign_keys = ON;
+        """)
+        conn.commit()
+
+
 def init_db():
     conn = get_connection()
     c = conn.cursor()
 
+    # Schema relaxé : pas de CHECK restrictifs sur type_client / region / fonds / statut
     c.execute("""
         CREATE TABLE IF NOT EXISTS clients (
             id          INTEGER PRIMARY KEY AUTOINCREMENT,
             nom_client  TEXT NOT NULL UNIQUE,
-            type_client TEXT NOT NULL CHECK(type_client IN ('IFA','Wholesale','Instit','Family Office')),
-            region      TEXT NOT NULL CHECK(region IN ('GCC','EMEA','APAC','Nordics','Asia ex-Japan','North America','LatAm')),
+            type_client TEXT NOT NULL DEFAULT '',
+            region      TEXT NOT NULL DEFAULT '',
             created_at  DATETIME DEFAULT CURRENT_TIMESTAMP
         )
     """)
 
     _safe_alter(c, "ALTER TABLE clients ADD COLUMN parent_id INTEGER REFERENCES clients(id) ON DELETE SET NULL")
-    _safe_alter(c, "ALTER TABLE clients ADD COLUMN tier TEXT DEFAULT 'Tier 2' CHECK(tier IN ('Tier 1','Tier 2','Tier 3'))")
-    _safe_alter(c, "ALTER TABLE clients ADD COLUMN kyc_status TEXT DEFAULT 'En cours' CHECK(kyc_status IN ('Valide','En cours','Bloque'))")
+    _safe_alter(c, "ALTER TABLE clients ADD COLUMN tier TEXT DEFAULT 'Tier 2'")
+    _safe_alter(c, "ALTER TABLE clients ADD COLUMN kyc_status TEXT DEFAULT 'En cours'")
     _safe_alter(c, "ALTER TABLE clients ADD COLUMN product_interests TEXT DEFAULT ''")
     _safe_alter(c, "ALTER TABLE clients ADD COLUMN country TEXT DEFAULT ''")
 
@@ -154,8 +228,8 @@ def init_db():
         CREATE TABLE IF NOT EXISTS pipeline (
             id                   INTEGER PRIMARY KEY AUTOINCREMENT,
             client_id            INTEGER NOT NULL,
-            fonds                TEXT NOT NULL CHECK(fonds IN ('Global Value','International Fund','Income Builder','Resilient Equity','Private Debt','Active ETFs')),
-            statut               TEXT NOT NULL DEFAULT 'Prospect' CHECK(statut IN ('Prospect','Initial Pitch','Due Diligence','Soft Commit','Funded','Paused','Lost','Redeemed')),
+            fonds                TEXT NOT NULL DEFAULT '',
+            statut               TEXT NOT NULL DEFAULT 'Prospect',
             target_aum_initial   REAL DEFAULT 0,
             revised_aum          REAL DEFAULT 0,
             funded_aum           REAL DEFAULT 0,
@@ -207,6 +281,13 @@ def init_db():
         )
     """)
     conn.commit()
+
+    # Migration rétroactive : supprime les CHECK restrictifs sur les DB existantes
+    try:
+        _migrate_relaxed_schema(conn)
+    except Exception:
+        pass  # Ne jamais bloquer le démarrage
+
     conn.close()
 
 
@@ -297,6 +378,45 @@ def add_sales_member(nom, marche):
         success = False
     conn.close()
     return success
+
+
+def update_sales_member(sales_id: int, nom: str, marche: str):
+    """Met à jour le nom et le marché d'un commercial existant."""
+    try:
+        conn = get_connection()
+        c = conn.cursor()
+        c.execute(
+            "UPDATE sales_team SET nom=?, marche=? WHERE id=?",
+            (nom.strip(), marche.strip(), int(sales_id))
+        )
+        conn.commit()
+        conn.close()
+        return True, None
+    except Exception as e:
+        return False, str(e)
+
+
+def delete_sales_member(sales_id: int):
+    """Supprime un commercial. Met à jour le pipeline : sales_owner -> 'Non assigne'."""
+    try:
+        conn = get_connection()
+        c = conn.cursor()
+        # Récupérer le nom avant suppression pour anonymiser le pipeline
+        c.execute("SELECT nom FROM sales_team WHERE id=?", (int(sales_id),))
+        row = c.fetchone()
+        if row:
+            nom_to_delete = row["nom"]
+            c.execute(
+                "UPDATE pipeline SET sales_owner='Non assigne'"
+                " WHERE sales_owner=?",
+                (nom_to_delete,)
+            )
+        c.execute("DELETE FROM sales_team WHERE id=?", (int(sales_id),))
+        conn.commit()
+        conn.close()
+        return True, None
+    except Exception as e:
+        return False, str(e)
 
 
 def get_sales_by_marche(marche):
@@ -746,6 +866,57 @@ def get_aum_by_region(fonds_filter=None):
 
 
 # ---------------------------------------------------------------------------
+# CHANTIER 2 — FILTRES DYNAMIQUES
+# ---------------------------------------------------------------------------
+
+def get_dynamic_filters():
+    """
+    Renvoie les listes de valeurs réellement présentes dans la DB.
+    Utilisé pour alimenter les filtres multiselect de l'interface.
+    Retourne un dict avec les clés :
+      - regions  : liste triée des régions non-vides des clients
+      - fonds    : liste triée des fonds présents dans le pipeline
+      - statuts  : liste triée des statuts présents dans le pipeline
+    Chaque liste a un fallback sur les référentiels si la DB est vide.
+    """
+    conn = get_connection()
+    c = conn.cursor()
+
+    c.execute(
+        "SELECT DISTINCT c.region FROM clients c"
+        " WHERE c.region IS NOT NULL AND c.region != ''"
+        " ORDER BY c.region"
+    )
+    regions_db = [r[0] for r in c.fetchall()]
+
+    c.execute(
+        "SELECT DISTINCT p.fonds FROM pipeline p"
+        " WHERE p.fonds IS NOT NULL AND p.fonds != ''"
+        " ORDER BY p.fonds"
+    )
+    fonds_db = [r[0] for r in c.fetchall()]
+
+    c.execute(
+        "SELECT DISTINCT p.statut FROM pipeline p"
+        " WHERE p.statut IS NOT NULL AND p.statut != ''"
+        " ORDER BY p.statut"
+    )
+    statuts_db = [r[0] for r in c.fetchall()]
+
+    conn.close()
+
+    # Fallback sur les référentiels si la DB est vide (premier lancement)
+    return {
+        "regions": regions_db if regions_db else list(REGIONS_REFERENTIEL),
+        "fonds":   fonds_db   if fonds_db   else list(FONDS_REFERENTIEL),
+        "statuts": statuts_db if statuts_db else [
+            "Prospect", "Initial Pitch", "Due Diligence",
+            "Soft Commit", "Funded", "Paused", "Lost", "Redeemed"
+        ],
+    }
+
+
+# ---------------------------------------------------------------------------
 # ACTIVITES
 # ---------------------------------------------------------------------------
 
@@ -1062,15 +1233,15 @@ def upsert_clients_from_df(df):
 
 
 # ---------------------------------------------------------------------------
-# CORRECTIF 2 — ULTIMATE SMART IMPORT
-# Auto-cree clients inconnus (Instit/EMEA) et sales owners (Global)
-# Saute la ligne UNIQUEMENT si nom_client est vide
+# SMART IMPORT — Auto-cree clients et sales owners inconnus
+# Regle metier : ZERO donnee inventee — region/type lus depuis Excel ou laisses vides
 # ---------------------------------------------------------------------------
 
 def upsert_pipeline_from_df(df):
     """
     Smart Import 100% autonome :
-      A. nom_client inconnu  -> INSERT INTO clients (type_client='Instit', region='EMEA')
+      A. nom_client inconnu  -> INSERT INTO clients (type_client et region lus depuis
+         le fichier Excel, ou '' si absent — on n'invente jamais de valeur par defaut)
       B. sales_owner inconnu -> INSERT OR IGNORE INTO sales_team (marche='Global')
       Saute une ligne UNIQUEMENT si nom_client est totalement vide.
     Smart Mapper : standardise les noms de colonnes Excel entrants avant lecture.
@@ -1084,28 +1255,38 @@ def upsert_pipeline_from_df(df):
         "compte":               "nom_client",
         "nom client":           "nom_client",
         "nom_du_client":        "nom_client",
+        # Type client
+        "type":                 "type_client",
+        "type client":          "type_client",
+        "client type":          "type_client",
+        "categorie":            "type_client",
+        # Region
+        "region":               "region",
+        "geography":            "region",
+        "geo":                  "region",
+        "marche":               "region",
         # AUM Cible
         "aum cible":            "target_aum_initial",
         "aum_cible":            "target_aum_initial",
         "aum target":           "target_aum_initial",
         "target aum":           "target_aum_initial",
         "target_aum":           "target_aum_initial",
-        "aum cible (m€)":       "target_aum_initial",
+        "aum cible (m\u20ac)":  "target_aum_initial",
         "aum_cible_m_eur":      "target_aum_initial",
         # AUM Révisé
         "aum revise":           "revised_aum",
-        "aum révisé":           "revised_aum",
+        "aum r\u00e9vis\u00e9": "revised_aum",
         "aum_revise":           "revised_aum",
         "aum revised":          "revised_aum",
         "revised aum":          "revised_aum",
-        "aum revise (m€)":      "revised_aum",
+        "aum revise (m\u20ac)": "revised_aum",
         "aum_revise_m_eur":     "revised_aum",
         # AUM Financé
         "aum finance":          "funded_aum",
-        "aum financé":          "funded_aum",
+        "aum financ\u00e9":     "funded_aum",
         "aum_finance":          "funded_aum",
         "funded aum":           "funded_aum",
-        "aum finance (m€)":     "funded_aum",
+        "aum finance (m\u20ac)":"funded_aum",
         "aum_finance_m_eur":    "funded_aum",
         # Commercial / Sales
         "commercial":           "sales_owner",
@@ -1113,7 +1294,7 @@ def upsert_pipeline_from_df(df):
         "sales owner":          "sales_owner",
         "sales rep":            "sales_owner",
         "responsable":          "sales_owner",
-        "chargé d'affaires":    "sales_owner",
+        "charg\u00e9 d'affaires":"sales_owner",
         # Fonds
         "fund":                 "fonds",
         "produit":              "fonds",
@@ -1121,7 +1302,7 @@ def upsert_pipeline_from_df(df):
         "status":               "statut",
         "stage":                "statut",
         "etape":                "statut",
-        "étape":                "statut",
+        "\u00e9tape":           "statut",
         # Next Action
         "prochaine action":     "next_action_date",
         "prochaine_action":     "next_action_date",
@@ -1130,7 +1311,7 @@ def upsert_pipeline_from_df(df):
         "date_action":          "next_action_date",
         # Probabilité
         "probabilite":          "closing_probability",
-        "probabilité":          "closing_probability",
+        "probabilit\u00e9":     "closing_probability",
         "proba":                "closing_probability",
         "probability":          "closing_probability",
         "closing probability":  "closing_probability",
@@ -1173,13 +1354,16 @@ def upsert_pipeline_from_df(df):
             if res:
                 client_id = res["id"]
             else:
-                # AUTO-CREATE : client absent -> creer avec defaults Instit/EMEA
+                # AUTO-CREATE : client absent -> creer avec les infos disponibles
+                # Regle metier : on ne forge JAMAIS de données. Si absent = chaine vide.
+                _type_client = str(row.get("type_client", "") or "").strip()
+                _region      = str(row.get("region", "") or "").strip()
                 try:
                     c.execute(
                         "INSERT INTO clients"
                         " (nom_client, type_client, region, tier, kyc_status)"
-                        " VALUES (?, 'Instit', 'EMEA', 'Tier 2', 'En cours')",
-                        (nom,)
+                        " VALUES (?, ?, ?, 'Tier 2', 'En cours')",
+                        (nom, _type_client, _region)
                     )
                     client_id = c.lastrowid
                 except sqlite3.IntegrityError:
