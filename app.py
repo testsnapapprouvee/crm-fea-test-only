@@ -592,14 +592,16 @@ def generate_global_pptx(kpis: dict, pipeline_df, mode_comex: bool = False) -> b
 # ---------------------------------------------------------------------------
 from datetime import date as _date_cls
 
-TIMEFRAMES = ["Max", "YTD", "1M Rolling", "3M Rolling", "1Y Rolling"]
+TIMEFRAMES = ["Max", "YTD", "1M Rolling", "3M Rolling", "6M Rolling", "1Y Rolling", "3Y Rolling"]
 
 def _timeframe_cutoff(timeframe: str):
     today = _date_cls.today()
     if timeframe == "YTD":         return _date_cls(today.year, 1, 1)
     if timeframe == "1M Rolling":  return today - timedelta(days=30)
     if timeframe == "3M Rolling":  return today - timedelta(days=91)
+    if timeframe == "6M Rolling":  return today - timedelta(days=182)
     if timeframe == "1Y Rolling":  return today - timedelta(days=365)
+    if timeframe == "3Y Rolling":  return today - timedelta(days=1095)
     return None
 
 # ---------------------------------------------------------------------------
@@ -2168,26 +2170,29 @@ with tab_pipeline:
         _dyn_statuts  = _dyn.get("statuts", STATUTS)
         _dyn_fonds    = _dyn.get("fonds",   FONDS)
         _dyn_regions  = _dyn.get("regions", REGIONS)
-        # S'assurer que les statuts actifs par défaut existent dans la liste dynamique
         _default_statuts = [s for s in STATUTS_ACTIFS if s in _dyn_statuts]
-        fc1, fc2, fc3 = st.columns(3)
+        fc1, fc2, fc3, fc4 = st.columns(4)
         with fc1: filt_statuts = st.multiselect("Statuts", _dyn_statuts,
                                                  default=_default_statuts,
                                                  key="pipe_filt_statuts")
         with fc2: filt_fonds   = st.multiselect("Fonds",   _dyn_fonds,
                                                  key="pipe_filt_fonds")
-        with fc3: filt_regions = st.multiselect("Regions", _dyn_regions,
+        with fc3: filt_regions = st.multiselect("Régions", _dyn_regions,
                                                  key="pipe_filt_regions")
+        with fc4: filt_countries = st.multiselect("Pays", COUNTRIES_LIST[1:],
+                                                   key="pipe_filt_countries")
     else:
-        filt_statuts = STATUTS_ACTIFS
-        filt_fonds   = []
-        filt_regions = []
+        filt_statuts   = STATUTS_ACTIFS
+        filt_fonds     = []
+        filt_regions   = []
+        filt_countries = []
 
     df_pipe_full = db.get_pipeline_with_last_activity()
     df_view      = df_pipe_full.copy()
-    if filt_statuts:  df_view = df_view[df_view["statut"].isin(filt_statuts)]
-    if filt_fonds:    df_view = df_view[df_view["fonds"].isin(filt_fonds)]
-    if filt_regions:  df_view = df_view[df_view["region"].isin(filt_regions)]
+    if filt_statuts:   df_view = df_view[df_view["statut"].isin(filt_statuts)]
+    if filt_fonds:     df_view = df_view[df_view["fonds"].isin(filt_fonds)]
+    if filt_regions:   df_view = df_view[df_view["region"].isin(filt_regions)]
+    if filt_countries: df_view = df_view[df_view["country"].isin(filt_countries)]
 
     st.markdown('<div class="pipeline-hint">Sélectionnez une ligne puis cliquez'
                 ' "Modifier le deal sélectionné" — <b>{} deal(s)</b> affiché(s)</div>'.format(len(df_view)),
@@ -2212,7 +2217,7 @@ with tab_pipeline:
 
     event = st.dataframe(
         df_display[cols_show], use_container_width=True, height=400, hide_index=True,
-        on_select="rerun", selection_mode="single-row",
+        on_select="rerun", selection_mode="multi-row",
         column_config={
             "id":                  st.column_config.NumberColumn("ID", width="small"),
             "nom_client":          st.column_config.TextColumn("Client"),
@@ -2622,7 +2627,7 @@ with tab_dash:
                                    key="dash_top_deals_region",
                                    label_visibility="collapsed")
     df_funded_top = (db.get_pipeline_with_clients()
-                     .query("statut == 'Funded'")
+                     .query("statut == 'Funded' and funded_aum > 0")
                      .sort_values("funded_aum", ascending=False))
     if _td_region != "Toutes":
         df_funded_top = df_funded_top[df_funded_top["region"] == _td_region]
@@ -2895,20 +2900,50 @@ with tab_sales:
     if df_sm.empty:
         st.info("Aucune donnée de pipeline disponible.")
     else:
-        # ── Recherche multiselect ─────────────────────────────────────────────
+        # ── Filtres Sales ─────────────────────────────────────────────────────
+        _sf1, _sf2, _sf3 = st.columns(3)
         _all_commerciaux = sorted(df_sm["Commercial"].tolist())
-        _sel_commerciaux = st.multiselect(
-            "Rechercher un commercial",
-            options=_all_commerciaux,
-            default=[],
-            key="sales_search_ms",
-            placeholder="Laisser vide pour afficher tous les commerciaux"
-        )
-        df_sm_show = (df_sm[df_sm["Commercial"].isin(_sel_commerciaux)].copy()
-                      if _sel_commerciaux else df_sm.copy())
+        with _sf1:
+            _sel_commerciaux = st.multiselect(
+                "Commercial",
+                options=_all_commerciaux,
+                default=[],
+                key="sales_search_ms",
+                placeholder="Tous les commerciaux"
+            )
+        # Filtre marché : extrait depuis sales_team
+        _st_data = db.get_sales_team()
+        _marches_opts = sorted(_st_data["marche"].unique().tolist()) if not _st_data.empty else []
+        with _sf2:
+            _sel_marches = st.multiselect(
+                "Marché",
+                options=_marches_opts,
+                default=[],
+                key="sales_filt_marche",
+                placeholder="Tous les marchés"
+            )
+        with _sf3:
+            _sel_countries_sales = st.multiselect(
+                "Pays client",
+                options=COUNTRIES_LIST[1:],
+                default=[],
+                key="sales_filt_country",
+                placeholder="Tous les pays"
+            )
+
+        # Appliquer les filtres
+        df_sm_show = df_sm.copy()
+        if _sel_commerciaux:
+            df_sm_show = df_sm_show[df_sm_show["Commercial"].isin(_sel_commerciaux)]
+        if _sel_marches and not _st_data.empty:
+            _owners_in_marche = _st_data[_st_data["marche"].isin(_sel_marches)]["nom"].tolist()
+            df_sm_show = df_sm_show[df_sm_show["Commercial"].isin(_owners_in_marche)]
 
         # ── Enrichissement analytique : Produit Phare & Marché Clé ───────────
         _df_enrich = db.get_pipeline_with_clients()
+        # Filtre pays sur le pipeline affiché dans les cartes
+        if _sel_countries_sales:
+            _df_enrich = _df_enrich[_df_enrich["country"].isin(_sel_countries_sales)]
         _produit_phare_map = {}
         _marche_cle_map    = {}
         if not _df_enrich.empty:
@@ -2990,12 +3025,31 @@ with tab_sales:
 
         st.divider()
         st.markdown("#### Strategic Analysis — Fund Breakdown by Market")
-        si_mode = st.radio(
-            "Périmètre",
-            ["Pipeline Actif (AUM Révisé)", "Funded (AUM Financé)"],
-            horizontal=True, key="si_mode")
+        _si_r1, _si_r2 = st.columns([2, 1])
+        with _si_r1:
+            si_mode = st.radio(
+                "Périmètre",
+                ["Pipeline Actif (AUM Révisé)", "Funded (AUM Financé)"],
+                horizontal=True, key="si_mode")
+        with _si_r2:
+            _si_region_filter = st.selectbox(
+                "Région", ["Toutes"] + REGIONS,
+                key="si_region_filter",
+                label_visibility="collapsed"
+            )
         df_mfb = db.get_market_fonds_breakdown(
             mode="funded" if "Funded" in si_mode else "pipeline")
+        # Filtre région : restreindre aux commerciaux couvrant cette région
+        if _si_region_filter != "Toutes" and not df_mfb.empty:
+            _pipe_si = db.get_pipeline_with_clients()
+            _pipe_si = _pipe_si[_pipe_si["region"] == _si_region_filter]
+            _owners_in_reg = _pipe_si["sales_owner"].unique().tolist()
+            _st_si = db.get_sales_team()
+            if not _st_si.empty:
+                _marches_in_reg = _st_si[_st_si["nom"].isin(_owners_in_reg)]["marche"].unique().tolist()
+                df_mfb = df_mfb[df_mfb["marche"].isin(_marches_in_reg)] if _marches_in_reg else df_mfb
+            else:
+                df_mfb = df_mfb[df_mfb["marche"].isin(_owners_in_reg)]
 
         if df_mfb.empty or df_mfb["aum"].sum() == 0:
             st.markdown(
@@ -3294,6 +3348,23 @@ with tab_settings:
                           else pd.read_excel(uploaded_file))
                 st.dataframe(df_imp.head(5), use_container_width=True, height=145)
                 st.caption("{} ligne(s)".format(len(df_imp)))
+
+                # ── Détection doublons avant import ──────────────────────────
+                if import_type == "Pipeline":
+                    _dup_report = db.detect_import_duplicates(df_imp)
+                    _dup_exact  = _dup_report.get("exact", [])
+                    _dup_fuzzy  = _dup_report.get("fuzzy", [])
+                    if _dup_exact:
+                        _dup_msg = "**{} doublon(s) exact(s)** : ".format(len(_dup_exact))
+                        for _d in _dup_exact[:5]:
+                            _dup_msg += "  L.{} & L.{} : {} ".format(_d["ligne_1"], _d["ligne_2"], _d["valeur"])
+                        st.warning(_dup_msg)
+                    if _dup_fuzzy:
+                        with st.expander("{} doublon(s) potentiel(s) (noms similaires)".format(
+                                len(_dup_fuzzy))):
+                            for d in _dup_fuzzy[:10]:
+                                st.markdown("- `{}` ↔ `{}`".format(d["nom_1"], d["nom_2"]))
+
                 if st.button("Lancer l'import", key="settings_btn_import", use_container_width=True):
                     fn = (db.upsert_clients_from_df if import_type == "Clients"
                           else db.upsert_pipeline_from_df)
