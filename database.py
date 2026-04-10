@@ -2159,60 +2159,33 @@ with tab_pipeline:
             dialog_manage_sales()
     st.markdown("<br>", unsafe_allow_html=True)
 
-    # ── Filtres — persistants via session_state ──────────────────────────────
-    # Les filtres survivent aux reruns : on lit/écrit dans session_state directement.
-    _dyn = db.get_dynamic_filters()
-    _dyn_statuts  = _dyn.get("statuts", STATUTS)
-    _dyn_fonds    = _dyn.get("fonds",   FONDS)
-    _dyn_regions  = _dyn.get("regions", REGIONS)
-
-    # Initialisation des valeurs par défaut (1 seule fois)
-    if "pipe_filt_statuts" not in st.session_state:
-        st.session_state["pipe_filt_statuts"]   = [s for s in STATUTS_ACTIFS if s in _dyn_statuts]
-    if "pipe_filt_fonds"   not in st.session_state:
-        st.session_state["pipe_filt_fonds"]     = []
-    if "pipe_filt_regions" not in st.session_state:
-        st.session_state["pipe_filt_regions"]   = []
-    if "pipe_filt_countries" not in st.session_state:
-        st.session_state["pipe_filt_countries"] = []
-
-    tp_filt, tp_reset, tp_spacer = st.columns([1, 1, 6])
+    # ── Filtres ───────────────────────────────────────────────────────────────
+    tp_filt, tp_spacer = st.columns([1, 7])
     with tp_filt:
-        if st.button("Filtres ▾" if not st.session_state.get("pipe_show_filters") else "Filtres ▴",
-                     key="pipe_filt_toggle", use_container_width=True, type="secondary"):
+        if st.button("Filtres", key="pipe_filt_toggle", use_container_width=True, type="secondary"):
             st.session_state["pipe_show_filters"] = not st.session_state.get("pipe_show_filters", False)
-    with tp_reset:
-        if st.button("Réinitialiser", key="pipe_filt_reset", use_container_width=True, type="secondary"):
-            st.session_state["pipe_filt_statuts"]   = [s for s in STATUTS_ACTIFS if s in _dyn_statuts]
-            st.session_state["pipe_filt_fonds"]     = []
-            st.session_state["pipe_filt_regions"]   = []
-            st.session_state["pipe_filt_countries"] = []
-            st.rerun()
 
     if st.session_state.get("pipe_show_filters", False):
+        _dyn = db.get_dynamic_filters()
+        _dyn_statuts  = _dyn.get("statuts", STATUTS)
+        _dyn_fonds    = _dyn.get("fonds",   FONDS)
+        _dyn_regions  = _dyn.get("regions", REGIONS)
+        _default_statuts = [s for s in STATUTS_ACTIFS if s in _dyn_statuts]
         fc1, fc2, fc3, fc4 = st.columns(4)
-        with fc1:
-            st.multiselect("Statuts", _dyn_statuts,
-                           default=st.session_state["pipe_filt_statuts"],
-                           key="pipe_filt_statuts")
-        with fc2:
-            st.multiselect("Fonds", _dyn_fonds,
-                           default=st.session_state["pipe_filt_fonds"],
-                           key="pipe_filt_fonds")
-        with fc3:
-            st.multiselect("Régions", _dyn_regions,
-                           default=st.session_state["pipe_filt_regions"],
-                           key="pipe_filt_regions")
-        with fc4:
-            st.multiselect("Pays", COUNTRIES_LIST[1:],
-                           default=st.session_state["pipe_filt_countries"],
-                           key="pipe_filt_countries")
-
-    # Lire les valeurs actives depuis session_state (persistent)
-    filt_statuts   = st.session_state["pipe_filt_statuts"]
-    filt_fonds     = st.session_state["pipe_filt_fonds"]
-    filt_regions   = st.session_state["pipe_filt_regions"]
-    filt_countries = st.session_state["pipe_filt_countries"]
+        with fc1: filt_statuts = st.multiselect("Statuts", _dyn_statuts,
+                                                 default=_default_statuts,
+                                                 key="pipe_filt_statuts")
+        with fc2: filt_fonds   = st.multiselect("Fonds",   _dyn_fonds,
+                                                 key="pipe_filt_fonds")
+        with fc3: filt_regions = st.multiselect("Régions", _dyn_regions,
+                                                 key="pipe_filt_regions")
+        with fc4: filt_countries = st.multiselect("Pays", COUNTRIES_LIST[1:],
+                                                   key="pipe_filt_countries")
+    else:
+        filt_statuts   = STATUTS_ACTIFS
+        filt_fonds     = []
+        filt_regions   = []
+        filt_countries = []
 
     df_pipe_full = db.get_pipeline_with_last_activity()
     df_view      = df_pipe_full.copy()
@@ -2221,21 +2194,9 @@ with tab_pipeline:
     if filt_regions:   df_view = df_view[df_view["region"].isin(filt_regions)]
     if filt_countries: df_view = df_view[df_view["country"].isin(filt_countries)]
 
-    # Badges filtres actifs
-    _active_badges = []
-    if filt_statuts   != [s for s in STATUTS_ACTIFS if s in _dyn_statuts]: _active_badges += filt_statuts
-    _active_badges += filt_fonds + filt_regions + filt_countries
-    _badge_html = "".join(
-        '<span style="background:#019ee122;border:1px solid #019ee155;color:#001c4b;'
-        'padding:1px 8px;font-size:0.68rem;font-weight:600;margin:2px;">{}</span>'.format(b)
-        for b in _active_badges
-    )
-    st.markdown(
-        '<div style="min-height:22px;margin:4px 0 6px 0;">{badges}'
-        '<span style="color:#888;font-size:0.75rem;margin-left:6px;">'
-        '<b>{n}</b> deal(s) affiché(s)</span></div>'.format(
-            badges=_badge_html, n=len(df_view)),
-        unsafe_allow_html=True)
+    st.markdown('<div class="pipeline-hint">Sélectionnez une ligne puis cliquez'
+                ' "Modifier le deal sélectionné" — <b>{} deal(s)</b> affiché(s)</div>'.format(len(df_view)),
+                unsafe_allow_html=True)
 
     df_display = df_view.copy()
     df_display["next_action_date"] = df_display["next_action_date"].apply(
@@ -2274,103 +2235,42 @@ with tab_pipeline:
             "derniere_activite":   st.column_config.TextColumn("Dernière Activité"),
         }, key="pipeline_ro")
 
-    # ── Sélection + actions — multi-row natif ────────────────────────────────
+    # ── Cross-tab safe selection: row index stored locally, dialog only on button click
     selected_rows = event.selection.rows if event.selection else []
+    _pipe_selected_id = None
+    if selected_rows and selected_rows[0] < len(df_view):
+        _pipe_selected_id = int(df_view.iloc[selected_rows[0]]["id"])
+        st.session_state["pipe_last_selected_id"] = _pipe_selected_id
 
-    # Collecter les IDs sélectionnés (multi)
-    _pipe_sel_ids = []
-    for _sr in selected_rows:
-        if _sr < len(df_view):
-            _pipe_sel_ids.append(int(df_view.iloc[_sr]["id"]))
-
-    # Persister le dernier ID unique pour l'édition
-    if len(_pipe_sel_ids) == 1:
-        st.session_state["pipe_last_selected_id"] = _pipe_sel_ids[0]
-    elif len(_pipe_sel_ids) > 1:
-        st.session_state.pop("pipe_last_selected_id", None)
-
-    if _pipe_sel_ids:
-        # Barre d'actions contextuelle
-        _nb_sel = len(_pipe_sel_ids)
-        _ac1, _ac2, _ac3 = st.columns([4, 1, 1])
-        with _ac1:
-            _labels = []
-            for _sid in _pipe_sel_ids[:3]:
-                _r = df_view[df_view["id"] == _sid]
-                if not _r.empty:
-                    _labels.append(str(_r.iloc[0]["nom_client"]))
-            _lbl_str = ", ".join(_labels)
-            if _nb_sel > 3:
-                _lbl_str += " +{}".format(_nb_sel - 3)
-            st.markdown(
-                '<div style="padding:6px 0;font-size:0.78rem;color:#001c4b;">'
-                '<b>{}</b> deal(s) sélectionné(s) : <span style="color:#019ee1;">{}</span>'
-                '</div>'.format(_nb_sel, _lbl_str),
-                unsafe_allow_html=True)
-        with _ac2:
-            if _nb_sel == 1:
-                if st.button("✏ Modifier", key="pipe_open_dialog_btn",
-                             use_container_width=True, type="secondary"):
-                    _row = db.get_pipeline_row_by_id(_pipe_sel_ids[0])
+    # Show which deal is selected + edit button — dialog ONLY fires on explicit click
+    _current_sel = st.session_state.get("pipe_last_selected_id")
+    if _current_sel is not None:
+        _sel_row_data = df_view[df_view["id"] == _current_sel]
+        if not _sel_row_data.empty:
+            _sn = str(_sel_row_data.iloc[0].get("nom_client",""))
+            _sf = str(_sel_row_data.iloc[0].get("fonds",""))
+            _ss = str(_sel_row_data.iloc[0].get("statut",""))
+            _hint_col, _btn_col = st.columns([3, 1])
+            with _hint_col:
+                st.markdown(
+                    '<div class="pipeline-hint" style="margin:6px 0;">'
+                    'Deal sélectionné : <b>{}</b> &nbsp;·&nbsp; {} &nbsp;·&nbsp; {}</div>'.format(
+                        _sn, _sf, _ss),
+                    unsafe_allow_html=True)
+            with _btn_col:
+                if st.button("Modifier le deal sélectionné", key="pipe_open_dialog_btn",
+                             type="tertiary", use_container_width=True):
+                    _row = db.get_pipeline_row_by_id(_current_sel)
                     if _row:
-                        dialog_edit_pipeline(_pipe_sel_ids[0], _row)
-        with _ac3:
-            if st.button("🗑 Supprimer ({})".format(_nb_sel),
-                         key="pipe_mass_del_btn",
-                         use_container_width=True, type="secondary"):
-                st.session_state["pipe_mass_del_ids"] = _pipe_sel_ids[:]
-
-        # Confirmation suppression
-        if st.session_state.get("pipe_mass_del_ids"):
-            _to_del = st.session_state["pipe_mass_del_ids"]
-            st.error(
-                "⚠️ Supprimer définitivement {} deal(s) et leur historique d'audit ?".format(len(_to_del))
-            )
-            _conf1, _conf2, _conf_sp = st.columns([1, 1, 6])
-            with _conf1:
-                if st.button("✔ Confirmer", key="pipe_mass_del_yes", type="primary"):
-                    _errs = []
-                    for _did in _to_del:
-                        _ok, _e = db.delete_pipeline_row(_did)
-                        if not _ok:
-                            _errs.append(str(_e))
-                    st.session_state.pop("pipe_mass_del_ids", None)
-                    st.session_state.pop("pipe_last_selected_id", None)
-                    if _errs:
-                        st.error("Erreurs : " + " | ".join(_errs))
-                    else:
-                        st.success("{} deal(s) supprimé(s).".format(len(_to_del)))
-                    st.rerun()
-            with _conf2:
-                if st.button("✖ Annuler", key="pipe_mass_del_no"):
-                    st.session_state.pop("pipe_mass_del_ids", None)
-                    st.rerun()
-    else:
-        # Rien sélectionné — hint discret
-        _current_sel = st.session_state.get("pipe_last_selected_id")
-        if _current_sel is not None:
-            _sd = df_view[df_view["id"] == _current_sel]
-            if not _sd.empty:
-                _sc1, _sc2 = st.columns([4, 1])
-                with _sc1:
-                    st.markdown(
-                        '<div style="padding:6px 0;font-size:0.78rem;color:#888;">'
-                        'Dernier sélectionné : <b style="color:#001c4b;">{}</b> · {}</div>'.format(
-                            _sd.iloc[0]["nom_client"], _sd.iloc[0]["fonds"]),
-                        unsafe_allow_html=True)
-                with _sc2:
-                    if st.button("✏ Modifier", key="pipe_open_dialog_btn",
-                                 use_container_width=True, type="secondary"):
-                        _row = db.get_pipeline_row_by_id(_current_sel)
-                        if _row:
-                            dialog_edit_pipeline(_current_sel, _row)
-            else:
-                st.session_state.pop("pipe_last_selected_id", None)
+                        dialog_edit_pipeline(_current_sel, _row)
         else:
-            st.markdown(
-                '<div style="color:#aaa;font-size:0.75rem;padding:6px 0;">'
-                'Cliquez sur une ligne pour l\'éditer · Sélectionnez plusieurs lignes pour la suppression groupée.</div>',
-                unsafe_allow_html=True)
+            # Deal no longer exists (was deleted) — clear selection
+            st.session_state.pop("pipe_last_selected_id", None)
+    else:
+        st.markdown(
+            '<div style="color:#888;font-size:0.78rem;padding:6px 0 2px 0;">'
+            'Sélectionnez une ligne pour activer l\'édition.</div>',
+            unsafe_allow_html=True)
 
     st.divider()
     df_viz_raw = db.get_pipeline_with_clients()
