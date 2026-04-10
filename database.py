@@ -819,7 +819,8 @@ def get_kpis(fonds_filter=None):
     c.execute("SELECT c2.type_client, COALESCE(SUM(p.funded_aum),0) FROM pipeline p JOIN clients c2 ON c2.id=p.client_id WHERE p.statut='Funded' " + fonds_sql + " GROUP BY c2.type_client", fonds_params)
     aum_by_type = {r[0]: float(r[1]) for r in c.fetchall()}
 
-    c.execute("SELECT c2.nom_client, c2.type_client, c2.region, p.fonds, p.funded_aum, p.sales_owner FROM pipeline p JOIN clients c2 ON c2.id=p.client_id WHERE p.statut='Funded' AND p.funded_aum > 0 " + fonds_sql + " ORDER BY p.funded_aum DESC LIMIT 10", fonds_params)
+    # top_deals : Funded uniquement, funded_aum > 0, EXCLUT Paused et sans statut
+    c.execute("SELECT c2.nom_client, c2.type_client, c2.region, p.fonds, p.funded_aum, p.sales_owner FROM pipeline p JOIN clients c2 ON c2.id=p.client_id WHERE p.statut='Funded' AND p.funded_aum > 0 AND p.statut != '' " + fonds_sql + " ORDER BY p.funded_aum DESC LIMIT 10", fonds_params)
     top_deals = [{k: (float(v) if k == "funded_aum" else str(v)) for k, v in dict(r).items()} for r in c.fetchall()]
 
     c.execute("SELECT c2.nom_client, c2.type_client, c2.region, p.fonds, p.funded_aum, p.sales_owner FROM pipeline p JOIN clients c2 ON c2.id=p.client_id WHERE p.statut='Redeemed' AND p.funded_aum > 0 " + fonds_sql + " ORDER BY p.funded_aum DESC LIMIT 10", fonds_params)
@@ -1201,6 +1202,9 @@ def get_mailing_list(regions=None, countries=None, tiers=None, product_interests
     )
     df = pd.read_sql_query(query, conn)
     conn.close()
+    # Validation email basique : doit contenir @ et un point après
+    if not df.empty and "email" in df.columns:
+        df = df[df["email"].str.contains(r"@.+\.", na=False, regex=True)]
     if regions:
         df = df[df["region"].isin(regions)]
     if countries:
@@ -1212,6 +1216,56 @@ def get_mailing_list(regions=None, countries=None, tiers=None, product_interests
             return any(p.strip() in pi_str for p in product_interests)
         df = df[df["product_interests"].apply(_has_interest)]
     return df.reset_index(drop=True)
+
+
+def detect_import_duplicates(df):
+    """
+    Analyse un DataFrame d'import et retourne un rapport de doublons potentiels.
+    Détecte :
+      - Lignes identiques (même nom_client + fonds)
+      - Noms très similaires (distance 1 caractère) — champs potentiellement inversés
+    Retourne un dict { "exact": [...], "fuzzy": [...] }
+    """
+    report = {"exact": [], "fuzzy": []}
+    df = df.copy()
+    df.columns = [col.lower().strip() for col in df.columns]
+
+    # Normalise le nom client (colonne canonique ou variantes courantes)
+    nom_col = None
+    for c in ["nom_client", "client", "company", "compte"]:
+        if c in df.columns:
+            nom_col = c
+            break
+    if nom_col is None:
+        return report
+
+    noms = df[nom_col].dropna().astype(str).str.strip().tolist()
+
+    # 1. Doublons exacts (même nom dans le fichier)
+    seen = {}
+    for i, n in enumerate(noms):
+        key = n.lower()
+        if key in seen:
+            report["exact"].append({
+                "ligne_1": seen[key] + 2,  # +2 : header + 0-index
+                "ligne_2": i + 2,
+                "valeur": n
+            })
+        else:
+            seen[key] = i
+
+    # 2. Similarité forte : même longueur ±1 et première lettre identique (champs inversés)
+    noms_uniq = list(seen.keys())
+    for i in range(len(noms_uniq)):
+        for j in range(i + 1, len(noms_uniq)):
+            a, b = noms_uniq[i], noms_uniq[j]
+            # Heuristique rapide : même début + longueur proche
+            if (abs(len(a) - len(b)) <= 3
+                    and a[:3] == b[:3]
+                    and a != b):
+                report["fuzzy"].append({"nom_1": a, "nom_2": b})
+
+    return report
 
 
 def upsert_clients_from_df(df):
