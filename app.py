@@ -2211,66 +2211,141 @@ with tab_pipeline:
     if "closing_probability" in df_display.columns:
         df_display["closing_probability"] = df_display["closing_probability"].fillna(50)
 
-    cols_show = ["id","nom_client","type_client","region","country","fonds","statut",
+    cols_edit = ["id","nom_client","type_client","region","country","fonds","statut",
                  "aum_pipeline_fmt","funded_aum_fmt",
                  "closing_probability","raison_perte","next_action_date","sales_owner","derniere_activite"]
 
-    event = st.dataframe(
-        df_display[cols_show], use_container_width=True, height=400, hide_index=True,
-        on_select="rerun", selection_mode="multi-row",
+    event = st.data_editor(
+        df_display[cols_edit], use_container_width=True, height=400, hide_index=True,
+        num_rows="fixed",
         column_config={
-            "id":                  st.column_config.NumberColumn("ID", width="small"),
-            "nom_client":          st.column_config.TextColumn("Client"),
-            "type_client":         st.column_config.TextColumn("Type", width="small"),
-            "region":              st.column_config.TextColumn("Region", width="small"),
-            "country":             st.column_config.TextColumn("Pays", width="small"),
-            "fonds":               st.column_config.TextColumn("Fonds"),
-            "statut":              st.column_config.TextColumn("Statut"),
-            "aum_pipeline_fmt":    st.column_config.TextColumn("AUM Pipeline"),
-            "funded_aum_fmt":      st.column_config.TextColumn("AUM Financé"),
-            "raison_perte":        st.column_config.TextColumn("Raison"),
+            "id":                  st.column_config.NumberColumn("ID", width="small", disabled=True),
+            "nom_client":          st.column_config.TextColumn("Client", disabled=True),
+            "type_client":         st.column_config.TextColumn("Type", width="small", disabled=True),
+            "region":              st.column_config.TextColumn("Region", width="small", disabled=True),
+            "country":             st.column_config.TextColumn("Pays", width="small", disabled=True),
+            "fonds":               st.column_config.SelectboxColumn("Fonds", options=FONDS),
+            "statut":              st.column_config.SelectboxColumn("Statut", options=STATUTS),
+            "aum_pipeline_fmt":    st.column_config.TextColumn("AUM Pipeline", disabled=True),
+            "funded_aum_fmt":      st.column_config.TextColumn("AUM Financé", disabled=True),
+            "raison_perte":        st.column_config.SelectboxColumn("Raison",
+                                       options=[""] + RAISONS_PERTE),
             "next_action_date":    st.column_config.TextColumn("Next Action"),
             "sales_owner":         st.column_config.TextColumn("Commercial"),
-            "closing_probability": st.column_config.NumberColumn("Proba %", format="%.0f%%", width="small"),
-            "derniere_activite":   st.column_config.TextColumn("Dernière Activité"),
-        }, key="pipeline_ro")
+            "closing_probability": st.column_config.NumberColumn("Proba %", format="%.0f%%",
+                                       width="small", min_value=0, max_value=100, step=5),
+            "derniere_activite":   st.column_config.TextColumn("Dernière Activité", disabled=True),
+            "_select":             st.column_config.CheckboxColumn("Sél.", default=False),
+        }, key="pipeline_editor")
 
-    # ── Cross-tab safe selection: row index stored locally, dialog only on button click
-    selected_rows = event.selection.rows if event.selection else []
-    _pipe_selected_id = None
-    if selected_rows and selected_rows[0] < len(df_view):
-        _pipe_selected_id = int(df_view.iloc[selected_rows[0]]["id"])
-        st.session_state["pipe_last_selected_id"] = _pipe_selected_id
+    _edited_df = event
+    _changed_rows = []
+    for idx in range(len(_edited_df)):
+        orig = df_display[cols_edit].iloc[idx] if idx < len(df_display) else None
+        if orig is None:
+            continue
+        ed = _edited_df.iloc[idx]
+        changed = False
+        for c in ["statut", "fonds", "closing_probability", "raison_perte",
+                   "next_action_date", "sales_owner"]:
+            if c in ed.index and c in orig.index:
+                if str(ed[c]) != str(orig[c]):
+                    changed = True
+                    break
+        if changed:
+            _changed_rows.append(idx)
 
-    # Show which deal is selected + edit button — dialog ONLY fires on explicit click
-    _current_sel = st.session_state.get("pipe_last_selected_id")
-    if _current_sel is not None:
-        _sel_row_data = df_view[df_view["id"] == _current_sel]
-        if not _sel_row_data.empty:
-            _sn = str(_sel_row_data.iloc[0].get("nom_client",""))
-            _sf = str(_sel_row_data.iloc[0].get("fonds",""))
-            _ss = str(_sel_row_data.iloc[0].get("statut",""))
-            _hint_col, _btn_col = st.columns([3, 1])
-            with _hint_col:
-                st.markdown(
-                    '<div class="pipeline-hint" style="margin:6px 0;">'
-                    'Deal sélectionné : <b>{}</b> &nbsp;·&nbsp; {} &nbsp;·&nbsp; {}</div>'.format(
-                        _sn, _sf, _ss),
-                    unsafe_allow_html=True)
-            with _btn_col:
-                if st.button("Modifier le deal sélectionné", key="pipe_open_dialog_btn",
-                             type="tertiary", use_container_width=True):
-                    _row = db.get_pipeline_row_by_id(_current_sel)
-                    if _row:
-                        dialog_edit_pipeline(_current_sel, _row)
-        else:
-            # Deal no longer exists (was deleted) — clear selection
+    if _changed_rows:
+        if st.button("Sauvegarder les modifications ({} ligne(s))".format(len(_changed_rows)),
+                     key="pipe_save_edits", type="primary", use_container_width=True):
+            _save_ok, _save_err = 0, 0
+            for idx in _changed_rows:
+                ed = _edited_df.iloc[idx]
+                pid = int(df_display.iloc[idx]["id"])
+                _orig_row = db.get_pipeline_row_by_id(pid)
+                if not _orig_row:
+                    _save_err += 1
+                    continue
+                _update_data = dict(_orig_row)
+                _update_data["id"] = pid
+                if "statut" in ed.index:
+                    _update_data["statut"] = str(ed["statut"])
+                if "fonds" in ed.index:
+                    _update_data["fonds"] = str(ed["fonds"])
+                if "closing_probability" in ed.index:
+                    try:
+                        _update_data["closing_probability"] = float(ed["closing_probability"])
+                    except (ValueError, TypeError):
+                        pass
+                if "raison_perte" in ed.index:
+                    _update_data["raison_perte"] = str(ed["raison_perte"]) if ed["raison_perte"] else ""
+                if "next_action_date" in ed.index and str(ed["next_action_date"]).strip():
+                    _update_data["next_action_date"] = str(ed["next_action_date"]).strip()
+                if "sales_owner" in ed.index and str(ed["sales_owner"]).strip():
+                    _update_data["sales_owner"] = str(ed["sales_owner"]).strip()
+                ok, msg = db.update_pipeline_row(_update_data)
+                if ok:
+                    _save_ok += 1
+                else:
+                    _save_err += 1
+                    st.warning("Deal #{} : {}".format(pid, msg))
+            if _save_ok:
+                st.success("{} deal(s) mis à jour.".format(_save_ok))
+            if _save_err:
+                st.error("{} erreur(s) lors de la sauvegarde.".format(_save_err))
+            if _save_ok:
+                st.rerun()
+
+    st.markdown("<br>", unsafe_allow_html=True)
+
+    # ── Massive Delete — select rows via checkboxes ────────────────────────
+    _sel_for_delete = st.multiselect(
+        "Sélectionner des deals à supprimer (par ID)",
+        options=df_display["id"].tolist(),
+        format_func=lambda x: "#{} — {}".format(
+            x, df_display[df_display["id"] == x]["nom_client"].values[0]
+            if len(df_display[df_display["id"] == x]) > 0 else "?"),
+        key="pipe_mass_delete_select",
+        placeholder="Choisir les deals à supprimer..."
+    )
+    if _sel_for_delete:
+        st.warning("{} deal(s) sélectionné(s) pour suppression.".format(len(_sel_for_delete)))
+        _del_c1, _del_c2, _ = st.columns([1, 1, 4])
+        with _del_c1:
+            if st.button("Supprimer définitivement", key="pipe_mass_delete_btn",
+                         type="primary", use_container_width=True):
+                st.session_state["pipe_mass_del_confirm"] = True
+        with _del_c2:
+            if st.button("Annuler", key="pipe_mass_delete_cancel",
+                         use_container_width=True):
+                st.session_state.pop("pipe_mass_del_confirm", None)
+
+        if st.session_state.get("pipe_mass_del_confirm"):
+            deleted = db.delete_pipeline_rows(_sel_for_delete)
+            st.success("{} deal(s) supprimé(s).".format(deleted))
+            st.session_state.pop("pipe_mass_del_confirm", None)
             st.session_state.pop("pipe_last_selected_id", None)
-    else:
-        st.markdown(
-            '<div style="color:#888;font-size:0.78rem;padding:6px 0 2px 0;">'
-            'Sélectionnez une ligne pour activer l\'édition.</div>',
-            unsafe_allow_html=True)
+            st.rerun()
+
+    # ── Single deal selection for dialog edit ──────────────────────────────
+    _single_sel_id = st.selectbox(
+        "Modifier un deal spécifique",
+        options=[None] + df_display["id"].tolist(),
+        format_func=lambda x: "— Sélectionner —" if x is None else "#{} — {} · {}".format(
+            x,
+            df_display[df_display["id"] == x]["nom_client"].values[0]
+            if len(df_display[df_display["id"] == x]) > 0 else "?",
+            df_display[df_display["id"] == x]["fonds"].values[0]
+            if len(df_display[df_display["id"] == x]) > 0 else "?"),
+        key="pipe_single_select",
+        label_visibility="collapsed"
+    )
+    if _single_sel_id is not None:
+        if st.button("Modifier le deal sélectionné", key="pipe_open_dialog_btn",
+                     type="tertiary", use_container_width=True):
+            _row = db.get_pipeline_row_by_id(_single_sel_id)
+            if _row:
+                dialog_edit_pipeline(_single_sel_id, _row)
 
     st.divider()
     df_viz_raw = db.get_pipeline_with_clients()
@@ -3330,10 +3405,12 @@ with tab_settings:
                 dialog_add_activity()
 
     with sa_col2:
-        st.markdown("#### Import CSV / Excel — Upsert")
-        import_type   = st.radio("Table cible", ["Clients","Pipeline"], horizontal=True)
+        st.markdown("#### Import CSV / Excel — Smart Staging")
+        import_type   = st.radio("Table cible", ["Clients","Pipeline"], horizontal=True,
+                                  key="settings_import_type")
         uploaded_file = st.file_uploader("Fichier CSV ou Excel (.xlsx)",
-                                         type=["csv","xlsx","xls"])
+                                         type=["csv","xlsx","xls"],
+                                         key="settings_file_uploader")
         if import_type == "Clients":
             st.info("Colonnes : nom_client, type_client, region")
         else:
@@ -3342,34 +3419,132 @@ with tab_settings:
                 "target_aum_initial, revised_aum, funded_aum, closing_probability, "
                 "raison_perte, concurrent_choisi, next_action_date, sales_owner"
             )
+
         if uploaded_file:
             try:
-                df_imp = (pd.read_csv(uploaded_file) if uploaded_file.name.endswith(".csv")
-                          else pd.read_excel(uploaded_file))
-                st.dataframe(df_imp.head(5), use_container_width=True, height=145)
-                st.caption("{} ligne(s)".format(len(df_imp)))
+                _file_key = "staging_{}_{}".format(uploaded_file.name, uploaded_file.size)
+                if st.session_state.get("_staging_file_key") != _file_key:
+                    _df_raw = (pd.read_csv(uploaded_file) if uploaded_file.name.endswith(".csv")
+                               else pd.read_excel(uploaded_file))
+                    _df_raw.columns = [c.strip() for c in _df_raw.columns]
+                    st.session_state["_staging_file_key"] = _file_key
+                    st.session_state["_staging_df"] = _df_raw
+                    st.session_state.pop("_staging_validated", None)
 
-                # ── Détection doublons avant import ──────────────────────────
-                if import_type == "Pipeline":
-                    _dup_report = db.detect_import_duplicates(df_imp)
-                    _dup_exact  = _dup_report.get("exact", [])
-                    _dup_fuzzy  = _dup_report.get("fuzzy", [])
-                    if _dup_exact:
-                        _dup_msg = "**{} doublon(s) exact(s)** : ".format(len(_dup_exact))
-                        for _d in _dup_exact[:5]:
-                            _dup_msg += "  L.{} & L.{} : {} ".format(_d["ligne_1"], _d["ligne_2"], _d["valeur"])
-                        st.warning(_dup_msg)
-                    if _dup_fuzzy:
-                        with st.expander("{} doublon(s) potentiel(s) (noms similaires)".format(
-                                len(_dup_fuzzy))):
-                            for d in _dup_fuzzy[:10]:
-                                st.markdown("- `{}` ↔ `{}`".format(d["nom_1"], d["nom_2"]))
+                df_staging = st.session_state.get("_staging_df")
+                if df_staging is not None:
+                    if import_type == "Pipeline":
+                        _ALLOWED_STATUTS = STATUTS
+                        _ALLOWED_FONDS   = FONDS
 
-                if st.button("Lancer l'import", key="settings_btn_import", use_container_width=True):
-                    fn = (db.upsert_clients_from_df if import_type == "Clients"
-                          else db.upsert_pipeline_from_df)
-                    ins, upd = fn(df_imp)
-                    st.success("Import : {} créé(s), {} mis à jour.".format(ins, upd))
+                        df_check = df_staging.copy()
+                        _col_map_lower = {c.lower(): c for c in df_check.columns}
+                        _fonds_col  = _col_map_lower.get("fonds",
+                                       _col_map_lower.get("fund",
+                                       _col_map_lower.get("produit", None)))
+                        _statut_col = _col_map_lower.get("statut",
+                                       _col_map_lower.get("status",
+                                       _col_map_lower.get("stage",
+                                       _col_map_lower.get("etape", None))))
+
+                        errors_list = []
+                        for idx in range(len(df_check)):
+                            row_errors = []
+                            if _fonds_col:
+                                val = str(df_check.at[idx, _fonds_col]).strip()
+                                if val and val != "nan" and val not in _ALLOWED_FONDS:
+                                    row_errors.append("Fonds '{}' inconnu".format(val))
+                            if _statut_col:
+                                val = str(df_check.at[idx, _statut_col]).strip()
+                                if val and val != "nan" and val not in _ALLOWED_STATUTS:
+                                    row_errors.append("Statut '{}' inconnu".format(val))
+                            errors_list.append("; ".join(row_errors))
+                        df_check["Errors"] = errors_list
+
+                        _dup_report = db.detect_import_duplicates(df_staging)
+                        _dup_exact  = _dup_report.get("exact", [])
+                        _dup_fuzzy  = _dup_report.get("fuzzy", [])
+                        if _dup_exact:
+                            _dup_msg = "**{} doublon(s) exact(s)** : ".format(len(_dup_exact))
+                            for _d in _dup_exact[:5]:
+                                _dup_msg += "  L.{} & L.{} : {} ".format(
+                                    _d["ligne_1"], _d["ligne_2"], _d["valeur"])
+                            st.warning(_dup_msg)
+                        if _dup_fuzzy:
+                            with st.expander("{} doublon(s) potentiel(s) (noms similaires)".format(
+                                    len(_dup_fuzzy))):
+                                for d in _dup_fuzzy[:10]:
+                                    st.markdown("- `{}` ↔ `{}`".format(d["nom_1"], d["nom_2"]))
+
+                        _has_errors = any(e != "" for e in errors_list)
+                        _err_count  = sum(1 for e in errors_list if e != "")
+                        if _has_errors:
+                            st.warning("{} ligne(s) avec erreurs. Corrigez-les ci-dessous avant d'importer.".format(
+                                _err_count))
+
+                        _fonds_options = _ALLOWED_FONDS
+                        _statut_options = _ALLOWED_STATUTS
+                        _col_config_staging = {}
+                        if _fonds_col:
+                            _col_config_staging[_fonds_col] = st.column_config.SelectboxColumn(
+                                "Fonds", options=_fonds_options, required=True)
+                        if _statut_col:
+                            _col_config_staging[_statut_col] = st.column_config.SelectboxColumn(
+                                "Statut", options=_statut_options, required=True)
+                        _col_config_staging["Errors"] = st.column_config.TextColumn(
+                            "Errors", disabled=True)
+
+                        edited_staging = st.data_editor(
+                            df_check,
+                            use_container_width=True,
+                            hide_index=False,
+                            num_rows="fixed",
+                            column_config=_col_config_staging,
+                            key="staging_editor")
+
+                        _edited_no_err = edited_staging.copy()
+                        _new_errors = []
+                        for idx in range(len(_edited_no_err)):
+                            row_errors = []
+                            if _fonds_col:
+                                val = str(_edited_no_err.at[idx, _fonds_col]).strip()
+                                if val and val != "nan" and val not in _ALLOWED_FONDS:
+                                    row_errors.append("Fonds '{}' inconnu".format(val))
+                            if _statut_col:
+                                val = str(_edited_no_err.at[idx, _statut_col]).strip()
+                                if val and val != "nan" and val not in _ALLOWED_STATUTS:
+                                    row_errors.append("Statut '{}' inconnu".format(val))
+                            _new_errors.append("; ".join(row_errors))
+                        _still_has_errors = any(e != "" for e in _new_errors)
+
+                        st.caption("{} ligne(s) totale(s)".format(len(edited_staging)))
+
+                        if _still_has_errors:
+                            st.button("Confirmer & Importer", disabled=True,
+                                      key="settings_btn_confirm_disabled",
+                                      use_container_width=True,
+                                      help="Corrigez toutes les erreurs avant d'importer")
+                        else:
+                            if st.button("Confirmer & Importer",
+                                         key="settings_btn_confirm_import",
+                                         use_container_width=True, type="primary"):
+                                _df_to_import = edited_staging.drop(columns=["Errors"], errors="ignore")
+                                st.session_state["_staging_df"] = _df_to_import
+                                ins, upd = db.upsert_pipeline_from_df(_df_to_import)
+                                st.success("Import : {} créé(s), {} mis à jour.".format(ins, upd))
+                                st.session_state.pop("_staging_file_key", None)
+                                st.session_state.pop("_staging_df", None)
+
+                    else:
+                        st.dataframe(df_staging.head(10), use_container_width=True, height=200)
+                        st.caption("{} ligne(s)".format(len(df_staging)))
+                        if st.button("Lancer l'import Clients",
+                                     key="settings_btn_import_clients",
+                                     use_container_width=True, type="primary"):
+                            ins, upd = db.upsert_clients_from_df(df_staging)
+                            st.success("Import : {} créé(s), {} mis à jour.".format(ins, upd))
+                            st.session_state.pop("_staging_file_key", None)
+                            st.session_state.pop("_staging_df", None)
             except Exception as e:
                 st.error("Erreur : {}".format(e))
 

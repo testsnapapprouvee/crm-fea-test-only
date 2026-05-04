@@ -1214,6 +1214,61 @@ def get_mailing_list(regions=None, countries=None, tiers=None, product_interests
     return df.reset_index(drop=True)
 
 
+def detect_import_duplicates(df):
+    """Detect exact and fuzzy duplicate client names in an import DataFrame."""
+    df = df.copy()
+    df.columns = [col.lower().strip() for col in df.columns]
+    col = "nom_client" if "nom_client" in df.columns else (
+        "client" if "client" in df.columns else (
+        "company" if "company" in df.columns else None))
+    if col is None:
+        return {"exact": [], "fuzzy": []}
+    names = df[col].dropna().astype(str).str.strip().tolist()
+    exact = []
+    seen = {}
+    for idx, n in enumerate(names, start=1):
+        key = n.lower()
+        if key in seen:
+            exact.append({"ligne_1": seen[key], "ligne_2": idx, "valeur": n})
+        else:
+            seen[key] = idx
+    fuzzy = []
+    unique_names = list(dict.fromkeys(n.strip() for n in names if n.strip()))
+    for i in range(len(unique_names)):
+        for j in range(i + 1, len(unique_names)):
+            a, b = unique_names[i].lower(), unique_names[j].lower()
+            if a != b and (a in b or b in a or _simple_ratio(a, b) > 0.85):
+                fuzzy.append({"nom_1": unique_names[i], "nom_2": unique_names[j]})
+    return {"exact": exact, "fuzzy": fuzzy}
+
+
+def _simple_ratio(a, b):
+    """Simple similarity ratio based on common characters."""
+    if not a or not b:
+        return 0.0
+    common = sum(1 for c in a if c in b)
+    return 2.0 * common / (len(a) + len(b))
+
+
+def delete_pipeline_rows(pipeline_ids):
+    """Delete multiple pipeline rows and their audit logs in one transaction."""
+    if not pipeline_ids:
+        return 0
+    try:
+        conn = get_connection()
+        c = conn.cursor()
+        placeholders = ",".join("?" * len(pipeline_ids))
+        ids = [int(pid) for pid in pipeline_ids]
+        c.execute("DELETE FROM audit_log WHERE pipeline_id IN ({})".format(placeholders), ids)
+        c.execute("DELETE FROM pipeline WHERE id IN ({})".format(placeholders), ids)
+        deleted = c.rowcount
+        conn.commit()
+        conn.close()
+        return deleted
+    except Exception:
+        return 0
+
+
 def upsert_clients_from_df(df):
     inserted, updated = 0, 0
     conn = get_connection()
