@@ -2194,14 +2194,14 @@ with tab_pipeline:
     if filt_regions:   df_view = df_view[df_view["region"].isin(filt_regions)]
     if filt_countries: df_view = df_view[df_view["country"].isin(filt_countries)]
 
-    st.markdown('<div class="pipeline-hint">Sélectionnez une ligne puis cliquez'
-                ' "Modifier le deal sélectionné" — <b>{} deal(s)</b> affiché(s)</div>'.format(len(df_view)),
+    st.markdown('<div class="pipeline-hint">'
+                '<b>{} deal(s)</b> affiché(s) — éditez directement dans le tableau, '
+                'cochez 🗑️ pour supprimer, puis cliquez <b>Sauvegarder</b></div>'.format(len(df_view)),
                 unsafe_allow_html=True)
 
     df_display = df_view.copy()
     df_display["next_action_date"] = df_display["next_action_date"].apply(
         lambda d: d.isoformat() if isinstance(d, date) else "")
-    # Smart AUM: single column AUM_Pipeline for active deals, funded_aum for Funded
     df_display["aum_pipeline"] = df_display.apply(
         lambda r: float(r["funded_aum"]) if r["statut"] == "Funded"
         else (float(r["revised_aum"]) if float(r["revised_aum"]) > 0
@@ -2211,14 +2211,20 @@ with tab_pipeline:
     if "closing_probability" in df_display.columns:
         df_display["closing_probability"] = df_display["closing_probability"].fillna(50)
 
-    cols_edit = ["id","nom_client","type_client","region","country","fonds","statut",
-                 "aum_pipeline_fmt","funded_aum_fmt",
-                 "closing_probability","raison_perte","next_action_date","sales_owner","derniere_activite"]
+    df_display.insert(0, "\U0001f5d1\ufe0f Delete", False)
 
-    event = st.data_editor(
-        df_display[cols_edit], use_container_width=True, height=400, hide_index=True,
-        num_rows="fixed",
+    _cols_for_editor = ["\U0001f5d1\ufe0f Delete",
+                        "id","nom_client","type_client","region","country",
+                        "fonds","statut","aum_pipeline_fmt","funded_aum_fmt",
+                        "closing_probability","raison_perte",
+                        "next_action_date","sales_owner","derniere_activite"]
+
+    edited_df = st.data_editor(
+        df_display[_cols_for_editor],
+        use_container_width=True, height=400, hide_index=True, num_rows="fixed",
         column_config={
+            "\U0001f5d1\ufe0f Delete":  st.column_config.CheckboxColumn("\U0001f5d1\ufe0f", default=False,
+                                            width="small"),
             "id":                  st.column_config.NumberColumn("ID", width="small", disabled=True),
             "nom_client":          st.column_config.TextColumn("Client", disabled=True),
             "type_client":         st.column_config.TextColumn("Type", width="small", disabled=True),
@@ -2228,124 +2234,96 @@ with tab_pipeline:
             "statut":              st.column_config.SelectboxColumn("Statut", options=STATUTS),
             "aum_pipeline_fmt":    st.column_config.TextColumn("AUM Pipeline", disabled=True),
             "funded_aum_fmt":      st.column_config.TextColumn("AUM Financé", disabled=True),
+            "closing_probability": st.column_config.NumberColumn("Proba %", format="%.0f%%",
+                                       width="small", min_value=0, max_value=100, step=5),
             "raison_perte":        st.column_config.SelectboxColumn("Raison",
                                        options=[""] + RAISONS_PERTE),
             "next_action_date":    st.column_config.TextColumn("Next Action"),
             "sales_owner":         st.column_config.TextColumn("Commercial"),
-            "closing_probability": st.column_config.NumberColumn("Proba %", format="%.0f%%",
-                                       width="small", min_value=0, max_value=100, step=5),
             "derniere_activite":   st.column_config.TextColumn("Dernière Activité", disabled=True),
-            "_select":             st.column_config.CheckboxColumn("Sél.", default=False),
         }, key="pipeline_editor")
 
-    _edited_df = event
-    _changed_rows = []
-    for idx in range(len(_edited_df)):
-        orig = df_display[cols_edit].iloc[idx] if idx < len(df_display) else None
-        if orig is None:
+    _del_col = "\U0001f5d1\ufe0f Delete"
+    _ids_to_delete = []
+    _rows_to_update = []
+    _orig_df = df_display[_cols_for_editor]
+
+    for idx in range(len(edited_df)):
+        if idx >= len(_orig_df):
+            break
+        row_ed   = edited_df.iloc[idx]
+        row_orig = _orig_df.iloc[idx]
+        pid      = int(row_orig["id"])
+
+        if row_ed[_del_col]:
+            _ids_to_delete.append(pid)
             continue
-        ed = _edited_df.iloc[idx]
+
         changed = False
         for c in ["statut", "fonds", "closing_probability", "raison_perte",
                    "next_action_date", "sales_owner"]:
-            if c in ed.index and c in orig.index:
-                if str(ed[c]) != str(orig[c]):
-                    changed = True
-                    break
+            if str(row_ed.get(c, "")) != str(row_orig.get(c, "")):
+                changed = True
+                break
         if changed:
-            _changed_rows.append(idx)
+            _rows_to_update.append((pid, row_ed))
 
-    if _changed_rows:
-        if st.button("Sauvegarder les modifications ({} ligne(s))".format(len(_changed_rows)),
-                     key="pipe_save_edits", type="primary", use_container_width=True):
-            _save_ok, _save_err = 0, 0
-            for idx in _changed_rows:
-                ed = _edited_df.iloc[idx]
-                pid = int(df_display.iloc[idx]["id"])
-                _orig_row = db.get_pipeline_row_by_id(pid)
-                if not _orig_row:
-                    _save_err += 1
-                    continue
-                _update_data = dict(_orig_row)
-                _update_data["id"] = pid
-                if "statut" in ed.index:
-                    _update_data["statut"] = str(ed["statut"])
-                if "fonds" in ed.index:
-                    _update_data["fonds"] = str(ed["fonds"])
-                if "closing_probability" in ed.index:
-                    try:
-                        _update_data["closing_probability"] = float(ed["closing_probability"])
-                    except (ValueError, TypeError):
-                        pass
-                if "raison_perte" in ed.index:
-                    _update_data["raison_perte"] = str(ed["raison_perte"]) if ed["raison_perte"] else ""
-                if "next_action_date" in ed.index and str(ed["next_action_date"]).strip():
-                    _update_data["next_action_date"] = str(ed["next_action_date"]).strip()
-                if "sales_owner" in ed.index and str(ed["sales_owner"]).strip():
-                    _update_data["sales_owner"] = str(ed["sales_owner"]).strip()
-                ok, msg = db.update_pipeline_row(_update_data)
-                if ok:
-                    _save_ok += 1
-                else:
-                    _save_err += 1
-                    st.warning("Deal #{} : {}".format(pid, msg))
-            if _save_ok:
-                st.success("{} deal(s) mis à jour.".format(_save_ok))
-            if _save_err:
-                st.error("{} erreur(s) lors de la sauvegarde.".format(_save_err))
-            if _save_ok:
-                st.rerun()
+    _n_actions = len(_ids_to_delete) + len(_rows_to_update)
+    _btn_label = "Sauvegarder les modifications"
+    if _n_actions > 0:
+        _parts = []
+        if _rows_to_update:
+            _parts.append("{} modif.".format(len(_rows_to_update)))
+        if _ids_to_delete:
+            _parts.append("{} suppr.".format(len(_ids_to_delete)))
+        _btn_label += " ({})".format(" + ".join(_parts))
 
-    st.markdown("<br>", unsafe_allow_html=True)
+    if st.button(_btn_label, key="pipe_save_all", type="primary",
+                 use_container_width=True, disabled=(_n_actions == 0)):
+        _ok_del, _ok_upd, _err = 0, 0, 0
 
-    # ── Massive Delete — select rows via checkboxes ────────────────────────
-    _sel_for_delete = st.multiselect(
-        "Sélectionner des deals à supprimer (par ID)",
-        options=df_display["id"].tolist(),
-        format_func=lambda x: "#{} — {}".format(
-            x, df_display[df_display["id"] == x]["nom_client"].values[0]
-            if len(df_display[df_display["id"] == x]) > 0 else "?"),
-        key="pipe_mass_delete_select",
-        placeholder="Choisir les deals à supprimer..."
-    )
-    if _sel_for_delete:
-        st.warning("{} deal(s) sélectionné(s) pour suppression.".format(len(_sel_for_delete)))
-        _del_c1, _del_c2, _ = st.columns([1, 1, 4])
-        with _del_c1:
-            if st.button("Supprimer définitivement", key="pipe_mass_delete_btn",
-                         type="primary", use_container_width=True):
-                st.session_state["pipe_mass_del_confirm"] = True
-        with _del_c2:
-            if st.button("Annuler", key="pipe_mass_delete_cancel",
-                         use_container_width=True):
-                st.session_state.pop("pipe_mass_del_confirm", None)
+        if _ids_to_delete:
+            _ok_del = db.delete_pipeline_rows(_ids_to_delete)
 
-        if st.session_state.get("pipe_mass_del_confirm"):
-            deleted = db.delete_pipeline_rows(_sel_for_delete)
-            st.success("{} deal(s) supprimé(s).".format(deleted))
-            st.session_state.pop("pipe_mass_del_confirm", None)
-            st.session_state.pop("pipe_last_selected_id", None)
+        for pid, row_ed in _rows_to_update:
+            _orig_row = db.get_pipeline_row_by_id(pid)
+            if not _orig_row:
+                _err += 1
+                continue
+            _upd = dict(_orig_row)
+            _upd["id"] = pid
+            for c in ["statut", "fonds"]:
+                _upd[c] = str(row_ed.get(c, _upd.get(c, "")))
+            try:
+                _upd["closing_probability"] = float(row_ed.get("closing_probability",
+                                                                _upd.get("closing_probability", 50)))
+            except (ValueError, TypeError):
+                pass
+            _upd["raison_perte"] = str(row_ed.get("raison_perte", "")) or ""
+            _nad = str(row_ed.get("next_action_date", "")).strip()
+            if _nad:
+                _upd["next_action_date"] = _nad
+            _so = str(row_ed.get("sales_owner", "")).strip()
+            if _so:
+                _upd["sales_owner"] = _so
+            ok, msg = db.update_pipeline_row(_upd)
+            if ok:
+                _ok_upd += 1
+            else:
+                _err += 1
+                st.warning("Deal #{} : {}".format(pid, msg))
+
+        _msgs = []
+        if _ok_upd:
+            _msgs.append("{} mis à jour".format(_ok_upd))
+        if _ok_del:
+            _msgs.append("{} supprimé(s)".format(_ok_del))
+        if _msgs:
+            st.success(" · ".join(_msgs))
+        if _err:
+            st.error("{} erreur(s).".format(_err))
+        if _ok_upd or _ok_del:
             st.rerun()
-
-    # ── Single deal selection for dialog edit ──────────────────────────────
-    _single_sel_id = st.selectbox(
-        "Modifier un deal spécifique",
-        options=[None] + df_display["id"].tolist(),
-        format_func=lambda x: "— Sélectionner —" if x is None else "#{} — {} · {}".format(
-            x,
-            df_display[df_display["id"] == x]["nom_client"].values[0]
-            if len(df_display[df_display["id"] == x]) > 0 else "?",
-            df_display[df_display["id"] == x]["fonds"].values[0]
-            if len(df_display[df_display["id"] == x]) > 0 else "?"),
-        key="pipe_single_select",
-        label_visibility="collapsed"
-    )
-    if _single_sel_id is not None:
-        if st.button("Modifier le deal sélectionné", key="pipe_open_dialog_btn",
-                     type="tertiary", use_container_width=True):
-            _row = db.get_pipeline_row_by_id(_single_sel_id)
-            if _row:
-                dialog_edit_pipeline(_single_sel_id, _row)
 
     st.divider()
     df_viz_raw = db.get_pipeline_with_clients()
