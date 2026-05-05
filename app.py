@@ -858,6 +858,194 @@ button[kind="primary"]:hover {
 
 
 # ---------------------------------------------------------------------------
+# CSS — Meridian premium UI (mockup revolut_crm_dashboard_v2)
+# Layered on top of existing styles; introduces DM Sans + premium card system
+# ---------------------------------------------------------------------------
+st.markdown("""
+<style>
+@import url('https://fonts.googleapis.com/css2?family=DM+Sans:opsz,wght@9..40,300;9..40,400;9..40,500;9..40,600;9..40,700;9..40,800&display=swap');
+
+/* Apply DM Sans globally inside Streamlit */
+html, body, .stApp, .main, .block-container, [class*="css"],
+[data-testid="stAppViewContainer"] *, [data-testid="stMarkdownContainer"] * {
+    font-family: 'DM Sans', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif !important;
+}
+
+.stApp { background: #F0F2F5 !important; }
+.main .block-container {
+    background: transparent !important;
+    padding-top: 1.5rem !important;
+    max-width: 1320px !important;
+}
+
+/* ── Meridian header (greeting + live badge) ── */
+.mer-hdr {
+    display:flex; align-items:flex-start; justify-content:space-between;
+    margin: 4px 0 22px;
+}
+.mer-hdr-title {
+    font-size: 24px; font-weight: 800; color: #111827;
+    letter-spacing: -0.5px; line-height: 1.1;
+}
+.mer-hdr-date {
+    font-size: 12px; color: #9CA3AF; font-weight: 400; margin-top: 4px;
+}
+.mer-live-badge {
+    display: inline-flex; align-items: center; gap: 7px;
+    background: #001c4b; color: #fff;
+    font-size: 11px; font-weight: 600;
+    padding: 7px 14px; border-radius: 50px;
+}
+.mer-live-dot {
+    width: 7px; height: 7px; border-radius: 50%;
+    background: #019ee1; animation: mer-pulse 2s infinite;
+}
+@keyframes mer-pulse {
+    0%,100% { opacity: 1; transform: scale(1); }
+    50%     { opacity: .6; transform: scale(1.3); }
+}
+
+/* ── Premium KPI cards (.kcard) ── */
+.kcard {
+    background: #fff; border-radius: 18px;
+    padding: 20px;
+    border: 0.5px solid rgba(0,0,0,.04);
+    transition: transform .15s, box-shadow .15s;
+    height: 100%;
+}
+.kcard:hover {
+    transform: translateY(-1px);
+    box-shadow: 0 8px 28px rgba(0,0,0,.07);
+}
+.kc-lbl {
+    font-size: 10.5px; font-weight: 500; color: #9CA3AF;
+    text-transform: uppercase; letter-spacing: .8px; margin-bottom: 10px;
+}
+.kc-val {
+    font-size: 28px; font-weight: 800; color: #111827;
+    letter-spacing: -1.2px; line-height: 1;
+}
+.kc-unit {
+    font-size: 13px; font-weight: 500; color: #9CA3AF; letter-spacing: -.2px;
+}
+.kc-delta {
+    display: inline-flex; align-items: center; gap: 3px;
+    font-size: 11px; font-weight: 600; margin-top: 9px;
+    padding: 3px 9px; border-radius: 50px;
+}
+.kc-delta.up { background: #ECFDF5; color: #059669; }
+.kc-delta.dn { background: #FEF2F2; color: #DC2626; }
+.spark {
+    display: flex; align-items: flex-end; gap: 2.5px;
+    margin-top: 12px; height: 24px;
+}
+.spark .sb { flex: 1; border-radius: 2px 2px 0 0; background: #E5E7EB; }
+.spark .sb.on { background: #001c4b; }
+
+/* ── Meridian alert banner ── */
+.mer-alert {
+    display: flex; align-items: center; gap: 12px;
+    background: #FFF7ED; border: 1px solid #FED7AA;
+    border-radius: 14px; padding: 12px 16px; margin-bottom: 18px;
+}
+.mer-alert-ico { font-size: 16px; }
+.mer-alert-txt { font-size: 12.5px; font-weight: 500; color: #92400E; flex: 1; }
+.mer-alert-txt b { color: #78350F; font-weight: 700; }
+
+/* ── Generic .card container (for sections) ── */
+.mer-card {
+    background: #fff; border-radius: 18px; padding: 20px;
+    border: 0.5px solid rgba(0,0,0,.04);
+    transition: transform .15s, box-shadow .15s;
+}
+.mer-card:hover {
+    transform: translateY(-1px);
+    box-shadow: 0 8px 28px rgba(0,0,0,.07);
+}
+.mer-sec-title {
+    font-size: 15px; font-weight: 700; color: #111827;
+    letter-spacing: -.2px; margin-bottom: 14px;
+}
+.mer-sec-sub { font-size: 11px; color: #9CA3AF; font-weight: 400; margin-left: 6px; }
+
+/* ── Override Streamlit tabs to match Meridian "pill" nav ── */
+.stTabs [data-baseweb="tab-list"] {
+    background: transparent !important;
+    border-bottom: 1.5px solid #E5E7EB !important;
+    gap: 0 !important;
+    padding-left: 0 !important;
+}
+.stTabs [data-baseweb="tab"] {
+    background: transparent !important;
+    color: #9CA3AF !important;
+    font-weight: 600 !important;
+    font-size: 12px !important;
+    padding: 9px 16px !important;
+    border: none !important;
+    border-bottom: 2.5px solid transparent !important;
+    margin-bottom: -1.5px !important;
+    border-radius: 0 !important;
+    transition: color .15s, border-color .15s !important;
+}
+.stTabs [data-baseweb="tab"]:hover {
+    color: #374151 !important;
+    background: transparent !important;
+}
+.stTabs [aria-selected="true"] {
+    background: transparent !important;
+    color: #111827 !important;
+    border-bottom-color: #001c4b !important;
+}
+
+/* ── Override Streamlit dataframe/data_editor to match mockup ── */
+[data-testid="stDataFrame"], [data-testid="stDataEditor"] {
+    border-radius: 14px !important;
+    overflow: hidden !important;
+    border: 0.5px solid rgba(0,0,0,.05) !important;
+}
+[data-testid="stDataFrame"] thead th,
+[data-testid="stDataEditor"] thead th {
+    background: #F9FAFB !important;
+    color: #6B7280 !important;
+    font-weight: 600 !important;
+    font-size: 11px !important;
+    text-transform: uppercase !important;
+    letter-spacing: .5px !important;
+    border-bottom: 1px solid #E5E7EB !important;
+}
+[data-testid="stDataFrame"] tbody td,
+[data-testid="stDataEditor"] tbody td {
+    font-size: 12.5px !important;
+    color: #111827 !important;
+}
+
+/* ── Quick-action button row ── */
+.qb-row { display:grid; grid-template-columns:repeat(4,1fr); gap:9px; margin-bottom:18px; }
+.qb {
+    background: #fff; border-radius: 14px; padding: 14px 10px;
+    text-align: center; border: 0.5px solid rgba(0,0,0,.05);
+    cursor: pointer; transition: transform .15s, box-shadow .15s;
+}
+.qb:hover { transform: translateY(-2px); box-shadow: 0 6px 20px rgba(0,0,0,.08); }
+.qb-ico { font-size: 18px; margin-bottom: 7px; }
+.qb-lbl { font-size: 11.5px; font-weight: 600; color: #374151; }
+
+/* ── Footer ── */
+.mer-footer {
+    display:flex; align-items:center; justify-content:space-between;
+    border-top: 1px solid #E5E7EB; padding-top: 16px; margin: 22px 0 4px;
+}
+.mer-ft-brand { font-size: 12.5px; font-weight: 700; color: #001c4b; }
+.mer-ft-meta {
+    font-size: 11px; color: #D1D5DB; font-weight: 500;
+    display: flex; gap: 20px;
+}
+.mer-ft-live { color: #019ee1; }
+</style>
+""", unsafe_allow_html=True)
+
+
+# ---------------------------------------------------------------------------
 # INIT DB
 # ---------------------------------------------------------------------------
 @st.cache_resource
@@ -2855,49 +3043,75 @@ with tab_dash:
 
     nb_lost_paused = kpis["nb_lost"] + kpis.get("nb_paused", 0)
 
-    card_lp = (
-        '<div class="kpi-card kpi-card-static">'
-        '<div class="kpi-label">Lost / Paused Deals</div>'
-        '<div class="kpi-value">{n}</div>'
-        '<div class="kpi-sub">{n} deals</div>'
-        '</div>'
-    ).format(n=nb_lost_paused) if nb_lost_paused > 0 else (
-        '<div class="kpi-card kpi-card-static">'
-        '<div class="kpi-label">Lost / Paused Deals</div>'
-        '<div class="kpi-value">0</div>'
-        '<div class="kpi-sub">&nbsp;</div>'
-        '</div>'
-    )
+    # ── Meridian header bar (greeting + live badge) ─────────────────────
+    _today_fr_days = ["Dimanche","Lundi","Mardi","Mercredi","Jeudi","Vendredi","Samedi"]
+    _today_fr_months = ["janvier","février","mars","avril","mai","juin",
+                         "juillet","août","septembre","octobre","novembre","décembre"]
+    _td = date.today()
+    _today_label = "{} {} {} {} · Asset Management CRM".format(
+        _today_fr_days[(_td.weekday() + 1) % 7], _td.day,
+        _today_fr_months[_td.month - 1], _td.year)
+    _nb_active_markets = kpis.get("nb_deals_actifs", 0)
     st.markdown(
-        '<div class="kpi-grid">'
-        '<div class="kpi-card kpi-card-static">'
-        '<div class="kpi-label">Total Funded AUM</div>'
-        '<div class="kpi-value">{aum_f}</div>'
-        '<div class="kpi-sub">{nb_f} deal(s) funded</div>'
+        '<div class="mer-hdr">'
+        '<div>'
+        '<div class="mer-hdr-title">Executive Dashboard</div>'
+        '<div class="mer-hdr-date">{date}</div>'
         '</div>'
-        '<div class="kpi-card kpi-card-static">'
-        '<div class="kpi-label">Active Pipeline</div>'
-        '<div class="kpi-value">{aum_p}</div>'
-        '<div class="kpi-sub">{nb_p} active deals</div>'
-        '</div>'
-        '<div class="kpi-card kpi-card-static">'
-        '<div class="kpi-label">Weighted Pipeline</div>'
-        '<div class="kpi-value">{wp}</div>'
-        '<div class="kpi-sub">probability-weighted</div>'
-        '</div>'
-        '<div class="kpi-card kpi-card-static">'
-        '<div class="kpi-label">Conversion Rate</div>'
-        '<div class="kpi-value">{taux:.1f}%</div>'
-        '<div class="kpi-sub">{nb_f2} funded / {nb_l} lost</div>'
-        '</div>'
-        '{card_lp}'
-        '</div>'.format(
-            aum_f=fmt_m(kpis["total_funded"]), nb_f=kpis["nb_funded"],
-            aum_p=fmt_m(kpis["pipeline_actif"]), nb_p=kpis["nb_deals_actifs"],
-            wp=fmt_m(kpis.get("weighted_pipeline", 0)),
-            taux=kpis["taux_conversion"], nb_f2=kpis["nb_funded"], nb_l=kpis["nb_lost"],
-            card_lp=card_lp),
+        '<div class="mer-live-badge"><div class="mer-live-dot"></div>'
+        'Live · {n} deals actifs</div>'
+        '</div>'.format(date=_today_label, n=_nb_active_markets),
         unsafe_allow_html=True)
+
+    # ── Overdue alert banner ─────────────────────────────────────────────
+    _df_overdue_count = db.get_overdue_actions(fonds_filter=_filtre_effectif)
+    _nb_overdue = len(_df_overdue_count) if not _df_overdue_count.empty else 0
+    if _nb_overdue > 0:
+        _sample_clients = ", ".join(
+            _df_overdue_count.head(2)["nom_client"].astype(str).tolist())
+        _extra = ""
+        if _nb_overdue > 2:
+            _extra = " et {} autre(s)".format(_nb_overdue - 2)
+        st.markdown(
+            '<div class="mer-alert">'
+            '<div class="mer-alert-ico">⚡</div>'
+            '<div class="mer-alert-txt"><b>{n} action(s) en retard</b> — '
+            '{clients}{extra} nécessitent votre attention.</div>'
+            '</div>'.format(n=_nb_overdue, clients=_sample_clients, extra=_extra),
+            unsafe_allow_html=True)
+
+    # ── Premium 4-KPI row using st.columns(4) + .kcard markup ───────────
+    _kc_cards = [
+        ("AUM Financé Total", fmt_m(kpis["total_funded"]),
+         "{} deal(s) funded".format(kpis["nb_funded"]), "up"),
+        ("Pipeline Actif", fmt_m(kpis["pipeline_actif"]),
+         "{} deals actifs".format(kpis["nb_deals_actifs"]), "up"),
+        ("Pipeline Pondéré", fmt_m(kpis.get("weighted_pipeline", 0)),
+         "probabilité-pondéré", "up"),
+        ("Taux de Conversion", "{:.1f} %".format(kpis["taux_conversion"]),
+         "{} funded / {} lost".format(kpis["nb_funded"], kpis["nb_lost"]), "up"),
+    ]
+    _kpi_cols = st.columns(4)
+    for _kc_idx, (_lbl, _val, _sub, _delta_dir) in enumerate(_kc_cards):
+        with _kpi_cols[_kc_idx]:
+            _spark = "".join(
+                '<div class="sb{cls}" style="height:{h}px"></div>'.format(
+                    cls=" on" if i == 6 else "",
+                    h=[10, 13, 12, 16, 14, 20, 24][i])
+                for i in range(7))
+            _val_parts = _val.split(" ", 1)
+            _val_main = _val_parts[0] if _val_parts else _val
+            _val_unit = _val_parts[1] if len(_val_parts) > 1 else ""
+            st.markdown(
+                '<div class="kcard">'
+                '<div class="kc-lbl">{lbl}</div>'
+                '<div class="kc-val">{val_main} <span class="kc-unit">{unit}</span></div>'
+                '<div class="kc-delta {dir}">{sub}</div>'
+                '<div class="spark">{spark}</div>'
+                '</div>'.format(
+                    lbl=_lbl, val_main=_val_main, unit=_val_unit,
+                    sub=_sub, dir=_delta_dir, spark=_spark),
+                unsafe_allow_html=True)
 
     st.markdown("<br>", unsafe_allow_html=True)
 
