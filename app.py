@@ -16,6 +16,7 @@ from pptx import Presentation
 from pptx.util import Inches, Pt, Emu
 from pptx.dml.color import RGBColor
 from pptx.enum.text import PP_ALIGN
+from streamlit_agraph import agraph, Node, Edge, Config
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
@@ -1958,6 +1959,7 @@ with tab_crm:
                     # PPTX export → Universal Export Hub in sidebar
 
                     # ── Corporate Structure block ─────────────────────────
+                    _grp_summary = db.get_client_group_summary(sel_id)
                     has_struct = sel_par or filiales
                     if has_struct:
                         st.markdown(
@@ -2005,6 +2007,83 @@ with tab_crm:
                                               ciel=CIEL, aum_grp=aum_grp),
                                 unsafe_allow_html=True)
 
+                    # ── Network Graph (Pappers-style) ────────────────────
+                    _net = db.get_client_network(sel_id)
+                    _net_nodes = []
+                    _net_edges = []
+                    _seen_funds = set()
+                    if _net.get("root"):
+                        _root = _net["root"]
+                        _is_root = (_root["id"] == sel_id)
+                        _net_nodes.append(Node(
+                            id="c_{}".format(_root["id"]),
+                            label=_root["nom"],
+                            size=30,
+                            color=MARINE,
+                            font={"color": "#ffffff", "size": 12, "bold": True},
+                            shape="dot",
+                        ))
+                        for sub in _net.get("subsidiaries", []):
+                            _net_nodes.append(Node(
+                                id="c_{}".format(sub["id"]),
+                                label=sub["nom_client"],
+                                size=20,
+                                color=CIEL,
+                                font={"color": MARINE, "size": 10},
+                                shape="dot",
+                            ))
+                            _net_edges.append(Edge(
+                                source="c_{}".format(_root["id"]),
+                                target="c_{}".format(sub["id"]),
+                                color="#cccccc", width=1.5,
+                            ))
+                        for fl in _net.get("fund_links", []):
+                            fund_id = "f_{}".format(fl["fonds"].replace(" ", "_"))
+                            if fund_id not in _seen_funds:
+                                _seen_funds.add(fund_id)
+                                _net_nodes.append(Node(
+                                    id=fund_id,
+                                    label=fl["fonds"],
+                                    size=15,
+                                    color=ORANGE,
+                                    font={"color": MARINE, "size": 9},
+                                    shape="diamond",
+                                ))
+                            _edge_color = ORANGE if fl["statut"] == "Funded" else "#cccccc"
+                            _edge_style = {"strokeDasharray": ""} if fl["statut"] == "Funded" else {}
+                            _net_edges.append(Edge(
+                                source="c_{}".format(fl["client_id"]),
+                                target=fund_id,
+                                color=_edge_color,
+                                width=2 if fl["statut"] == "Funded" else 1,
+                                dashes=fl["statut"] != "Funded",
+                            ))
+
+                    if _net_nodes:
+                        st.markdown(
+                            '<div style="font-size:0.72rem;font-weight:700;color:{m};'
+                            'text-transform:uppercase;letter-spacing:0.6px;'
+                            'margin:14px 0 6px 0;border-bottom:1px solid #001c4b15;padding-bottom:3px;">'
+                            'Network Graph</div>'.format(m=MARINE),
+                            unsafe_allow_html=True)
+                        _graph_cfg = Config(
+                            width="100%", height=300,
+                            directed=False,
+                            physics=True,
+                            hierarchical=False,
+                            nodeHighlightBehavior=True,
+                            highlightColor=CIEL,
+                            collapsible=False,
+                        )
+                        agraph(nodes=_net_nodes, edges=_net_edges, config=_graph_cfg)
+                        st.markdown(
+                            '<div style="font-size:0.65rem;color:#999;margin-top:2px;">'
+                            '<span style="color:{m};">●</span> Parent &nbsp;'
+                            '<span style="color:{c};">●</span> Filiale &nbsp;'
+                            '<span style="color:{o};">◆</span> Fonds</div>'.format(
+                                m=MARINE, c=CIEL, o=ORANGE),
+                            unsafe_allow_html=True)
+
                     # ── Activités Récentes ────────────────────────────────
                     st.markdown(
                         '<div style="display:flex;align-items:center;justify-content:space-between;'
@@ -2038,6 +2117,120 @@ with tab_crm:
                     if st.button("+ Enregistrer une activité", key="crm_add_act_{}".format(sel_id),
                                  type="tertiary"):
                         dialog_add_activity(preselect_client_id=sel_id)
+
+                # ── Client-Specific Pipeline Editor ──────────────────────
+                st.markdown(
+                    '<div style="font-size:0.72rem;font-weight:700;color:{m};'
+                    'text-transform:uppercase;letter-spacing:0.6px;'
+                    'margin:18px 0 8px 0;border-bottom:1px solid #001c4b15;padding-bottom:3px;">'
+                    'Pipeline — {nom}</div>'.format(m=MARINE, nom=sel_nom),
+                    unsafe_allow_html=True)
+                _df_client_pipe = db.get_pipeline_with_clients().copy()
+                _df_client_pipe = _df_client_pipe[_df_client_pipe["client_id"] == sel_id].reset_index(drop=True)
+                if _df_client_pipe.empty:
+                    st.markdown(
+                        '<div style="color:#888;font-size:0.78rem;padding:6px 0;">'
+                        'Aucun deal dans le pipeline pour ce client.</div>',
+                        unsafe_allow_html=True)
+                    if st.button("+ Nouveau deal", key="crm_pipe_new_{}".format(sel_id),
+                                 type="tertiary"):
+                        dialog_add_deal(preselect_client_id=sel_id)
+                else:
+                    _df_cp_edit = _df_client_pipe.copy()
+                    _df_cp_edit["next_action_date"] = _df_cp_edit["next_action_date"].apply(
+                        lambda d: d.isoformat() if isinstance(d, date) else "")
+                    _df_cp_edit["aum_m"] = _df_cp_edit.apply(
+                        lambda r: round(float(r["funded_aum"]) / 1e6, 2) if r["statut"] == "Funded"
+                        else round((float(r["revised_aum"]) if float(r["revised_aum"]) > 0
+                              else float(r["target_aum_initial"])) / 1e6, 2), axis=1)
+                    if "closing_probability" in _df_cp_edit.columns:
+                        _df_cp_edit["closing_probability"] = _df_cp_edit["closing_probability"].fillna(50)
+
+                    _cp_cols = ["id", "fonds", "statut", "aum_m",
+                                "closing_probability", "next_action_date", "sales_owner"]
+                    _cp_edited = st.data_editor(
+                        _df_cp_edit[_cp_cols],
+                        use_container_width=True,
+                        hide_index=True,
+                        num_rows="fixed",
+                        height=min(250, 46 + len(_df_cp_edit) * 36),
+                        column_config={
+                            "id":                  st.column_config.NumberColumn("ID", width="small", disabled=True),
+                            "fonds":               st.column_config.SelectboxColumn("Fonds", options=FONDS),
+                            "statut":              st.column_config.SelectboxColumn("Statut", options=STATUTS),
+                            "aum_m":               st.column_config.NumberColumn("AUM (M€)", format="%.2f",
+                                                       min_value=0.0, step=1.0),
+                            "closing_probability": st.column_config.NumberColumn("Proba %", format="%.0f%%",
+                                                       width="small", min_value=0, max_value=100, step=5),
+                            "next_action_date":    st.column_config.TextColumn("Next Action"),
+                            "sales_owner":         st.column_config.TextColumn("Commercial"),
+                        },
+                        key="crm_client_pipe_editor_{}".format(sel_id))
+
+                    _cp_changes = []
+                    _cp_orig = _df_cp_edit[_cp_cols]
+                    for idx in range(len(_cp_edited)):
+                        if idx >= len(_cp_orig):
+                            break
+                        ed = _cp_edited.iloc[idx]
+                        orig = _cp_orig.iloc[idx]
+                        for c in ["statut", "fonds", "aum_m", "closing_probability",
+                                   "next_action_date", "sales_owner"]:
+                            if str(ed.get(c, "")) != str(orig.get(c, "")):
+                                _cp_changes.append(idx)
+                                break
+
+                    _cp_btn_c1, _cp_btn_c2 = st.columns([3, 1])
+                    with _cp_btn_c1:
+                        _cp_label = "Sauvegarder les deals du client"
+                        if _cp_changes:
+                            _cp_label += " ({})".format(len(_cp_changes))
+                        if st.button(_cp_label, key="crm_pipe_save_{}".format(sel_id),
+                                     type="primary", use_container_width=True,
+                                     disabled=(len(_cp_changes) == 0)):
+                            _cp_ok, _cp_err = 0, 0
+                            for idx in _cp_changes:
+                                ed = _cp_edited.iloc[idx]
+                                pid = int(_cp_orig.iloc[idx]["id"])
+                                _orig_row = db.get_pipeline_row_by_id(pid)
+                                if not _orig_row:
+                                    _cp_err += 1
+                                    continue
+                                _upd = dict(_orig_row)
+                                _upd["id"] = pid
+                                for c in ["statut", "fonds"]:
+                                    _upd[c] = str(ed.get(c, _upd.get(c, "")))
+                                try:
+                                    _upd["closing_probability"] = float(ed.get("closing_probability", 50))
+                                except (ValueError, TypeError):
+                                    pass
+                                _nad = str(ed.get("next_action_date", "")).strip()
+                                if _nad:
+                                    _upd["next_action_date"] = _nad
+                                _so = str(ed.get("sales_owner", "")).strip()
+                                if _so:
+                                    _upd["sales_owner"] = _so
+                                _new_aum = float(ed.get("aum_m", 0)) * 1e6
+                                if _orig_row["statut"] == "Funded" or str(ed.get("statut", "")) == "Funded":
+                                    _upd["funded_aum"] = _new_aum
+                                else:
+                                    _upd["revised_aum"] = _new_aum
+                                ok, msg = db.update_pipeline_row(_upd)
+                                if ok:
+                                    _cp_ok += 1
+                                else:
+                                    _cp_err += 1
+                                    st.warning("Deal #{}: {}".format(pid, msg))
+                            if _cp_ok:
+                                st.success("{} deal(s) mis à jour.".format(_cp_ok))
+                            if _cp_err:
+                                st.error("{} erreur(s).".format(_cp_err))
+                            if _cp_ok:
+                                st.rerun()
+                    with _cp_btn_c2:
+                        if st.button("+ Deal", key="crm_pipe_add_{}".format(sel_id),
+                                     type="tertiary", use_container_width=True):
+                            dialog_add_deal(preselect_client_id=sel_id)
 
                 # ════════════════════════════════════════════════════════
                 # COLONNE DROITE — Contacts

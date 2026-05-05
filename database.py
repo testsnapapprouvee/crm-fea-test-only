@@ -971,6 +971,9 @@ def add_pipeline_entry(client_id, fonds, statut, target_aum, revised_aum,
     fa = float(funded_aum or 0)
     if statut == "Funded" and fa == 0:
         fa = float(revised_aum or 0)
+    _owner = (sales_owner or "").strip()
+    if not _owner or _owner == "Non assigne":
+        _owner = auto_assign_sales_owner(conn, client_id)
     c.execute(
         "INSERT INTO pipeline (client_id, fonds, statut, target_aum_initial, revised_aum, funded_aum,"
         " raison_perte, concurrent_choisi, next_action_date, sales_owner, closing_probability)"
@@ -979,7 +982,7 @@ def add_pipeline_entry(client_id, fonds, statut, target_aum, revised_aum,
          float(target_aum or 0), float(revised_aum or 0), fa,
          raison_perte.strip() or None if raison_perte else None,
          concurrent_choisi.strip() or None if concurrent_choisi else None,
-         next_action_date, sales_owner.strip() or "Non assigne",
+         next_action_date, _owner,
          float(closing_probability or 50))
     )
     conn.commit()
@@ -1269,6 +1272,81 @@ def delete_pipeline_rows(pipeline_ids):
         return 0
 
 
+def auto_assign_sales_owner(conn, client_id):
+    """Find the best sales rep for a client based on region/country → marche mapping."""
+    c = conn.cursor()
+    c.execute(
+        "SELECT region, COALESCE(country, '') AS country FROM clients WHERE id = ?",
+        (int(client_id),))
+    row = c.fetchone()
+    if not row:
+        return "Non assigne"
+    region  = str(row["region"] or "").strip()
+    country = str(row["country"] or "").strip()
+
+    for match_val in (country, region):
+        if not match_val:
+            continue
+        c.execute(
+            "SELECT nom FROM sales_team WHERE LOWER(marche) = LOWER(?) LIMIT 1",
+            (match_val,))
+        hit = c.fetchone()
+        if hit:
+            return str(hit["nom"])
+
+    c.execute(
+        "SELECT nom FROM sales_team WHERE LOWER(marche) = 'global' LIMIT 1")
+    hit = c.fetchone()
+    if hit:
+        return str(hit["nom"])
+
+    return "Non assigne"
+
+
+def get_client_network(client_id):
+    """Build network graph data for a client: parent, siblings, subsidiaries, and fund links."""
+    conn = get_connection()
+    c = conn.cursor()
+
+    c.execute("SELECT id, nom_client, parent_id, type_client, region FROM clients WHERE id = ?",
+              (int(client_id),))
+    client = c.fetchone()
+    if not client:
+        conn.close()
+        return {"nodes": [], "edges": []}
+
+    root_id = int(client["parent_id"]) if client["parent_id"] else int(client["id"])
+
+    c.execute("SELECT id, nom_client, type_client FROM clients WHERE id = ?", (root_id,))
+    root = c.fetchone()
+    if not root:
+        root_id = int(client["id"])
+        root = client
+
+    c.execute(
+        "SELECT id, nom_client, type_client FROM clients WHERE parent_id = ? ORDER BY nom_client",
+        (root_id,))
+    subsidiaries = [dict(r) for r in c.fetchall()]
+
+    all_entity_ids = [root_id] + [s["id"] for s in subsidiaries]
+    placeholders = ",".join("?" * len(all_entity_ids))
+    c.execute(
+        "SELECT DISTINCT p.fonds, p.client_id, p.statut FROM pipeline p"
+        " WHERE p.client_id IN ({}) AND p.statut IN"
+        " ('Funded','Prospect','Initial Pitch','Due Diligence','Soft Commit')"
+        " ORDER BY p.fonds".format(placeholders),
+        all_entity_ids)
+    fund_links = [dict(r) for r in c.fetchall()]
+
+    conn.close()
+    return {
+        "root": {"id": root_id, "nom": str(root["nom_client"]), "type": str(root["type_client"])},
+        "subsidiaries": subsidiaries,
+        "fund_links": fund_links,
+        "selected_id": int(client_id),
+    }
+
+
 def upsert_clients_from_df(df):
     inserted, updated = 0, 0
     conn = get_connection()
@@ -1462,7 +1540,9 @@ def upsert_pipeline_from_df(df):
         sales  = str(row.get("sales_owner", "Non assigne") or "Non assigne").strip()
         prob   = _safe_float(row.get("closing_probability", 50), default=50.0)
 
-        # ── 4. Auto-creer le sales owner s'il est inconnu ────────────────────
+        # ── 4. Smart Auto-Assignment: resolve sales owner ─────────────────────
+        if not sales or sales == "Non assigne":
+            sales = auto_assign_sales_owner(conn, client_id)
         if sales and sales != "Non assigne":
             c.execute("SELECT id FROM sales_team WHERE nom=?", (sales,))
             if not c.fetchone():
@@ -1472,7 +1552,7 @@ def upsert_pipeline_from_df(df):
                         (sales,)
                     )
                 except Exception:
-                    pass  # Ignore les erreurs de contrainte
+                    pass
 
         # ── 5. Upsert pipeline ────────────────────────────────────────────────
         c.execute(
