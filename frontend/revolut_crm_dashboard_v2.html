@@ -4,6 +4,7 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>CRM · Meridian Capital</title>
+<script src="https://cdn.plot.ly/plotly-2.35.2.min.js" charset="utf-8"></script>
 <style>
 @import url('https://fonts.googleapis.com/css2?family=DM+Sans:opsz,wght@9..40,300;9..40,400;9..40,500;9..40,600;9..40,700;9..40,800&display=swap');
 *{font-family:'DM Sans',sans-serif;box-sizing:border-box;margin:0;padding:0;}
@@ -212,6 +213,29 @@ body{background:#F0F2F5;}
 .qb[data-action]{user-select:none;}
 .empty-state{text-align:center;padding:32px 20px;color:#9CA3AF;font-size:13px;}
 .empty-state .ico{font-size:32px;display:block;margin-bottom:8px;opacity:.5;}
+/* ── BUTTON GROUPS (segmented controls) ── */
+.btn-group{display:inline-flex;background:#F3F4F6;border-radius:10px;padding:3px;gap:2px;}
+.btn-tab{padding:6px 12px;border-radius:8px;border:none;font-size:11.5px;font-weight:600;color:#6B7280;cursor:pointer;font-family:'DM Sans',sans-serif;background:transparent;transition:background .15s,color .15s;}
+.btn-tab:hover{color:#111827;}
+.btn-tab.on{background:#001c4b;color:#fff;}
+.btn-tab.on:hover{color:#fff;}
+/* ── TOP 10 ROWS ── */
+.t10-row{display:flex;align-items:center;gap:10px;padding:9px 0;border-bottom:1px solid #F3F4F6;}
+.t10-row:last-child{border-bottom:none;}
+.t10-rank{width:28px;height:28px;border-radius:8px;background:#F3F4F6;display:flex;align-items:center;justify-content:center;font-weight:800;font-size:11px;color:#6B7280;flex-shrink:0;}
+.t10-rank.gold{background:#FEF3C7;color:#92400E;}
+.t10-rank.silver{background:#F3F4F6;color:#374151;}
+.t10-rank.bronze{background:#FDE68A;color:#78350F;opacity:.75;}
+.t10-name{font-size:13px;font-weight:600;color:#111827;}
+.t10-sub{font-size:11px;color:#9CA3AF;margin-top:2px;}
+.t10-bar{flex:1;background:#F3F4F6;border-radius:50px;height:6px;margin:0 12px;overflow:hidden;max-width:200px;}
+.t10-bar-fill{height:100%;border-radius:50px;background:linear-gradient(90deg,#001c4b,#019ee1);}
+.t10-aum{font-size:13px;font-weight:800;color:#001c4b;width:90px;text-align:right;flex-shrink:0;}
+/* ── WHITESPACE FULL MODAL ── */
+.ws-full-grid{display:grid;gap:2px;font-size:10px;}
+.ws-full-cell{padding:5px 4px;text-align:center;border-radius:4px;font-weight:600;}
+.ws-full-row-lbl{font-size:11px;font-weight:600;color:#374151;padding:5px 8px;white-space:nowrap;}
+.ws-full-col-lbl{font-size:9.5px;font-weight:700;color:#9CA3AF;text-align:center;padding:3px 2px;text-transform:uppercase;letter-spacing:.4px;}
 </style>
 </head>
 <body>
@@ -283,7 +307,7 @@ body{background:#F0F2F5;}
       <tbody id="ws-body"></tbody>
     </table>
     </div>
-    <div class="cta">Explorer le whitespace complet →</div>
+    <div class="cta" data-action="ws-full">Explorer le whitespace complet →</div>
   </div>
   <div class="card">
     <div class="sec-title">AUM par Région <span class="sec-sub">Funded</span></div>
@@ -301,19 +325,47 @@ body{background:#F0F2F5;}
 ════════════════════════════════════════════════════════ -->
 <div class="map-card">
   <div class="map-header">
-    <div class="sec-title" style="margin-bottom:0;">Cartographie Stratégique <span class="sec-sub">AUM par Pays</span></div>
-    <div class="map-coming">Plotly · Bientôt disponible</div>
+    <div class="sec-title" style="margin-bottom:0;">Cartographie Stratégique <span class="sec-sub">AUM par Pays · Funded + Pipeline actif</span></div>
+    <div id="map-badges-inline" style="display:flex;gap:6px;flex-wrap:wrap;"></div>
   </div>
-  <div class="map-card-inner">
+  <div id="choropleth-map" style="width:100%;height:420px;padding:8px 12px 12px;"></div>
+  <div id="choropleth-empty" class="map-card-inner" style="display:none;">
     <div class="map-meridian-dots"></div>
     <div class="map-icon">🗺️</div>
     <div class="map-title">Cartographie Stratégique — AUM par Pays</div>
     <div class="map-sub">
-      Visualisation interactive mondiale de la distribution des AUM par pays et région.<br>
-      Drill-down par fonds, manager et statut pipeline. Données en temps réel.
+      Aucune donnée géographique disponible.<br>
+      Ajoutez des clients avec un pays renseigné pour voir la carte.
     </div>
-    <div class="map-badge-row" id="map-badges"></div>
   </div>
+</div>
+<!-- ═══════════════════════════════════════════════════════
+     TOP 10 BI — Analyse approfondie
+════════════════════════════════════════════════════════ -->
+<div class="card" style="margin-bottom:16px;">
+  <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:14px;flex-wrap:wrap;gap:10px;">
+    <div class="sec-title" style="margin-bottom:0;">Top 10 — Analyse <span class="sec-sub" id="top10-total">— M€</span></div>
+    <div style="display:flex;gap:6px;flex-wrap:wrap;">
+      <div class="btn-group" id="top10-group">
+        <button class="btn-tab on" data-group="deal">Deals</button>
+        <button class="btn-tab" data-group="fonds">Fonds</button>
+        <button class="btn-tab" data-group="client">Clients</button>
+        <button class="btn-tab" data-group="sales">Sales</button>
+        <button class="btn-tab" data-group="region">Régions</button>
+        <button class="btn-tab" data-group="country">Pays</button>
+      </div>
+      <div style="width:1px;background:#E5E7EB;margin:0 4px;"></div>
+      <div class="btn-group" id="top10-period">
+        <button class="btn-tab on" data-period="all">All-time</button>
+        <button class="btn-tab" data-period="ytd">YTD</button>
+        <button class="btn-tab" data-period="365d">1 An</button>
+        <button class="btn-tab" data-period="180d">6 Mois</button>
+        <button class="btn-tab" data-period="90d">90j</button>
+        <button class="btn-tab" data-period="30d">30j</button>
+      </div>
+    </div>
+  </div>
+  <div id="top10-list"></div>
 </div>
 <!-- SALES TEAM -->
 <div class="bot-row" id="sales-team-row"></div>
@@ -372,9 +424,16 @@ body{background:#F0F2F5;}
           <div class="crm-360-meta" id="c360-meta">—</div>
           <div class="crm-360-badges" id="c360-badges"></div>
         </div>
-        <div style="text-align:right;flex-shrink:0;">
-          <div style="font-size:10px;text-transform:uppercase;letter-spacing:.6px;color:#9CA3AF;font-weight:500;margin-bottom:4px;">Score Relation</div>
-          <div style="font-size:26px;font-weight:800;color:#001c4b;letter-spacing:-1px;" id="c360-score">—<span style="font-size:13px;color:#9CA3AF;font-weight:400;">/100</span></div>
+        <div style="text-align:right;flex-shrink:0;display:flex;flex-direction:column;align-items:flex-end;gap:6px;">
+          <div>
+            <div style="font-size:10px;text-transform:uppercase;letter-spacing:.6px;color:#9CA3AF;font-weight:500;margin-bottom:4px;">Score Relation</div>
+            <div style="font-size:26px;font-weight:800;color:#001c4b;letter-spacing:-1px;" id="c360-score">—<span style="font-size:13px;color:#9CA3AF;font-weight:400;">/100</span></div>
+          </div>
+          <div style="display:flex;gap:6px;">
+            <button class="btn btn-ghost" data-action="edit-client" title="Modifier le client">✎ Modifier</button>
+            <button class="btn btn-ghost" data-action="delete-client" title="Supprimer le client" style="color:#DC2626;border-color:#FECACA;">🗑 Supprimer</button>
+            <button class="btn btn-primary" data-action="new-deal-for-client" title="Ajouter un deal">+ Deal</button>
+          </div>
         </div>
       </div>
       <!-- KPI strip -->
@@ -1043,13 +1102,196 @@ function renderPerfKpis(kpis, monthly) {
   }).join('');
 }
 
-/* ──────────────── MAP BADGES (placeholder) ──────────────── */
-function renderMapBadges(stats) {
-  const html = '<span class="map-badge navy">🌍 ' + (stats.nb_countries||0) + ' pays couverts</span>'
-    + '<span class="map-badge blue">📍 ' + fmtM(stats.total_aum || 0) + ' cartographiés</span>'
-    + '<span class="map-badge green">↑ Mise à jour temps réel</span>'
-    + '<span class="map-badge navy">🔗 Intégration Plotly choroplèthe</span>';
-  document.getElementById('map-badges').innerHTML = html;
+/* ──────────────── CHOROPLETH MAP (Plotly) ──────────────── */
+function renderChoropleth(payload) {
+  const countries = (payload && payload.countries) ? payload.countries.filter(c => c.iso) : [];
+  const mapEl   = document.getElementById('choropleth-map');
+  const emptyEl = document.getElementById('choropleth-empty');
+  const badgesEl = document.getElementById('map-badges-inline');
+
+  if (!countries.length) {
+    if (mapEl) mapEl.style.display = 'none';
+    if (emptyEl) emptyEl.style.display = 'flex';
+    if (badgesEl) badgesEl.innerHTML = '';
+    return;
+  }
+  if (mapEl) mapEl.style.display = 'block';
+  if (emptyEl) emptyEl.style.display = 'none';
+
+  const totalAum = countries.reduce((a, c) => a + (c.total_aum || 0), 0);
+  if (badgesEl) {
+    badgesEl.innerHTML = '<span class="map-badge navy">🌍 ' + countries.length + ' pays</span>'
+      + '<span class="map-badge blue">📍 ' + fmtM(totalAum) + '</span>'
+      + '<span class="map-badge green">● Live</span>';
+  }
+
+  if (typeof Plotly === 'undefined') {
+    mapEl.innerHTML = '<div class="empty-state">⚠ Plotly indisponible (vérifier la connexion CDN)</div>';
+    return;
+  }
+
+  const trace = {
+    type:      'choropleth',
+    locations: countries.map(c => c.iso),
+    z:         countries.map(c => c.total_aum / 1e6),
+    text:      countries.map(c =>
+      '<b>' + c.country + '</b><br>'
+      + 'Funded: ' + fmtM(c.funded_aum)
+      + '<br>Pipeline: ' + fmtM(c.pipeline_aum)
+      + '<br>Total: ' + fmtM(c.total_aum)
+      + '<br>' + c.nb_clients + ' client(s)'),
+    hovertemplate: '%{text}<extra></extra>',
+    colorscale: [
+      [0,    '#E8EDF5'],
+      [0.25, '#9EB7DC'],
+      [0.5,  '#3060A8'],
+      [0.75, '#0F3A7A'],
+      [1,    '#001c4b'],
+    ],
+    marker: {line: {color: '#fff', width: 0.6}},
+    colorbar: {
+      title: {text: 'M€', font: {size: 10, color: '#6B7280', family: 'DM Sans'}},
+      thickness: 8, len: 0.7, x: 1.02,
+      tickfont: {size: 9, color: '#6B7280', family: 'DM Sans'},
+    },
+  };
+  const layout = {
+    geo: {
+      showframe: false, showcoastlines: true, coastlinecolor: '#D1D5DB',
+      showland: true, landcolor: '#F9FAFB',
+      showcountries: true, countrycolor: '#E5E7EB',
+      projection: {type: 'natural earth'},
+      bgcolor: '#fff',
+    },
+    margin: {l:0, r:0, t:0, b:0},
+    paper_bgcolor: '#fff', plot_bgcolor: '#fff',
+    font: {family: 'DM Sans', color: '#111827'},
+    height: 400,
+  };
+  Plotly.newPlot('choropleth-map', [trace], layout, {displayModeBar: false, responsive: true});
+}
+
+/* ──────────────── TOP 10 BI ──────────────── */
+let TOP10_GROUP = 'deal';
+let TOP10_PERIOD = 'all';
+
+async function refreshTop10() {
+  try {
+    const data = await API('/api/top-deals?group_by=' + TOP10_GROUP + '&period=' + TOP10_PERIOD + '&limit=10');
+    const list = document.getElementById('top10-list');
+    document.getElementById('top10-total').textContent = fmtM(data.total || 0) + ' · ' + data.items.length + ' entrée(s)';
+    if (!data.items.length) {
+      list.innerHTML = '<div class="empty-state"><span class="ico">📊</span>Aucun deal funded sur cette période.</div>';
+      return;
+    }
+    const max = Math.max(...data.items.map(it => it.aum)) || 1;
+    list.innerHTML = data.items.map((it, i) => {
+      const w = Math.round((it.aum || 0) / max * 100);
+      const rankCls = i === 0 ? 'gold' : (i === 1 ? 'silver' : (i === 2 ? 'bronze' : ''));
+      const rankIco = i === 0 ? '🥇' : (i === 1 ? '🥈' : (i === 2 ? '🥉' : (i + 1)));
+      const flag = (it.country || it.region) ? flagFor(it.country, it.region) + ' ' : '';
+      return '<div class="t10-row">'
+        + '<div class="t10-rank ' + rankCls + '">' + rankIco + '</div>'
+        + '<div style="min-width:0;flex:1;">'
+        + '<div class="t10-name">' + flag + escapeHtml(it.label) + '</div>'
+        + '<div class="t10-sub">' + escapeHtml(it.sublabel || '') + '</div>'
+        + '</div>'
+        + '<div class="t10-bar"><div class="t10-bar-fill" style="width:' + w + '%;"></div></div>'
+        + '<div class="t10-aum">' + fmtM(it.aum) + '</div>'
+        + '</div>';
+    }).join('');
+  } catch (err) {
+    console.error('top10', err);
+  }
+}
+
+function initTop10Controls() {
+  document.querySelectorAll('#top10-group .btn-tab').forEach(btn => {
+    btn.addEventListener('click', () => {
+      document.querySelectorAll('#top10-group .btn-tab').forEach(b => b.classList.remove('on'));
+      btn.classList.add('on');
+      TOP10_GROUP = btn.dataset.group;
+      refreshTop10();
+    });
+  });
+  document.querySelectorAll('#top10-period .btn-tab').forEach(btn => {
+    btn.addEventListener('click', () => {
+      document.querySelectorAll('#top10-period .btn-tab').forEach(b => b.classList.remove('on'));
+      btn.classList.add('on');
+      TOP10_PERIOD = btn.dataset.period;
+      refreshTop10();
+    });
+  });
+}
+
+/* ──────────────── WHITESPACE FULL MODAL ──────────────── */
+async function openWhitespaceFullModal() {
+  try {
+    const data = await API('/api/whitespace-full');
+    if (!data.clients.length || !data.fonds.length) {
+      openModal(`
+        <div class="modal-hdr">
+          <div class="modal-title">Whitespace complet</div>
+          <button class="modal-close" onclick="closeModal()">×</button>
+        </div>
+        <div class="modal-body">
+          <div class="empty-state"><span class="ico">📭</span>Aucune donnée pipeline disponible.</div>
+        </div>`);
+      return;
+    }
+    const colors = (v, max) => {
+      if (v <= 0) return {bg:'#F9FAFB', col:'#D1D5DB'};
+      const ratio = Math.min(v / max, 1);
+      if (ratio < 0.15) return {bg:'#DBEAFE', col:'#1D4ED8'};
+      if (ratio < 0.4)  return {bg:'#6BAED6', col:'#fff'};
+      if (ratio < 0.7)  return {bg:'#3060A8', col:'#fff'};
+      return {bg:'#001c4b', col:'#fff'};
+    };
+    let maxF = 0, maxP = 0;
+    data.funded.forEach(row => row.forEach(v => { if (v > maxF) maxF = v; }));
+    data.pipeline.forEach(row => row.forEach(v => { if (v > maxP) maxP = v; }));
+    const max = Math.max(maxF, maxP) || 1;
+    const colCount = data.fonds.length + 1;
+    let table = '<div class="ws-full-grid" style="grid-template-columns: 200px repeat(' + data.fonds.length + ', 1fr);">';
+    table += '<div></div>';
+    data.fonds.forEach(f => { table += '<div class="ws-full-col-lbl">' + escapeHtml(f) + '</div>'; });
+    data.clients.forEach((cli, i) => {
+      table += '<div class="ws-full-row-lbl">' + escapeHtml(cli) + '</div>';
+      data.fonds.forEach((f, j) => {
+        const fAum = data.funded[i][j];
+        const pAum = data.pipeline[i][j];
+        const total = fAum + pAum;
+        const sty = colors(total, max);
+        let txt;
+        if (total <= 0)        txt = '·';
+        else if (fAum > 0)     txt = '<b>' + (fAum / 1e6).toFixed(0) + 'M</b>';
+        else                   txt = (pAum / 1e6).toFixed(0) + 'M*';
+        const tip = '[' + cli + ' / ' + f + ']  Funded ' + fmtM(fAum) + '  ·  Pipeline ' + fmtM(pAum);
+        table += '<div class="ws-full-cell" title="' + escapeHtml(tip) + '" style="background:' + sty.bg + ';color:' + sty.col + ';">' + txt + '</div>';
+      });
+    });
+    table += '</div>';
+    openModal(`
+      <div class="modal-hdr">
+        <div class="modal-title">Whitespace complet — ${data.clients.length} clients × ${data.fonds.length} fonds</div>
+        <button class="modal-close" onclick="closeModal()">×</button>
+      </div>
+      <div class="modal-body" style="overflow-x:auto;max-width:100%;">
+        ${table}
+        <div style="margin-top:14px;font-size:11px;color:#6B7280;">
+          <b>Légende</b> — Cellule sombre = AUM Funded fort · Cellule claire = opportunité cross-sell · <b>nM</b> = Funded · <b>nM*</b> = Pipeline actif
+        </div>
+      </div>
+      <div class="modal-ftr">
+        <button class="btn btn-primary" onclick="closeModal()">Fermer</button>
+      </div>`);
+    // Override modal width
+    const box = document.getElementById('modal-box');
+    if (box) box.classList.add('wide');
+    if (box) box.style.maxWidth = '1200px';
+  } catch (e) {
+    toast('Erreur whitespace: ' + e.message, 'error');
+  }
 }
 
 /* ──────────────── TABS ──────────────── */
@@ -1102,10 +1344,8 @@ async function boot() {
     barRow('perf-region', overview.regions.map(r => [r.region, r.aum||0]));
     barRow('perf-funds', Object.entries(overview.funds_aggregate));
     renderMonthlyEvolution(overview.monthly_aum);
-    renderMapBadges({
-      nb_countries: (overview.regions||[]).length * 5,
-      total_aum: overview.kpis.total_funded,
-    });
+    renderChoropleth(overview.aum_by_country);
+    refreshTop10();
     // Live badge
     const nbActifs = overview.kpis.nb_deals_actifs || 0;
     document.getElementById('live-badge-text').textContent = 'Live · ' + nbActifs + ' deals actifs';
@@ -1133,6 +1373,7 @@ async function boot() {
 }
 
 document.getElementById('crm-search').addEventListener('input', e => buildClientList(e.target.value));
+initTop10Controls();
 
 /* ============================================================
    ACTION HANDLERS — CRUD modals + admin actions
@@ -1481,6 +1722,25 @@ document.addEventListener('click', e => {
     fetch('/api/deals/'+id).then(r => r.json()).then(d => openDealModal(d));
   }
   if (action === 'delete-deal')   deleteDeal(parseInt(t.dataset.id), t.dataset.label);
+  if (action === 'ws-full')       openWhitespaceFullModal();
+  if (action === 'edit-client')   {
+    if (!SELECTED_CLIENT_ID) { toast('Sélectionnez un client', 'error'); return; }
+    const c = CRM_CACHE.find(x => x.id === SELECTED_CLIENT_ID);
+    if (c) openClientModal(c);
+  }
+  if (action === 'delete-client') {
+    if (!SELECTED_CLIENT_ID) { toast('Sélectionnez un client', 'error'); return; }
+    const c = CRM_CACHE.find(x => x.id === SELECTED_CLIENT_ID);
+    if (!c) return;
+    if (!confirm('Supprimer le client "' + c.nom_client + '" ?\nTous ses deals, contacts et activités seront aussi supprimés.\nCette action est irréversible.')) return;
+    delReq('/api/clients/' + c.id)
+      .then(() => { toast('Client supprimé', 'success'); SELECTED_CLIENT_ID = null; boot(); })
+      .catch(e => toast('Erreur: ' + e.message, 'error'));
+  }
+  if (action === 'new-deal-for-client') {
+    if (!SELECTED_CLIENT_ID) { toast('Sélectionnez un client', 'error'); return; }
+    openDealModal({client_id: SELECTED_CLIENT_ID});
+  }
 });
 
 boot();

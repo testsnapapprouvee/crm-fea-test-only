@@ -648,6 +648,40 @@ def api_regions():
     return out
 
 
+# Country → ISO-3 code mapping for Plotly choropleth
+_COUNTRY_ISO = {
+    "United Arab Emirates": "ARE", "Saudi Arabia": "SAU", "Qatar": "QAT",
+    "Kuwait": "KWT", "Bahrain": "BHR", "Oman": "OMN",
+    "United Kingdom": "GBR", "France": "FRA", "Germany": "DEU",
+    "Switzerland": "CHE", "Luxembourg": "LUX", "Netherlands": "NLD",
+    "Italy": "ITA", "Spain": "ESP", "Belgium": "BEL", "Austria": "AUT",
+    "Sweden": "SWE", "Norway": "NOR", "Denmark": "DNK", "Finland": "FIN",
+    "Singapore": "SGP", "Japan": "JPN", "Hong Kong": "HKG",
+    "China": "CHN", "South Korea": "KOR", "Australia": "AUS", "India": "IND",
+    "United States": "USA", "Canada": "CAN", "Brazil": "BRA",
+    "Mexico": "MEX", "South Africa": "ZAF", "Egypt": "EGY",
+}
+
+
+@app.get("/api/aum-by-country")
+def api_aum_by_country():
+    df = db.get_aum_by_country()
+    if df is None or df.empty:
+        return {"countries": []}
+    out = []
+    for _, r in df.iterrows():
+        cty = str(r["country"])
+        out.append({
+            "country":      cty,
+            "iso":          _COUNTRY_ISO.get(cty),
+            "funded_aum":   float(r["funded_aum"]),
+            "pipeline_aum": float(r["pipeline_aum"]),
+            "total_aum":    float(r["total_aum"]),
+            "nb_clients":   int(r["nb_clients"]),
+        })
+    return {"countries": out}
+
+
 @app.get("/api/whitespace")
 def api_whitespace():
     matrix = db.get_whitespace_matrix()
@@ -664,6 +698,109 @@ def api_whitespace():
             else float(v) for v in row
         ])
     return {"clients": top_clients, "fonds": fonds, "values": values}
+
+
+@app.get("/api/whitespace-full")
+def api_whitespace_full():
+    """Full whitespace matrix: all clients × all fonds (Funded + active pipeline)."""
+    df_pipe = db.get_pipeline_with_clients()
+    if df_pipe.empty:
+        return {"clients": [], "fonds": [], "funded": [], "pipeline": []}
+    fonds = sorted(df_pipe["fonds"].dropna().unique().tolist())
+    fonds = [f for f in fonds if f]
+    if not fonds:
+        return {"clients": [], "fonds": [], "funded": [], "pipeline": []}
+    clients = sorted(df_pipe["nom_client"].dropna().unique().tolist())
+    df_pipe["_aum_p"] = df_pipe.apply(_smart_aum, axis=1)
+    funded = []
+    pipeline = []
+    for cli in clients:
+        sub = df_pipe[df_pipe["nom_client"] == cli]
+        f_row = []
+        p_row = []
+        for fund in fonds:
+            sub_f = sub[sub["fonds"] == fund]
+            if sub_f.empty:
+                f_row.append(0.0)
+                p_row.append(0.0)
+            else:
+                f_val = float(sub_f[sub_f["statut"] == "Funded"]["funded_aum"].sum())
+                p_val = float(sub_f[sub_f["statut"].isin(
+                    ["Prospect","Initial Pitch","Due Diligence","Soft Commit"])]["_aum_p"].sum())
+                f_row.append(f_val)
+                p_row.append(p_val)
+        funded.append(f_row)
+        pipeline.append(p_row)
+    # Sort clients by total AUM descending
+    totals = [sum(funded[i]) + sum(pipeline[i]) for i in range(len(clients))]
+    order = sorted(range(len(clients)), key=lambda i: totals[i], reverse=True)
+    return {
+        "clients":  [clients[i] for i in order],
+        "fonds":    fonds,
+        "funded":   [funded[i] for i in order],
+        "pipeline": [pipeline[i] for i in order],
+    }
+
+
+@app.get("/api/top-deals")
+def api_top_deals(period: str = "all", group_by: str = "deal", limit: int = 10):
+    """Top deals BI endpoint.
+    - period: 'all' | '30d' | '90d' | '180d' | '365d' | 'ytd'
+    - group_by: 'deal' | 'fonds' | 'client' | 'sales' | 'region' | 'country'
+    - limit: number of top items returned (default 10)
+    """
+    df = db.get_pipeline_with_clients()
+    if df.empty:
+        return {"period": period, "group_by": group_by, "items": []}
+    df = df[df["statut"] == "Funded"].copy()
+    df["funded_aum"] = pd.to_numeric(df["funded_aum"], errors="coerce").fillna(0.0)
+    df = df[df["funded_aum"] > 0]
+
+    today = date.today()
+    cutoff = None
+    if period == "30d":  cutoff = today - timedelta(days=30)
+    elif period == "90d": cutoff = today - timedelta(days=90)
+    elif period == "180d": cutoff = today - timedelta(days=180)
+    elif period == "365d": cutoff = today - timedelta(days=365)
+    elif period == "ytd": cutoff = date(today.year, 1, 1)
+
+    if cutoff is not None:
+        # Filter on next_action_date (proxy for recency since updated_at is not in df)
+        df["nad_dt"] = pd.to_datetime(df["next_action_date"], errors="coerce")
+        cutoff_ts = pd.Timestamp(cutoff)
+        df = df[(df["nad_dt"].isna()) | (df["nad_dt"] >= cutoff_ts)]
+
+    if df.empty:
+        return {"period": period, "group_by": group_by, "items": []}
+
+    items = []
+    if group_by == "deal":
+        df = df.sort_values("funded_aum", ascending=False).head(limit)
+        for _, r in df.iterrows():
+            items.append(_safe_dict({
+                "label":      str(r["nom_client"]),
+                "sublabel":   "{} · {}".format(r.get("fonds",""), r.get("sales_owner","—")),
+                "country":    str(r.get("country","")),
+                "region":     str(r.get("region","")),
+                "aum":        float(r["funded_aum"]),
+                "deal_id":    int(r["id"]),
+            }))
+    elif group_by in ("fonds", "client", "sales", "region", "country"):
+        col_map = {"fonds":"fonds","client":"nom_client","sales":"sales_owner",
+                   "region":"region","country":"country"}
+        col = col_map[group_by]
+        agg = df.groupby(col)["funded_aum"].agg(["sum", "count"]).reset_index()
+        agg.columns = [col, "sum", "count"]
+        agg = agg.sort_values("sum", ascending=False).head(limit)
+        for _, r in agg.iterrows():
+            label = str(r[col]) if r[col] else "—"
+            items.append({
+                "label":    label,
+                "sublabel": "{} deal(s)".format(int(r["count"])),
+                "aum":      float(r["sum"]),
+                "count":    int(r["count"]),
+            })
+    return {"period": period, "group_by": group_by, "items": items, "total": float(sum(i["aum"] for i in items))}
 
 
 @app.get("/api/next-actions")
@@ -889,6 +1026,7 @@ def api_overview():
         "mini_stats":        api_mini_stats(),
         "funds_aggregate":   api_funds_aggregate(),
         "monthly_aum":       api_monthly_aum(),
+        "aum_by_country":    api_aum_by_country(),
     }
 
 
