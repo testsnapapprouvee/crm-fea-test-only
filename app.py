@@ -16,6 +16,7 @@ from pptx import Presentation
 from pptx.util import Inches, Pt, Emu
 from pptx.dml.color import RGBColor
 from pptx.enum.text import PP_ALIGN
+from streamlit_agraph import agraph, Node, Edge, Config
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
@@ -581,6 +582,96 @@ def generate_global_pptx(kpis: dict, pipeline_df, mode_comex: bool = False) -> b
         _add_plotly_slide(prs, _fig_cf_p, "MONEY IN MOTION — PROJECTED INFLOWS",
                           "AUM pondere = AUM Pipeline x Probabilite de closing")
 
+    # ── Slide 6 : Whitespace Heatmap ─────────────────────────────────────
+    _df_ws_p = db.get_whitespace_matrix()
+    if not _df_ws_p.empty:
+        _ws_clients_p = _df_ws_p.index.tolist()
+        if len(_ws_clients_p) > 20:
+            _aum_totals_p = _df_ws_p.fillna(0).sum(axis=1).sort_values(ascending=False)
+            _ws_clients_p = _aum_totals_p.head(20).index.tolist()
+        _ws_fonds_p = _df_ws_p.columns.tolist()
+        _ws_sub_p = _df_ws_p.loc[_ws_clients_p, _ws_fonds_p]
+        _z_p = [[0.0 if (v is None or (isinstance(v, float) and np.isnan(v)))
+                 else float(v) for v in row] for row in _ws_sub_p.values.tolist()]
+        _txt_p = [[("{:.1f}M".format(v / 1e6) if v > 0 else "")
+                   for v in row] for row in _z_p]
+        _fig_ws_p = go.Figure(go.Heatmap(
+            z=_z_p, x=_ws_fonds_p, y=_ws_clients_p,
+            text=_txt_p, texttemplate="%{text}",
+            textfont=dict(size=8, color="#ffffff"),
+            colorscale=[[0, "#f0f4f8"], [0.001, "#c6dff0"], [0.15, "#6baed6"],
+                        [0.4, "#2171b5"], [0.7, "#1a5e8a"], [1.0, "#001c4b"]],
+            zmin=0, showscale=True, xgap=2, ygap=2,
+            colorbar=dict(title=dict(text="AUM (EUR)", font=dict(size=9)),
+                          tickfont=dict(size=8), thickness=10, len=0.8)))
+        _fig_ws_p.update_layout(
+            height=max(350, 26 * len(_ws_clients_p) + 100),
+            paper_bgcolor="#ffffff", plot_bgcolor="#ffffff", font_color="#001c4b",
+            xaxis=dict(side="top", tickangle=-30), yaxis=dict(autorange="reversed"),
+            margin=dict(l=10, r=60, t=60, b=10))
+        _add_plotly_slide(prs, _fig_ws_p, "WHITESPACE ANALYSIS — CROSS-SELL ENGINE",
+                          "Bleu fonce = AUM Finance eleve. Gris clair = opportunite cross-sell.")
+
+    # ── Slide 7 : Choropleth Map ─────────────────────────────────────────
+    _df_cty_p = db.get_aum_by_country()
+    if not _df_cty_p.empty and _df_cty_p["total_aum"].sum() > 0:
+        _ISO_P = {
+            "United Arab Emirates": "ARE", "Saudi Arabia": "SAU", "Qatar": "QAT",
+            "Kuwait": "KWT", "Bahrain": "BHR", "Oman": "OMN",
+            "United Kingdom": "GBR", "France": "FRA", "Germany": "DEU",
+            "Switzerland": "CHE", "Luxembourg": "LUX", "Netherlands": "NLD",
+            "Italy": "ITA", "Spain": "ESP", "Belgium": "BEL", "Austria": "AUT",
+            "Sweden": "SWE", "Norway": "NOR", "Denmark": "DNK", "Finland": "FIN",
+            "Singapore": "SGP", "Japan": "JPN", "Hong Kong": "HKG",
+            "China": "CHN", "South Korea": "KOR", "Australia": "AUS", "India": "IND",
+            "United States": "USA", "Canada": "CAN", "Brazil": "BRA",
+            "Mexico": "MEX", "South Africa": "ZAF", "Egypt": "EGY",
+        }
+        _df_map_p = _df_cty_p.copy()
+        _df_map_p["iso"] = _df_map_p["country"].map(_ISO_P)
+        _df_map_p = _df_map_p.dropna(subset=["iso"])
+        if not _df_map_p.empty:
+            _fig_map_p = go.Figure(go.Choropleth(
+                locations=_df_map_p["iso"], z=_df_map_p["total_aum"],
+                colorscale=[[0, "#f0f4f8"], [0.2, "#c6dff0"], [0.4, "#6baed6"],
+                            [0.6, "#2171b5"], [0.8, "#1a5e8a"], [1.0, "#001c4b"]],
+                marker_line_color="#ffffff", marker_line_width=0.5,
+                showscale=True,
+                colorbar=dict(title=dict(text="AUM", font=dict(size=9)),
+                              tickfont=dict(size=8), thickness=10, len=0.6)))
+            _fig_map_p.update_layout(
+                geo=dict(showframe=False, showcoastlines=True,
+                         coastlinecolor="#e8e8e8", projection_type="natural earth",
+                         bgcolor="#ffffff", landcolor="#f8f9fa",
+                         showcountries=True, countrycolor="#e0e0e0"),
+                height=420, paper_bgcolor="#ffffff", font_color="#001c4b",
+                margin=dict(l=0, r=0, t=10, b=10))
+            _add_plotly_slide(prs, _fig_map_p, "GLOBAL ROADSHOW MAP — AUM PAR PAYS",
+                              "AUM total (Funded + Pipeline actif) par pays")
+
+    # ── Slide 8 : AUM Time Machine ───────────────────────────────────────
+    _df_hist_p = db.get_historical_aum(days_back=365)
+    if not _df_hist_p.empty:
+        _fig_hist_p = go.Figure()
+        _fig_hist_p.add_trace(go.Scatter(
+            x=_df_hist_p["date"], y=_df_hist_p["funded_aum"],
+            name="Funded AUM", mode="lines",
+            line=dict(color="#001c4b", width=2.5),
+            fill="tozeroy", fillcolor="rgba(0,28,75,0.08)"))
+        _fig_hist_p.add_trace(go.Scatter(
+            x=_df_hist_p["date"], y=_df_hist_p["pipeline_aum"],
+            name="Active Pipeline", mode="lines",
+            line=dict(color="#019ee1", width=2, dash="dot")))
+        _fig_hist_p.update_layout(
+            height=360, paper_bgcolor="#ffffff", plot_bgcolor="#ffffff",
+            font_color="#001c4b",
+            legend=dict(orientation="h", y=1.05, x=0.5, xanchor="center"),
+            xaxis=dict(showgrid=False, tickformat="%b %Y"),
+            yaxis=dict(showgrid=True, gridcolor="#e8e8e8", tickformat=".2s"),
+            margin=dict(l=20, r=20, t=30, b=20))
+        _add_plotly_slide(prs, _fig_hist_p, "AUM TIME MACHINE — EVOLUTION HISTORIQUE",
+                          "Funded AUM et Pipeline Actif sur 12 mois")
+
     buf = io.BytesIO()
     prs.save(buf)
     buf.seek(0)
@@ -762,6 +853,194 @@ button[kind="primary"]:hover {
 }
 .struct-label { font-size:0.65rem; color:#888; text-transform:uppercase; letter-spacing:0.5px; margin-bottom:3px; }
 .struct-val   { font-weight:700; color:#001c4b; }
+</style>
+""", unsafe_allow_html=True)
+
+
+# ---------------------------------------------------------------------------
+# CSS — Meridian premium UI (mockup revolut_crm_dashboard_v2)
+# Layered on top of existing styles; introduces DM Sans + premium card system
+# ---------------------------------------------------------------------------
+st.markdown("""
+<style>
+@import url('https://fonts.googleapis.com/css2?family=DM+Sans:opsz,wght@9..40,300;9..40,400;9..40,500;9..40,600;9..40,700;9..40,800&display=swap');
+
+/* Apply DM Sans globally inside Streamlit */
+html, body, .stApp, .main, .block-container, [class*="css"],
+[data-testid="stAppViewContainer"] *, [data-testid="stMarkdownContainer"] * {
+    font-family: 'DM Sans', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif !important;
+}
+
+.stApp { background: #F0F2F5 !important; }
+.main .block-container {
+    background: transparent !important;
+    padding-top: 1.5rem !important;
+    max-width: 1320px !important;
+}
+
+/* ── Meridian header (greeting + live badge) ── */
+.mer-hdr {
+    display:flex; align-items:flex-start; justify-content:space-between;
+    margin: 4px 0 22px;
+}
+.mer-hdr-title {
+    font-size: 24px; font-weight: 800; color: #111827;
+    letter-spacing: -0.5px; line-height: 1.1;
+}
+.mer-hdr-date {
+    font-size: 12px; color: #9CA3AF; font-weight: 400; margin-top: 4px;
+}
+.mer-live-badge {
+    display: inline-flex; align-items: center; gap: 7px;
+    background: #001c4b; color: #fff;
+    font-size: 11px; font-weight: 600;
+    padding: 7px 14px; border-radius: 50px;
+}
+.mer-live-dot {
+    width: 7px; height: 7px; border-radius: 50%;
+    background: #019ee1; animation: mer-pulse 2s infinite;
+}
+@keyframes mer-pulse {
+    0%,100% { opacity: 1; transform: scale(1); }
+    50%     { opacity: .6; transform: scale(1.3); }
+}
+
+/* ── Premium KPI cards (.kcard) ── */
+.kcard {
+    background: #fff; border-radius: 18px;
+    padding: 20px;
+    border: 0.5px solid rgba(0,0,0,.04);
+    transition: transform .15s, box-shadow .15s;
+    height: 100%;
+}
+.kcard:hover {
+    transform: translateY(-1px);
+    box-shadow: 0 8px 28px rgba(0,0,0,.07);
+}
+.kc-lbl {
+    font-size: 10.5px; font-weight: 500; color: #9CA3AF;
+    text-transform: uppercase; letter-spacing: .8px; margin-bottom: 10px;
+}
+.kc-val {
+    font-size: 28px; font-weight: 800; color: #111827;
+    letter-spacing: -1.2px; line-height: 1;
+}
+.kc-unit {
+    font-size: 13px; font-weight: 500; color: #9CA3AF; letter-spacing: -.2px;
+}
+.kc-delta {
+    display: inline-flex; align-items: center; gap: 3px;
+    font-size: 11px; font-weight: 600; margin-top: 9px;
+    padding: 3px 9px; border-radius: 50px;
+}
+.kc-delta.up { background: #ECFDF5; color: #059669; }
+.kc-delta.dn { background: #FEF2F2; color: #DC2626; }
+.spark {
+    display: flex; align-items: flex-end; gap: 2.5px;
+    margin-top: 12px; height: 24px;
+}
+.spark .sb { flex: 1; border-radius: 2px 2px 0 0; background: #E5E7EB; }
+.spark .sb.on { background: #001c4b; }
+
+/* ── Meridian alert banner ── */
+.mer-alert {
+    display: flex; align-items: center; gap: 12px;
+    background: #FFF7ED; border: 1px solid #FED7AA;
+    border-radius: 14px; padding: 12px 16px; margin-bottom: 18px;
+}
+.mer-alert-ico { font-size: 16px; }
+.mer-alert-txt { font-size: 12.5px; font-weight: 500; color: #92400E; flex: 1; }
+.mer-alert-txt b { color: #78350F; font-weight: 700; }
+
+/* ── Generic .card container (for sections) ── */
+.mer-card {
+    background: #fff; border-radius: 18px; padding: 20px;
+    border: 0.5px solid rgba(0,0,0,.04);
+    transition: transform .15s, box-shadow .15s;
+}
+.mer-card:hover {
+    transform: translateY(-1px);
+    box-shadow: 0 8px 28px rgba(0,0,0,.07);
+}
+.mer-sec-title {
+    font-size: 15px; font-weight: 700; color: #111827;
+    letter-spacing: -.2px; margin-bottom: 14px;
+}
+.mer-sec-sub { font-size: 11px; color: #9CA3AF; font-weight: 400; margin-left: 6px; }
+
+/* ── Override Streamlit tabs to match Meridian "pill" nav ── */
+.stTabs [data-baseweb="tab-list"] {
+    background: transparent !important;
+    border-bottom: 1.5px solid #E5E7EB !important;
+    gap: 0 !important;
+    padding-left: 0 !important;
+}
+.stTabs [data-baseweb="tab"] {
+    background: transparent !important;
+    color: #9CA3AF !important;
+    font-weight: 600 !important;
+    font-size: 12px !important;
+    padding: 9px 16px !important;
+    border: none !important;
+    border-bottom: 2.5px solid transparent !important;
+    margin-bottom: -1.5px !important;
+    border-radius: 0 !important;
+    transition: color .15s, border-color .15s !important;
+}
+.stTabs [data-baseweb="tab"]:hover {
+    color: #374151 !important;
+    background: transparent !important;
+}
+.stTabs [aria-selected="true"] {
+    background: transparent !important;
+    color: #111827 !important;
+    border-bottom-color: #001c4b !important;
+}
+
+/* ── Override Streamlit dataframe/data_editor to match mockup ── */
+[data-testid="stDataFrame"], [data-testid="stDataEditor"] {
+    border-radius: 14px !important;
+    overflow: hidden !important;
+    border: 0.5px solid rgba(0,0,0,.05) !important;
+}
+[data-testid="stDataFrame"] thead th,
+[data-testid="stDataEditor"] thead th {
+    background: #F9FAFB !important;
+    color: #6B7280 !important;
+    font-weight: 600 !important;
+    font-size: 11px !important;
+    text-transform: uppercase !important;
+    letter-spacing: .5px !important;
+    border-bottom: 1px solid #E5E7EB !important;
+}
+[data-testid="stDataFrame"] tbody td,
+[data-testid="stDataEditor"] tbody td {
+    font-size: 12.5px !important;
+    color: #111827 !important;
+}
+
+/* ── Quick-action button row ── */
+.qb-row { display:grid; grid-template-columns:repeat(4,1fr); gap:9px; margin-bottom:18px; }
+.qb {
+    background: #fff; border-radius: 14px; padding: 14px 10px;
+    text-align: center; border: 0.5px solid rgba(0,0,0,.05);
+    cursor: pointer; transition: transform .15s, box-shadow .15s;
+}
+.qb:hover { transform: translateY(-2px); box-shadow: 0 6px 20px rgba(0,0,0,.08); }
+.qb-ico { font-size: 18px; margin-bottom: 7px; }
+.qb-lbl { font-size: 11.5px; font-weight: 600; color: #374151; }
+
+/* ── Footer ── */
+.mer-footer {
+    display:flex; align-items:center; justify-content:space-between;
+    border-top: 1px solid #E5E7EB; padding-top: 16px; margin: 22px 0 4px;
+}
+.mer-ft-brand { font-size: 12.5px; font-weight: 700; color: #001c4b; }
+.mer-ft-meta {
+    font-size: 11px; color: #D1D5DB; font-weight: 500;
+    display: flex; gap: 20px;
+}
+.mer-ft-live { color: #019ee1; }
 </style>
 """, unsafe_allow_html=True)
 
@@ -1588,13 +1867,71 @@ with st.sidebar:
                         nb_pdf = nb_pdf[cols_k] if cols_k else None
                     _include_perf = (include_perf_pdf and pf_pdf is not None
                                      and hasattr(pf_pdf, "empty") and not pf_pdf.empty)
+                    _bi_pngs = []
+                    try:
+                        _export_cfg = dict(format="png", engine="kaleido",
+                                           width=900, height=500)
+                        _export_layout = dict(
+                            title="", showlegend=True,
+                            margin=dict(l=40, r=40, t=20, b=30),
+                            paper_bgcolor="#ffffff", plot_bgcolor="#ffffff")
+                        import copy as _copy_pdf
+                        _df_cf_pdf = db.get_expected_cashflows()
+                        if not _df_cf_pdf.empty and _df_cf_pdf["aum_pondere"].sum() > 0:
+                            _months_pdf = sorted(_df_cf_pdf["mois"].unique().tolist())
+                            _fig_cf_pdf = go.Figure()
+                            for _i, _f in enumerate(sorted(_df_cf_pdf["fonds"].unique())):
+                                _df_f = _df_cf_pdf[_df_cf_pdf["fonds"] == _f]
+                                _mm = dict(zip(_df_f["mois"], _df_f["aum_pondere"]))
+                                _fig_cf_pdf.add_trace(go.Bar(
+                                    name=_f, x=_months_pdf,
+                                    y=[_mm.get(m, 0) for m in _months_pdf],
+                                    marker_color=PALETTE[_i % len(PALETTE)]))
+                            _fig_cf_pdf.update_layout(barmode="stack", **_export_layout)
+                            _bi_pngs.append(("Money in Motion — Cashflows",
+                                io.BytesIO(_fig_cf_pdf.to_image(**_export_cfg))))
+
+                        _df_ws_pdf = db.get_whitespace_matrix()
+                        if not _df_ws_pdf.empty:
+                            _ws_c = _df_ws_pdf.index.tolist()[:20]
+                            _ws_f = _df_ws_pdf.columns.tolist()
+                            _z = [[0.0 if (v is None or (isinstance(v, float) and np.isnan(v)))
+                                   else float(v) for v in r]
+                                  for r in _df_ws_pdf.loc[_ws_c, _ws_f].values.tolist()]
+                            _fig_ws_pdf = go.Figure(go.Heatmap(
+                                z=_z, x=_ws_f, y=_ws_c,
+                                colorscale=[[0,"#f0f4f8"],[0.5,"#2171b5"],[1,"#001c4b"]],
+                                xgap=2, ygap=2, showscale=True))
+                            _fig_ws_pdf.update_layout(
+                                xaxis=dict(side="top"), yaxis=dict(autorange="reversed"),
+                                **_export_layout)
+                            _bi_pngs.append(("Whitespace Analysis — Cross-Sell",
+                                io.BytesIO(_fig_ws_pdf.to_image(**_export_cfg))))
+
+                        _df_hist_pdf = db.get_historical_aum(days_back=365)
+                        if not _df_hist_pdf.empty:
+                            _fig_h_pdf = go.Figure()
+                            _fig_h_pdf.add_trace(go.Scatter(
+                                x=_df_hist_pdf["date"], y=_df_hist_pdf["funded_aum"],
+                                name="Funded AUM", line=dict(color="#001c4b", width=2),
+                                fill="tozeroy", fillcolor="rgba(0,28,75,0.08)"))
+                            _fig_h_pdf.add_trace(go.Scatter(
+                                x=_df_hist_pdf["date"], y=_df_hist_pdf["pipeline_aum"],
+                                name="Active Pipeline",
+                                line=dict(color="#019ee1", width=2, dash="dot")))
+                            _fig_h_pdf.update_layout(**_export_layout)
+                            _bi_pngs.append(("AUM Time Machine",
+                                io.BytesIO(_fig_h_pdf.to_image(**_export_cfg))))
+                    except Exception:
+                        pass
                     pdf_bytes = pdf_gen.generate_pdf(
                         pipeline_df=pipeline_hub, kpis=kpis_hub,
                         aum_by_region=aum_region_pdf, mode_comex=mode_comex,
                         perf_data=pf_pdf, nav_base100_df=nb_pdf,
                         fonds_perimetre=fonds_perimetre,
                         include_top10=include_top10, include_outflows=include_outflows,
-                        include_perf=_include_perf)
+                        include_perf=_include_perf,
+                        bi_chart_pngs=_bi_pngs if _bi_pngs else None)
                     fname_pdf = "report{}_{}.pdf".format(
                         "_comex" if mode_comex else "", date.today().isoformat())
                     st.download_button("Télécharger le PDF", data=pdf_bytes,
@@ -1958,6 +2295,7 @@ with tab_crm:
                     # PPTX export → Universal Export Hub in sidebar
 
                     # ── Corporate Structure block ─────────────────────────
+                    _grp_summary = db.get_client_group_summary(sel_id)
                     has_struct = sel_par or filiales
                     if has_struct:
                         st.markdown(
@@ -2005,6 +2343,83 @@ with tab_crm:
                                               ciel=CIEL, aum_grp=aum_grp),
                                 unsafe_allow_html=True)
 
+                    # ── Network Graph (Pappers-style) ────────────────────
+                    _net = db.get_client_network(sel_id)
+                    _net_nodes = []
+                    _net_edges = []
+                    _seen_funds = set()
+                    if _net.get("root"):
+                        _root = _net["root"]
+                        _is_root = (_root["id"] == sel_id)
+                        _net_nodes.append(Node(
+                            id="c_{}".format(_root["id"]),
+                            label=_root["nom"],
+                            size=30,
+                            color=MARINE,
+                            font={"color": "#ffffff", "size": 12, "bold": True},
+                            shape="dot",
+                        ))
+                        for sub in _net.get("subsidiaries", []):
+                            _net_nodes.append(Node(
+                                id="c_{}".format(sub["id"]),
+                                label=sub["nom_client"],
+                                size=20,
+                                color=CIEL,
+                                font={"color": MARINE, "size": 10},
+                                shape="dot",
+                            ))
+                            _net_edges.append(Edge(
+                                source="c_{}".format(_root["id"]),
+                                target="c_{}".format(sub["id"]),
+                                color="#cccccc", width=1.5,
+                            ))
+                        for fl in _net.get("fund_links", []):
+                            fund_id = "f_{}".format(fl["fonds"].replace(" ", "_"))
+                            if fund_id not in _seen_funds:
+                                _seen_funds.add(fund_id)
+                                _net_nodes.append(Node(
+                                    id=fund_id,
+                                    label=fl["fonds"],
+                                    size=15,
+                                    color=ORANGE,
+                                    font={"color": MARINE, "size": 9},
+                                    shape="diamond",
+                                ))
+                            _edge_color = ORANGE if fl["statut"] == "Funded" else "#cccccc"
+                            _edge_style = {"strokeDasharray": ""} if fl["statut"] == "Funded" else {}
+                            _net_edges.append(Edge(
+                                source="c_{}".format(fl["client_id"]),
+                                target=fund_id,
+                                color=_edge_color,
+                                width=2 if fl["statut"] == "Funded" else 1,
+                                dashes=fl["statut"] != "Funded",
+                            ))
+
+                    if _net_nodes:
+                        st.markdown(
+                            '<div style="font-size:0.72rem;font-weight:700;color:{m};'
+                            'text-transform:uppercase;letter-spacing:0.6px;'
+                            'margin:14px 0 6px 0;border-bottom:1px solid #001c4b15;padding-bottom:3px;">'
+                            'Network Graph</div>'.format(m=MARINE),
+                            unsafe_allow_html=True)
+                        _graph_cfg = Config(
+                            width="100%", height=300,
+                            directed=False,
+                            physics=True,
+                            hierarchical=False,
+                            nodeHighlightBehavior=True,
+                            highlightColor=CIEL,
+                            collapsible=False,
+                        )
+                        agraph(nodes=_net_nodes, edges=_net_edges, config=_graph_cfg)
+                        st.markdown(
+                            '<div style="font-size:0.65rem;color:#999;margin-top:2px;">'
+                            '<span style="color:{m};">●</span> Parent &nbsp;'
+                            '<span style="color:{c};">●</span> Filiale &nbsp;'
+                            '<span style="color:{o};">◆</span> Fonds</div>'.format(
+                                m=MARINE, c=CIEL, o=ORANGE),
+                            unsafe_allow_html=True)
+
                     # ── Activités Récentes ────────────────────────────────
                     st.markdown(
                         '<div style="display:flex;align-items:center;justify-content:space-between;'
@@ -2038,6 +2453,120 @@ with tab_crm:
                     if st.button("+ Enregistrer une activité", key="crm_add_act_{}".format(sel_id),
                                  type="tertiary"):
                         dialog_add_activity(preselect_client_id=sel_id)
+
+                # ── Client-Specific Pipeline Editor ──────────────────────
+                st.markdown(
+                    '<div style="font-size:0.72rem;font-weight:700;color:{m};'
+                    'text-transform:uppercase;letter-spacing:0.6px;'
+                    'margin:18px 0 8px 0;border-bottom:1px solid #001c4b15;padding-bottom:3px;">'
+                    'Pipeline — {nom}</div>'.format(m=MARINE, nom=sel_nom),
+                    unsafe_allow_html=True)
+                _df_client_pipe = db.get_pipeline_with_clients().copy()
+                _df_client_pipe = _df_client_pipe[_df_client_pipe["client_id"] == sel_id].reset_index(drop=True)
+                if _df_client_pipe.empty:
+                    st.markdown(
+                        '<div style="color:#888;font-size:0.78rem;padding:6px 0;">'
+                        'Aucun deal dans le pipeline pour ce client.</div>',
+                        unsafe_allow_html=True)
+                    if st.button("+ Nouveau deal", key="crm_pipe_new_{}".format(sel_id),
+                                 type="tertiary"):
+                        dialog_add_deal(preselect_client_id=sel_id)
+                else:
+                    _df_cp_edit = _df_client_pipe.copy()
+                    _df_cp_edit["next_action_date"] = _df_cp_edit["next_action_date"].apply(
+                        lambda d: d.isoformat() if isinstance(d, date) else "")
+                    _df_cp_edit["aum_m"] = _df_cp_edit.apply(
+                        lambda r: round(float(r["funded_aum"]) / 1e6, 2) if r["statut"] == "Funded"
+                        else round((float(r["revised_aum"]) if float(r["revised_aum"]) > 0
+                              else float(r["target_aum_initial"])) / 1e6, 2), axis=1)
+                    if "closing_probability" in _df_cp_edit.columns:
+                        _df_cp_edit["closing_probability"] = _df_cp_edit["closing_probability"].fillna(50)
+
+                    _cp_cols = ["id", "fonds", "statut", "aum_m",
+                                "closing_probability", "next_action_date", "sales_owner"]
+                    _cp_edited = st.data_editor(
+                        _df_cp_edit[_cp_cols],
+                        use_container_width=True,
+                        hide_index=True,
+                        num_rows="fixed",
+                        height=min(250, 46 + len(_df_cp_edit) * 36),
+                        column_config={
+                            "id":                  st.column_config.NumberColumn("ID", width="small", disabled=True),
+                            "fonds":               st.column_config.SelectboxColumn("Fonds", options=FONDS),
+                            "statut":              st.column_config.SelectboxColumn("Statut", options=STATUTS),
+                            "aum_m":               st.column_config.NumberColumn("AUM (M€)", format="%.2f",
+                                                       min_value=0.0, step=1.0),
+                            "closing_probability": st.column_config.NumberColumn("Proba %", format="%.0f%%",
+                                                       width="small", min_value=0, max_value=100, step=5),
+                            "next_action_date":    st.column_config.TextColumn("Next Action"),
+                            "sales_owner":         st.column_config.TextColumn("Commercial"),
+                        },
+                        key="crm_client_pipe_editor_{}".format(sel_id))
+
+                    _cp_changes = []
+                    _cp_orig = _df_cp_edit[_cp_cols]
+                    for idx in range(len(_cp_edited)):
+                        if idx >= len(_cp_orig):
+                            break
+                        ed = _cp_edited.iloc[idx]
+                        orig = _cp_orig.iloc[idx]
+                        for c in ["statut", "fonds", "aum_m", "closing_probability",
+                                   "next_action_date", "sales_owner"]:
+                            if str(ed.get(c, "")) != str(orig.get(c, "")):
+                                _cp_changes.append(idx)
+                                break
+
+                    _cp_btn_c1, _cp_btn_c2 = st.columns([3, 1])
+                    with _cp_btn_c1:
+                        _cp_label = "Sauvegarder les deals du client"
+                        if _cp_changes:
+                            _cp_label += " ({})".format(len(_cp_changes))
+                        if st.button(_cp_label, key="crm_pipe_save_{}".format(sel_id),
+                                     type="primary", use_container_width=True,
+                                     disabled=(len(_cp_changes) == 0)):
+                            _cp_ok, _cp_err = 0, 0
+                            for idx in _cp_changes:
+                                ed = _cp_edited.iloc[idx]
+                                pid = int(_cp_orig.iloc[idx]["id"])
+                                _orig_row = db.get_pipeline_row_by_id(pid)
+                                if not _orig_row:
+                                    _cp_err += 1
+                                    continue
+                                _upd = dict(_orig_row)
+                                _upd["id"] = pid
+                                for c in ["statut", "fonds"]:
+                                    _upd[c] = str(ed.get(c, _upd.get(c, "")))
+                                try:
+                                    _upd["closing_probability"] = float(ed.get("closing_probability", 50))
+                                except (ValueError, TypeError):
+                                    pass
+                                _nad = str(ed.get("next_action_date", "")).strip()
+                                if _nad:
+                                    _upd["next_action_date"] = _nad
+                                _so = str(ed.get("sales_owner", "")).strip()
+                                if _so:
+                                    _upd["sales_owner"] = _so
+                                _new_aum = float(ed.get("aum_m", 0)) * 1e6
+                                if _orig_row["statut"] == "Funded" or str(ed.get("statut", "")) == "Funded":
+                                    _upd["funded_aum"] = _new_aum
+                                else:
+                                    _upd["revised_aum"] = _new_aum
+                                ok, msg = db.update_pipeline_row(_upd)
+                                if ok:
+                                    _cp_ok += 1
+                                else:
+                                    _cp_err += 1
+                                    st.warning("Deal #{}: {}".format(pid, msg))
+                            if _cp_ok:
+                                st.success("{} deal(s) mis à jour.".format(_cp_ok))
+                            if _cp_err:
+                                st.error("{} erreur(s).".format(_cp_err))
+                            if _cp_ok:
+                                st.rerun()
+                    with _cp_btn_c2:
+                        if st.button("+ Deal", key="crm_pipe_add_{}".format(sel_id),
+                                     type="tertiary", use_container_width=True):
+                            dialog_add_deal(preselect_client_id=sel_id)
 
                 # ════════════════════════════════════════════════════════
                 # COLONNE DROITE — Contacts
@@ -2194,14 +2723,14 @@ with tab_pipeline:
     if filt_regions:   df_view = df_view[df_view["region"].isin(filt_regions)]
     if filt_countries: df_view = df_view[df_view["country"].isin(filt_countries)]
 
-    st.markdown('<div class="pipeline-hint">Sélectionnez une ligne puis cliquez'
-                ' "Modifier le deal sélectionné" — <b>{} deal(s)</b> affiché(s)</div>'.format(len(df_view)),
+    st.markdown('<div class="pipeline-hint">'
+                '<b>{} deal(s)</b> affiché(s) — éditez directement dans le tableau, '
+                'cochez 🗑️ pour supprimer, puis cliquez <b>Sauvegarder</b></div>'.format(len(df_view)),
                 unsafe_allow_html=True)
 
     df_display = df_view.copy()
     df_display["next_action_date"] = df_display["next_action_date"].apply(
         lambda d: d.isoformat() if isinstance(d, date) else "")
-    # Smart AUM: single column AUM_Pipeline for active deals, funded_aum for Funded
     df_display["aum_pipeline"] = df_display.apply(
         lambda r: float(r["funded_aum"]) if r["statut"] == "Funded"
         else (float(r["revised_aum"]) if float(r["revised_aum"]) > 0
@@ -2211,66 +2740,119 @@ with tab_pipeline:
     if "closing_probability" in df_display.columns:
         df_display["closing_probability"] = df_display["closing_probability"].fillna(50)
 
-    cols_show = ["id","nom_client","type_client","region","country","fonds","statut",
-                 "aum_pipeline_fmt","funded_aum_fmt",
-                 "closing_probability","raison_perte","next_action_date","sales_owner","derniere_activite"]
+    df_display.insert(0, "\U0001f5d1\ufe0f Delete", False)
 
-    event = st.dataframe(
-        df_display[cols_show], use_container_width=True, height=400, hide_index=True,
-        on_select="rerun", selection_mode="multi-row",
+    _cols_for_editor = ["\U0001f5d1\ufe0f Delete",
+                        "id","nom_client","type_client","region","country",
+                        "fonds","statut","aum_pipeline_fmt","funded_aum_fmt",
+                        "closing_probability","raison_perte",
+                        "next_action_date","sales_owner","derniere_activite"]
+
+    edited_df = st.data_editor(
+        df_display[_cols_for_editor],
+        use_container_width=True, height=400, hide_index=True, num_rows="fixed",
         column_config={
-            "id":                  st.column_config.NumberColumn("ID", width="small"),
-            "nom_client":          st.column_config.TextColumn("Client"),
-            "type_client":         st.column_config.TextColumn("Type", width="small"),
-            "region":              st.column_config.TextColumn("Region", width="small"),
-            "country":             st.column_config.TextColumn("Pays", width="small"),
-            "fonds":               st.column_config.TextColumn("Fonds"),
-            "statut":              st.column_config.TextColumn("Statut"),
-            "aum_pipeline_fmt":    st.column_config.TextColumn("AUM Pipeline"),
-            "funded_aum_fmt":      st.column_config.TextColumn("AUM Financé"),
-            "raison_perte":        st.column_config.TextColumn("Raison"),
+            "\U0001f5d1\ufe0f Delete":  st.column_config.CheckboxColumn("\U0001f5d1\ufe0f", default=False,
+                                            width="small"),
+            "id":                  st.column_config.NumberColumn("ID", width="small", disabled=True),
+            "nom_client":          st.column_config.TextColumn("Client", disabled=True),
+            "type_client":         st.column_config.TextColumn("Type", width="small", disabled=True),
+            "region":              st.column_config.TextColumn("Region", width="small", disabled=True),
+            "country":             st.column_config.TextColumn("Pays", width="small", disabled=True),
+            "fonds":               st.column_config.SelectboxColumn("Fonds", options=FONDS),
+            "statut":              st.column_config.SelectboxColumn("Statut", options=STATUTS),
+            "aum_pipeline_fmt":    st.column_config.TextColumn("AUM Pipeline", disabled=True),
+            "funded_aum_fmt":      st.column_config.TextColumn("AUM Financé", disabled=True),
+            "closing_probability": st.column_config.NumberColumn("Proba %", format="%.0f%%",
+                                       width="small", min_value=0, max_value=100, step=5),
+            "raison_perte":        st.column_config.SelectboxColumn("Raison",
+                                       options=[""] + RAISONS_PERTE),
             "next_action_date":    st.column_config.TextColumn("Next Action"),
             "sales_owner":         st.column_config.TextColumn("Commercial"),
-            "closing_probability": st.column_config.NumberColumn("Proba %", format="%.0f%%", width="small"),
-            "derniere_activite":   st.column_config.TextColumn("Dernière Activité"),
-        }, key="pipeline_ro")
+            "derniere_activite":   st.column_config.TextColumn("Dernière Activité", disabled=True),
+        }, key="pipeline_editor")
 
-    # ── Cross-tab safe selection: row index stored locally, dialog only on button click
-    selected_rows = event.selection.rows if event.selection else []
-    _pipe_selected_id = None
-    if selected_rows and selected_rows[0] < len(df_view):
-        _pipe_selected_id = int(df_view.iloc[selected_rows[0]]["id"])
-        st.session_state["pipe_last_selected_id"] = _pipe_selected_id
+    _del_col = "\U0001f5d1\ufe0f Delete"
+    _ids_to_delete = []
+    _rows_to_update = []
+    _orig_df = df_display[_cols_for_editor]
 
-    # Show which deal is selected + edit button — dialog ONLY fires on explicit click
-    _current_sel = st.session_state.get("pipe_last_selected_id")
-    if _current_sel is not None:
-        _sel_row_data = df_view[df_view["id"] == _current_sel]
-        if not _sel_row_data.empty:
-            _sn = str(_sel_row_data.iloc[0].get("nom_client",""))
-            _sf = str(_sel_row_data.iloc[0].get("fonds",""))
-            _ss = str(_sel_row_data.iloc[0].get("statut",""))
-            _hint_col, _btn_col = st.columns([3, 1])
-            with _hint_col:
-                st.markdown(
-                    '<div class="pipeline-hint" style="margin:6px 0;">'
-                    'Deal sélectionné : <b>{}</b> &nbsp;·&nbsp; {} &nbsp;·&nbsp; {}</div>'.format(
-                        _sn, _sf, _ss),
-                    unsafe_allow_html=True)
-            with _btn_col:
-                if st.button("Modifier le deal sélectionné", key="pipe_open_dialog_btn",
-                             type="tertiary", use_container_width=True):
-                    _row = db.get_pipeline_row_by_id(_current_sel)
-                    if _row:
-                        dialog_edit_pipeline(_current_sel, _row)
-        else:
-            # Deal no longer exists (was deleted) — clear selection
-            st.session_state.pop("pipe_last_selected_id", None)
-    else:
-        st.markdown(
-            '<div style="color:#888;font-size:0.78rem;padding:6px 0 2px 0;">'
-            'Sélectionnez une ligne pour activer l\'édition.</div>',
-            unsafe_allow_html=True)
+    for idx in range(len(edited_df)):
+        if idx >= len(_orig_df):
+            break
+        row_ed   = edited_df.iloc[idx]
+        row_orig = _orig_df.iloc[idx]
+        pid      = int(row_orig["id"])
+
+        if row_ed[_del_col]:
+            _ids_to_delete.append(pid)
+            continue
+
+        changed = False
+        for c in ["statut", "fonds", "closing_probability", "raison_perte",
+                   "next_action_date", "sales_owner"]:
+            if str(row_ed.get(c, "")) != str(row_orig.get(c, "")):
+                changed = True
+                break
+        if changed:
+            _rows_to_update.append((pid, row_ed))
+
+    _n_actions = len(_ids_to_delete) + len(_rows_to_update)
+    _btn_label = "Sauvegarder les modifications"
+    if _n_actions > 0:
+        _parts = []
+        if _rows_to_update:
+            _parts.append("{} modif.".format(len(_rows_to_update)))
+        if _ids_to_delete:
+            _parts.append("{} suppr.".format(len(_ids_to_delete)))
+        _btn_label += " ({})".format(" + ".join(_parts))
+
+    if st.button(_btn_label, key="pipe_save_all", type="primary",
+                 use_container_width=True, disabled=(_n_actions == 0)):
+        _ok_del, _ok_upd, _err = 0, 0, 0
+
+        if _ids_to_delete:
+            _ok_del = db.delete_pipeline_rows(_ids_to_delete)
+
+        for pid, row_ed in _rows_to_update:
+            _orig_row = db.get_pipeline_row_by_id(pid)
+            if not _orig_row:
+                _err += 1
+                continue
+            _upd = dict(_orig_row)
+            _upd["id"] = pid
+            for c in ["statut", "fonds"]:
+                _upd[c] = str(row_ed.get(c, _upd.get(c, "")))
+            try:
+                _upd["closing_probability"] = float(row_ed.get("closing_probability",
+                                                                _upd.get("closing_probability", 50)))
+            except (ValueError, TypeError):
+                pass
+            _upd["raison_perte"] = str(row_ed.get("raison_perte", "")) or ""
+            _nad = str(row_ed.get("next_action_date", "")).strip()
+            if _nad:
+                _upd["next_action_date"] = _nad
+            _so = str(row_ed.get("sales_owner", "")).strip()
+            if _so:
+                _upd["sales_owner"] = _so
+            ok, msg = db.update_pipeline_row(_upd)
+            if ok:
+                _ok_upd += 1
+            else:
+                _err += 1
+                st.warning("Deal #{} : {}".format(pid, msg))
+
+        _msgs = []
+        if _ok_upd:
+            _msgs.append("{} mis à jour".format(_ok_upd))
+        if _ok_del:
+            _msgs.append("{} supprimé(s)".format(_ok_del))
+        if _msgs:
+            st.success(" · ".join(_msgs))
+        if _err:
+            st.error("{} erreur(s).".format(_err))
+        if _ok_upd or _ok_del:
+            st.rerun()
 
     st.divider()
     df_viz_raw = db.get_pipeline_with_clients()
@@ -2461,49 +3043,118 @@ with tab_dash:
 
     nb_lost_paused = kpis["nb_lost"] + kpis.get("nb_paused", 0)
 
-    card_lp = (
-        '<div class="kpi-card kpi-card-static">'
-        '<div class="kpi-label">Lost / Paused Deals</div>'
-        '<div class="kpi-value">{n}</div>'
-        '<div class="kpi-sub">{n} deals</div>'
-        '</div>'
-    ).format(n=nb_lost_paused) if nb_lost_paused > 0 else (
-        '<div class="kpi-card kpi-card-static">'
-        '<div class="kpi-label">Lost / Paused Deals</div>'
-        '<div class="kpi-value">0</div>'
-        '<div class="kpi-sub">&nbsp;</div>'
-        '</div>'
-    )
+    # ── Meridian header bar (greeting + live badge) ─────────────────────
+    _today_fr_days = ["Dimanche","Lundi","Mardi","Mercredi","Jeudi","Vendredi","Samedi"]
+    _today_fr_months = ["janvier","février","mars","avril","mai","juin",
+                         "juillet","août","septembre","octobre","novembre","décembre"]
+    _td = date.today()
+    _today_label = "{} {} {} {} · Asset Management CRM".format(
+        _today_fr_days[(_td.weekday() + 1) % 7], _td.day,
+        _today_fr_months[_td.month - 1], _td.year)
+    _nb_active_markets = kpis.get("nb_deals_actifs", 0)
     st.markdown(
-        '<div class="kpi-grid">'
-        '<div class="kpi-card kpi-card-static">'
-        '<div class="kpi-label">Total Funded AUM</div>'
-        '<div class="kpi-value">{aum_f}</div>'
-        '<div class="kpi-sub">{nb_f} deal(s) funded</div>'
+        '<div class="mer-hdr">'
+        '<div>'
+        '<div class="mer-hdr-title">Executive Dashboard</div>'
+        '<div class="mer-hdr-date">{date}</div>'
         '</div>'
-        '<div class="kpi-card kpi-card-static">'
-        '<div class="kpi-label">Active Pipeline</div>'
-        '<div class="kpi-value">{aum_p}</div>'
-        '<div class="kpi-sub">{nb_p} active deals</div>'
-        '</div>'
-        '<div class="kpi-card kpi-card-static">'
-        '<div class="kpi-label">Weighted Pipeline</div>'
-        '<div class="kpi-value">{wp}</div>'
-        '<div class="kpi-sub">probability-weighted</div>'
-        '</div>'
-        '<div class="kpi-card kpi-card-static">'
-        '<div class="kpi-label">Conversion Rate</div>'
-        '<div class="kpi-value">{taux:.1f}%</div>'
-        '<div class="kpi-sub">{nb_f2} funded / {nb_l} lost</div>'
-        '</div>'
-        '{card_lp}'
-        '</div>'.format(
-            aum_f=fmt_m(kpis["total_funded"]), nb_f=kpis["nb_funded"],
-            aum_p=fmt_m(kpis["pipeline_actif"]), nb_p=kpis["nb_deals_actifs"],
-            wp=fmt_m(kpis.get("weighted_pipeline", 0)),
-            taux=kpis["taux_conversion"], nb_f2=kpis["nb_funded"], nb_l=kpis["nb_lost"],
-            card_lp=card_lp),
+        '<div class="mer-live-badge"><div class="mer-live-dot"></div>'
+        'Live · {n} deals actifs</div>'
+        '</div>'.format(date=_today_label, n=_nb_active_markets),
         unsafe_allow_html=True)
+
+    # ── Overdue alert banner ─────────────────────────────────────────────
+    _df_overdue_count = db.get_overdue_actions(fonds_filter=_filtre_effectif)
+    _nb_overdue = len(_df_overdue_count) if not _df_overdue_count.empty else 0
+    if _nb_overdue > 0:
+        _sample_clients = ", ".join(
+            _df_overdue_count.head(2)["nom_client"].astype(str).tolist())
+        _extra = ""
+        if _nb_overdue > 2:
+            _extra = " et {} autre(s)".format(_nb_overdue - 2)
+        st.markdown(
+            '<div class="mer-alert">'
+            '<div class="mer-alert-ico">⚡</div>'
+            '<div class="mer-alert-txt"><b>{n} action(s) en retard</b> — '
+            '{clients}{extra} nécessitent votre attention.</div>'
+            '</div>'.format(n=_nb_overdue, clients=_sample_clients, extra=_extra),
+            unsafe_allow_html=True)
+
+    # ── Premium 4-KPI row using st.columns(4) + .kcard markup ───────────
+    _kc_cards = [
+        ("AUM Financé Total", fmt_m(kpis["total_funded"]),
+         "{} deal(s) funded".format(kpis["nb_funded"]), "up"),
+        ("Pipeline Actif", fmt_m(kpis["pipeline_actif"]),
+         "{} deals actifs".format(kpis["nb_deals_actifs"]), "up"),
+        ("Pipeline Pondéré", fmt_m(kpis.get("weighted_pipeline", 0)),
+         "probabilité-pondéré", "up"),
+        ("Taux de Conversion", "{:.1f} %".format(kpis["taux_conversion"]),
+         "{} funded / {} lost".format(kpis["nb_funded"], kpis["nb_lost"]), "up"),
+    ]
+    _kpi_cols = st.columns(4)
+    for _kc_idx, (_lbl, _val, _sub, _delta_dir) in enumerate(_kc_cards):
+        with _kpi_cols[_kc_idx]:
+            _spark = "".join(
+                '<div class="sb{cls}" style="height:{h}px"></div>'.format(
+                    cls=" on" if i == 6 else "",
+                    h=[10, 13, 12, 16, 14, 20, 24][i])
+                for i in range(7))
+            _val_parts = _val.split(" ", 1)
+            _val_main = _val_parts[0] if _val_parts else _val
+            _val_unit = _val_parts[1] if len(_val_parts) > 1 else ""
+            st.markdown(
+                '<div class="kcard">'
+                '<div class="kc-lbl">{lbl}</div>'
+                '<div class="kc-val">{val_main} <span class="kc-unit">{unit}</span></div>'
+                '<div class="kc-delta {dir}">{sub}</div>'
+                '<div class="spark">{spark}</div>'
+                '</div>'.format(
+                    lbl=_lbl, val_main=_val_main, unit=_val_unit,
+                    sub=_sub, dir=_delta_dir, spark=_spark),
+                unsafe_allow_html=True)
+
+    st.markdown("<br>", unsafe_allow_html=True)
+
+    # ── AUM Time Machine — Historical Line Chart ─────────────────────────
+    st.markdown("#### AUM Time Machine")
+    _tm_options = {"YTD": None, "1M": 30, "3M": 91, "6M": 182, "1Y": 365}
+    _tm_sel = st.selectbox("Période", list(_tm_options.keys()),
+                            index=4, key="dash_time_machine_period",
+                            label_visibility="collapsed")
+    _tm_days = _tm_options[_tm_sel]
+    if _tm_days is None:
+        _tm_days = (date.today() - date(date.today().year, 1, 1)).days or 30
+    _df_hist = db.get_historical_aum(days_back=_tm_days)
+    if not _df_hist.empty:
+        fig_tm = go.Figure()
+        fig_tm.add_trace(go.Scatter(
+            x=_df_hist["date"], y=_df_hist["funded_aum"],
+            name="Funded AUM", mode="lines",
+            line=dict(color=MARINE, width=2.5),
+            fill="tozeroy", fillcolor="rgba(0,28,75,0.08)",
+            hovertemplate="<b>Funded</b><br>%{x|%d/%m/%Y}<br>%{customdata}<extra></extra>",
+            customdata=[fmt_m(v) for v in _df_hist["funded_aum"]]))
+        fig_tm.add_trace(go.Scatter(
+            x=_df_hist["date"], y=_df_hist["pipeline_aum"],
+            name="Active Pipeline", mode="lines",
+            line=dict(color=CIEL, width=2, dash="dot"),
+            hovertemplate="<b>Pipeline</b><br>%{x|%d/%m/%Y}<br>%{customdata}<extra></extra>",
+            customdata=[fmt_m(v) for v in _df_hist["pipeline_aum"]]))
+        fig_tm.update_layout(
+            height=300, paper_bgcolor=BLANC, plot_bgcolor=BLANC,
+            font_color=MARINE,
+            legend=dict(orientation="h", y=1.08, x=0.5, xanchor="center",
+                        font_size=10, bgcolor=BLANC, bordercolor=GRIS, borderwidth=1),
+            xaxis=dict(showgrid=False, tickformat="%b %Y"),
+            yaxis=dict(showgrid=True, gridcolor=GRIS, tickformat=".2s",
+                       title="AUM (EUR)"),
+            margin=dict(l=10, r=10, t=40, b=10))
+        st.plotly_chart(fig_tm, use_container_width=True,
+                        config={"displayModeBar": False}, key="chart_time_machine")
+        st.caption("Evolution historique du Funded AUM et du Pipeline Actif. "
+                   "Période : {}.".format(_tm_sel))
+    else:
+        st.info("Aucune donnée historique disponible.")
 
     st.markdown("<br>", unsafe_allow_html=True)
 
@@ -2618,6 +3269,65 @@ with tab_dash:
                                     margin=dict(l=180, r=20, t=36, b=10))
             st.plotly_chart(fig_fonds, use_container_width=True, config={"displayModeBar": False}, key="chart_bar_fonds")
 
+    # ── Global Roadshow Map — Choropleth ────────────────────────────────────
+    st.divider()
+    st.markdown("#### Global Roadshow Map — AUM par Pays")
+    _df_country_aum = db.get_aum_by_country()
+    if not _df_country_aum.empty and _df_country_aum["total_aum"].sum() > 0:
+        _COUNTRY_ISO = {
+            "United Arab Emirates": "ARE", "Saudi Arabia": "SAU", "Qatar": "QAT",
+            "Kuwait": "KWT", "Bahrain": "BHR", "Oman": "OMN",
+            "United Kingdom": "GBR", "France": "FRA", "Germany": "DEU",
+            "Switzerland": "CHE", "Luxembourg": "LUX", "Netherlands": "NLD",
+            "Italy": "ITA", "Spain": "ESP", "Belgium": "BEL", "Austria": "AUT",
+            "Sweden": "SWE", "Norway": "NOR", "Denmark": "DNK", "Finland": "FIN",
+            "Singapore": "SGP", "Japan": "JPN", "Hong Kong": "HKG",
+            "China": "CHN", "South Korea": "KOR", "Australia": "AUS", "India": "IND",
+            "United States": "USA", "Canada": "CAN", "Brazil": "BRA",
+            "Mexico": "MEX", "South Africa": "ZAF", "Egypt": "EGY",
+        }
+        _df_map = _df_country_aum.copy()
+        _df_map["iso"] = _df_map["country"].map(_COUNTRY_ISO)
+        _df_map = _df_map.dropna(subset=["iso"])
+        _df_map["hover_text"] = _df_map.apply(
+            lambda r: "<b>{}</b><br>Funded: {}<br>Pipeline: {}<br>Total: {}".format(
+                r["country"], fmt_m(r["funded_aum"]),
+                fmt_m(r["pipeline_aum"]), fmt_m(r["total_aum"])), axis=1)
+        if not _df_map.empty:
+            fig_map = go.Figure(go.Choropleth(
+                locations=_df_map["iso"],
+                z=_df_map["total_aum"],
+                text=_df_map["hover_text"],
+                hovertemplate="%{text}<extra></extra>",
+                colorscale=[
+                    [0.0, "#f0f4f8"], [0.2, "#c6dff0"], [0.4, "#6baed6"],
+                    [0.6, "#2171b5"], [0.8, "#1a5e8a"], [1.0, MARINE],
+                ],
+                marker_line_color="#ffffff",
+                marker_line_width=0.5,
+                colorbar=dict(
+                    title=dict(text="AUM (EUR)", font=dict(size=9, color=MARINE)),
+                    tickfont=dict(size=8, color=MARINE),
+                    thickness=12, len=0.6,
+                ),
+            ))
+            fig_map.update_layout(
+                geo=dict(
+                    showframe=False, showcoastlines=True,
+                    coastlinecolor=GRIS, projection_type="natural earth",
+                    bgcolor=BLANC, landcolor="#f8f9fa",
+                    showlakes=False, showcountries=True, countrycolor="#e0e0e0",
+                ),
+                height=360, paper_bgcolor=BLANC,
+                font_color=MARINE,
+                margin=dict(l=0, r=0, t=10, b=10),
+            )
+            st.plotly_chart(fig_map, use_container_width=True,
+                            config={"displayModeBar": False}, key="chart_choropleth")
+            st.caption("AUM total (Funded + Pipeline actif) par pays. Couleur plus foncée = AUM plus élevé.")
+    else:
+        st.info("Aucune donnée géographique disponible pour la carte.")
+
     st.divider()
     _td_col1, _td_col2 = st.columns([3, 1])
     with _td_col1:
@@ -2663,12 +3373,21 @@ with tab_dash:
 
     # ── TOP CLIENTS CONSOLIDE — Stacked Bar horizontal par Fonds ─────────────
     st.divider()
-    st.markdown("#### Top Clients — Vue Consolidee (AUM Finance par Fonds)")
+    _strat_col1, _strat_col2 = st.columns([3, 1])
+    with _strat_col1:
+        st.markdown("#### Top Clients — Vue Consolidee (AUM Finance par Fonds)")
+    with _strat_col2:
+        _strat_region = st.selectbox("Filtrer par Région", ["Toutes"] + REGIONS,
+                                      key="dash_strat_region",
+                                      label_visibility="collapsed")
     _df_top_clients_raw = (
         db.get_pipeline_with_clients()
         .query("statut == 'Funded' and funded_aum > 0")
         .copy()
     )
+    if _strat_region != "Toutes":
+        _df_top_clients_raw = _df_top_clients_raw[
+            _df_top_clients_raw["region"] == _strat_region]
     if not _df_top_clients_raw.empty:
         _df_tc = (
             _df_top_clients_raw
@@ -3330,10 +4049,12 @@ with tab_settings:
                 dialog_add_activity()
 
     with sa_col2:
-        st.markdown("#### Import CSV / Excel — Upsert")
-        import_type   = st.radio("Table cible", ["Clients","Pipeline"], horizontal=True)
+        st.markdown("#### Import CSV / Excel — Smart Staging")
+        import_type   = st.radio("Table cible", ["Clients","Pipeline"], horizontal=True,
+                                  key="settings_import_type")
         uploaded_file = st.file_uploader("Fichier CSV ou Excel (.xlsx)",
-                                         type=["csv","xlsx","xls"])
+                                         type=["csv","xlsx","xls"],
+                                         key="settings_file_uploader")
         if import_type == "Clients":
             st.info("Colonnes : nom_client, type_client, region")
         else:
@@ -3342,34 +4063,132 @@ with tab_settings:
                 "target_aum_initial, revised_aum, funded_aum, closing_probability, "
                 "raison_perte, concurrent_choisi, next_action_date, sales_owner"
             )
+
         if uploaded_file:
             try:
-                df_imp = (pd.read_csv(uploaded_file) if uploaded_file.name.endswith(".csv")
-                          else pd.read_excel(uploaded_file))
-                st.dataframe(df_imp.head(5), use_container_width=True, height=145)
-                st.caption("{} ligne(s)".format(len(df_imp)))
+                _file_key = "staging_{}_{}".format(uploaded_file.name, uploaded_file.size)
+                if st.session_state.get("_staging_file_key") != _file_key:
+                    _df_raw = (pd.read_csv(uploaded_file) if uploaded_file.name.endswith(".csv")
+                               else pd.read_excel(uploaded_file))
+                    _df_raw.columns = [c.strip() for c in _df_raw.columns]
+                    st.session_state["_staging_file_key"] = _file_key
+                    st.session_state["_staging_df"] = _df_raw
+                    st.session_state.pop("_staging_validated", None)
 
-                # ── Détection doublons avant import ──────────────────────────
-                if import_type == "Pipeline":
-                    _dup_report = db.detect_import_duplicates(df_imp)
-                    _dup_exact  = _dup_report.get("exact", [])
-                    _dup_fuzzy  = _dup_report.get("fuzzy", [])
-                    if _dup_exact:
-                        _dup_msg = "**{} doublon(s) exact(s)** : ".format(len(_dup_exact))
-                        for _d in _dup_exact[:5]:
-                            _dup_msg += "  L.{} & L.{} : {} ".format(_d["ligne_1"], _d["ligne_2"], _d["valeur"])
-                        st.warning(_dup_msg)
-                    if _dup_fuzzy:
-                        with st.expander("{} doublon(s) potentiel(s) (noms similaires)".format(
-                                len(_dup_fuzzy))):
-                            for d in _dup_fuzzy[:10]:
-                                st.markdown("- `{}` ↔ `{}`".format(d["nom_1"], d["nom_2"]))
+                df_staging = st.session_state.get("_staging_df")
+                if df_staging is not None:
+                    if import_type == "Pipeline":
+                        _ALLOWED_STATUTS = STATUTS
+                        _ALLOWED_FONDS   = FONDS
 
-                if st.button("Lancer l'import", key="settings_btn_import", use_container_width=True):
-                    fn = (db.upsert_clients_from_df if import_type == "Clients"
-                          else db.upsert_pipeline_from_df)
-                    ins, upd = fn(df_imp)
-                    st.success("Import : {} créé(s), {} mis à jour.".format(ins, upd))
+                        df_check = df_staging.copy()
+                        _col_map_lower = {c.lower(): c for c in df_check.columns}
+                        _fonds_col  = _col_map_lower.get("fonds",
+                                       _col_map_lower.get("fund",
+                                       _col_map_lower.get("produit", None)))
+                        _statut_col = _col_map_lower.get("statut",
+                                       _col_map_lower.get("status",
+                                       _col_map_lower.get("stage",
+                                       _col_map_lower.get("etape", None))))
+
+                        errors_list = []
+                        for idx in range(len(df_check)):
+                            row_errors = []
+                            if _fonds_col:
+                                val = str(df_check.at[idx, _fonds_col]).strip()
+                                if val and val != "nan" and val not in _ALLOWED_FONDS:
+                                    row_errors.append("Fonds '{}' inconnu".format(val))
+                            if _statut_col:
+                                val = str(df_check.at[idx, _statut_col]).strip()
+                                if val and val != "nan" and val not in _ALLOWED_STATUTS:
+                                    row_errors.append("Statut '{}' inconnu".format(val))
+                            errors_list.append("; ".join(row_errors))
+                        df_check["Errors"] = errors_list
+
+                        _dup_report = db.detect_import_duplicates(df_staging)
+                        _dup_exact  = _dup_report.get("exact", [])
+                        _dup_fuzzy  = _dup_report.get("fuzzy", [])
+                        if _dup_exact:
+                            _dup_msg = "**{} doublon(s) exact(s)** : ".format(len(_dup_exact))
+                            for _d in _dup_exact[:5]:
+                                _dup_msg += "  L.{} & L.{} : {} ".format(
+                                    _d["ligne_1"], _d["ligne_2"], _d["valeur"])
+                            st.warning(_dup_msg)
+                        if _dup_fuzzy:
+                            with st.expander("{} doublon(s) potentiel(s) (noms similaires)".format(
+                                    len(_dup_fuzzy))):
+                                for d in _dup_fuzzy[:10]:
+                                    st.markdown("- `{}` ↔ `{}`".format(d["nom_1"], d["nom_2"]))
+
+                        _has_errors = any(e != "" for e in errors_list)
+                        _err_count  = sum(1 for e in errors_list if e != "")
+                        if _has_errors:
+                            st.warning("{} ligne(s) avec erreurs. Corrigez-les ci-dessous avant d'importer.".format(
+                                _err_count))
+
+                        _fonds_options = _ALLOWED_FONDS
+                        _statut_options = _ALLOWED_STATUTS
+                        _col_config_staging = {}
+                        if _fonds_col:
+                            _col_config_staging[_fonds_col] = st.column_config.SelectboxColumn(
+                                "Fonds", options=_fonds_options, required=True)
+                        if _statut_col:
+                            _col_config_staging[_statut_col] = st.column_config.SelectboxColumn(
+                                "Statut", options=_statut_options, required=True)
+                        _col_config_staging["Errors"] = st.column_config.TextColumn(
+                            "Errors", disabled=True)
+
+                        edited_staging = st.data_editor(
+                            df_check,
+                            use_container_width=True,
+                            hide_index=False,
+                            num_rows="fixed",
+                            column_config=_col_config_staging,
+                            key="staging_editor")
+
+                        _edited_no_err = edited_staging.copy()
+                        _new_errors = []
+                        for idx in range(len(_edited_no_err)):
+                            row_errors = []
+                            if _fonds_col:
+                                val = str(_edited_no_err.at[idx, _fonds_col]).strip()
+                                if val and val != "nan" and val not in _ALLOWED_FONDS:
+                                    row_errors.append("Fonds '{}' inconnu".format(val))
+                            if _statut_col:
+                                val = str(_edited_no_err.at[idx, _statut_col]).strip()
+                                if val and val != "nan" and val not in _ALLOWED_STATUTS:
+                                    row_errors.append("Statut '{}' inconnu".format(val))
+                            _new_errors.append("; ".join(row_errors))
+                        _still_has_errors = any(e != "" for e in _new_errors)
+
+                        st.caption("{} ligne(s) totale(s)".format(len(edited_staging)))
+
+                        if _still_has_errors:
+                            st.button("Confirmer & Importer", disabled=True,
+                                      key="settings_btn_confirm_disabled",
+                                      use_container_width=True,
+                                      help="Corrigez toutes les erreurs avant d'importer")
+                        else:
+                            if st.button("Confirmer & Importer",
+                                         key="settings_btn_confirm_import",
+                                         use_container_width=True, type="primary"):
+                                _df_to_import = edited_staging.drop(columns=["Errors"], errors="ignore")
+                                st.session_state["_staging_df"] = _df_to_import
+                                ins, upd = db.upsert_pipeline_from_df(_df_to_import)
+                                st.success("Import : {} créé(s), {} mis à jour.".format(ins, upd))
+                                st.session_state.pop("_staging_file_key", None)
+                                st.session_state.pop("_staging_df", None)
+
+                    else:
+                        st.dataframe(df_staging.head(10), use_container_width=True, height=200)
+                        st.caption("{} ligne(s)".format(len(df_staging)))
+                        if st.button("Lancer l'import Clients",
+                                     key="settings_btn_import_clients",
+                                     use_container_width=True, type="primary"):
+                            ins, upd = db.upsert_clients_from_df(df_staging)
+                            st.success("Import : {} créé(s), {} mis à jour.".format(ins, upd))
+                            st.session_state.pop("_staging_file_key", None)
+                            st.session_state.pop("_staging_df", None)
             except Exception as e:
                 st.error("Erreur : {}".format(e))
 

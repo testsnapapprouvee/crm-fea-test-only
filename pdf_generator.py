@@ -696,6 +696,26 @@ def _header_footer(canvas, doc):
 # ---------------------------------------------------------------------------
 # ENTREE PRINCIPALE
 # ---------------------------------------------------------------------------
+def _section_bi_charts(chart_pngs, styles):
+    """Append BI chart PNG buffers as full-width pages in the PDF."""
+    elements = []
+    for title, png_buf in chart_pngs:
+        if png_buf is None:
+            continue
+        elements.append(PageBreak())
+        elements.append(Paragraph(title, styles["section"]))
+        elements.append(ColorRect(USABLE_W, 2, COL_CIEL))
+        elements.append(Spacer(1, 12))
+        try:
+            png_buf.seek(0)
+            img = Image(png_buf, width=USABLE_W, height=USABLE_W * 0.55)
+            cap = Paragraph(title, styles["caption"])
+            elements.append(KeepTogether([img, cap]))
+        except Exception:
+            elements.append(Paragraph("Graphique indisponible.", styles["body"]))
+    return elements
+
+
 def generate_pdf(
     pipeline_df,
     kpis,
@@ -707,12 +727,14 @@ def generate_pdf(
     include_top10=True,
     include_outflows=False,
     include_perf=True,
+    bi_chart_pngs=None,
 ):
     """
     Genere le PDF.
     include_top10    : inclure la page Top 10 Inflows (cochable)
     include_outflows : inclure le Top 10 Outflows dans la meme page (cochable)
     include_perf     : inclure la page Performance NAV (cochable)
+    bi_chart_pngs    : list of (title, BytesIO) tuples for BI chart pages
     """
     aum_by_region = aum_by_region or {}
     outflows      = kpis.get("outflows", [])
@@ -759,6 +781,9 @@ def generate_pdf(
     # Page 5 : Performance (optionnel)
     if include_perf and perf_data is not None and not perf_data.empty:
         elements += _section_performance(perf_data, nav_base100_df, styles, fonds_perimetre)
+    # BI Charts pages (Whitespace, Choropleth, Cashflows, Time Machine)
+    if bi_chart_pngs:
+        elements += _section_bi_charts(bi_chart_pngs, styles)
 
     doc.build(elements, onFirstPage=_header_footer, onLaterPages=_header_footer)
     result = pdf_buf.getvalue()
