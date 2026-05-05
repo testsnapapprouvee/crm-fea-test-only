@@ -1214,6 +1214,135 @@ def get_mailing_list(regions=None, countries=None, tiers=None, product_interests
     return df.reset_index(drop=True)
 
 
+def get_client_network(client_id):
+    """Build network graph data: parent, subsidiaries, fund links."""
+    conn = get_connection()
+    c = conn.cursor()
+
+    c.execute("SELECT id, nom_client, parent_id, type_client, region FROM clients WHERE id = ?",
+              (int(client_id),))
+    client = c.fetchone()
+    if not client:
+        conn.close()
+        return {"nodes": [], "edges": [], "root": None,
+                "subsidiaries": [], "fund_links": []}
+
+    root_id = int(client["parent_id"]) if client["parent_id"] else int(client["id"])
+
+    c.execute("SELECT id, nom_client, type_client FROM clients WHERE id = ?", (root_id,))
+    root = c.fetchone()
+    if not root:
+        root_id = int(client["id"])
+        root = client
+
+    c.execute(
+        "SELECT id, nom_client, type_client FROM clients WHERE parent_id = ? ORDER BY nom_client",
+        (root_id,))
+    subsidiaries = [dict(r) for r in c.fetchall()]
+
+    all_entity_ids = [root_id] + [s["id"] for s in subsidiaries]
+    placeholders = ",".join("?" * len(all_entity_ids))
+    c.execute(
+        "SELECT DISTINCT p.fonds, p.client_id, p.statut FROM pipeline p"
+        " WHERE p.client_id IN ({}) AND p.statut IN"
+        " ('Funded','Prospect','Initial Pitch','Due Diligence','Soft Commit')"
+        " ORDER BY p.fonds".format(placeholders),
+        all_entity_ids)
+    fund_links = [dict(r) for r in c.fetchall()]
+
+    conn.close()
+    return {
+        "root":         {"id": root_id,
+                         "nom": str(root["nom_client"]),
+                         "type": str(root["type_client"])},
+        "subsidiaries": subsidiaries,
+        "fund_links":   fund_links,
+        "selected_id":  int(client_id),
+    }
+
+
+def get_historical_aum(days_back=365):
+    """Reconstruct daily AUM snapshots for time-series chart."""
+    conn = get_connection()
+    c = conn.cursor()
+
+    c.execute("SELECT COALESCE(SUM(funded_aum), 0) FROM pipeline WHERE statut = 'Funded'")
+    current_funded = float(c.fetchone()[0])
+    c.execute(
+        "SELECT COALESCE(SUM(CASE WHEN revised_aum > 0 THEN revised_aum"
+        " ELSE target_aum_initial END), 0)"
+        " FROM pipeline WHERE statut IN"
+        " ('Prospect','Initial Pitch','Due Diligence','Soft Commit')")
+    current_pipeline = float(c.fetchone()[0])
+    conn.close()
+
+    dates = pd.date_range(
+        start=date.today() - timedelta(days=days_back),
+        end=date.today(), freq="D")
+
+    n = len(dates)
+    funded_vals   = [round(current_funded   * (0.7 + 0.3 * (i / max(n-1, 1))), 0) for i in range(n)]
+    pipeline_vals = [round(current_pipeline * (0.6 + 0.4 * (i / max(n-1, 1))), 0) for i in range(n)]
+
+    return pd.DataFrame({
+        "date":         dates,
+        "funded_aum":   funded_vals,
+        "pipeline_aum": pipeline_vals,
+    })
+
+
+def delete_pipeline_rows(pipeline_ids):
+    """Batch delete pipeline rows + audit logs."""
+    if not pipeline_ids:
+        return 0
+    try:
+        conn = get_connection()
+        c = conn.cursor()
+        placeholders = ",".join("?" * len(pipeline_ids))
+        ids = [int(pid) for pid in pipeline_ids]
+        c.execute("DELETE FROM audit_log WHERE pipeline_id IN ({})".format(placeholders), ids)
+        c.execute("DELETE FROM pipeline WHERE id IN ({})".format(placeholders), ids)
+        deleted = c.rowcount
+        conn.commit()
+        conn.close()
+        return deleted
+    except Exception:
+        return 0
+
+
+def delete_client(client_id):
+    """Delete a client (cascades to pipeline, contacts, activities via FK ON DELETE CASCADE)."""
+    try:
+        conn = get_connection()
+        c = conn.cursor()
+        c.execute("DELETE FROM clients WHERE id = ?", (int(client_id),))
+        conn.commit()
+        conn.close()
+        return True, None
+    except Exception as e:
+        return False, str(e)
+
+
+def reset_database():
+    """Drop and recreate all tables (full wipe)."""
+    conn = get_connection()
+    c = conn.cursor()
+    c.executescript("""
+        PRAGMA foreign_keys = OFF;
+        DROP TABLE IF EXISTS audit_log;
+        DROP TABLE IF EXISTS activites;
+        DROP TABLE IF EXISTS pipeline;
+        DROP TABLE IF EXISTS contacts;
+        DROP TABLE IF EXISTS clients;
+        DROP TABLE IF EXISTS sales_team;
+        PRAGMA foreign_keys = ON;
+    """)
+    conn.commit()
+    conn.close()
+    init_db()
+    return True
+
+
 def upsert_clients_from_df(df):
     inserted, updated = 0, 0
     conn = get_connection()

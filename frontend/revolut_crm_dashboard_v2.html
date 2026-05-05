@@ -172,6 +172,46 @@ body{background:#F0F2F5;}
 .crm-timeline-item{display:flex;gap:10px;padding:8px 0;border-bottom:1px solid #F9FAFB;align-items:flex-start;}
 .crm-timeline-item:last-child{border-bottom:none;}
 .crm-timeline-dot{width:8px;height:8px;border-radius:50%;flex-shrink:0;margin-top:4px;}
+/* ── MODAL SYSTEM ── */
+.modal-backdrop{position:fixed;inset:0;background:rgba(17,24,39,.55);backdrop-filter:blur(4px);z-index:1000;display:none;align-items:center;justify-content:center;padding:24px;}
+.modal-backdrop.on{display:flex;}
+.modal{background:#fff;border-radius:18px;width:100%;max-width:560px;max-height:90vh;overflow-y:auto;box-shadow:0 20px 60px rgba(0,0,0,.3);}
+.modal.wide{max-width:760px;}
+.modal-hdr{padding:18px 22px;border-bottom:1px solid #F3F4F6;display:flex;align-items:center;justify-content:space-between;position:sticky;top:0;background:#fff;border-radius:18px 18px 0 0;z-index:1;}
+.modal-title{font-size:16px;font-weight:800;color:#111827;letter-spacing:-.3px;}
+.modal-close{width:32px;height:32px;border-radius:50%;background:#F3F4F6;border:none;cursor:pointer;font-size:16px;color:#6B7280;display:flex;align-items:center;justify-content:center;}
+.modal-close:hover{background:#E5E7EB;color:#111827;}
+.modal-body{padding:20px 22px;}
+.modal-ftr{padding:14px 22px;border-top:1px solid #F3F4F6;display:flex;justify-content:flex-end;gap:8px;background:#FAFBFC;border-radius:0 0 18px 18px;position:sticky;bottom:0;}
+.fld{margin-bottom:14px;}
+.fld-lbl{font-size:11px;font-weight:600;color:#374151;text-transform:uppercase;letter-spacing:.5px;margin-bottom:5px;display:block;}
+.fld-input,.fld-select,.fld-textarea{width:100%;padding:10px 12px;border-radius:10px;border:1px solid #E5E7EB;font-size:13px;color:#111827;font-family:'DM Sans',sans-serif;background:#F9FAFB;outline:none;transition:border-color .15s,background .15s;}
+.fld-input:focus,.fld-select:focus,.fld-textarea:focus{border-color:#019ee1;background:#fff;}
+.fld-textarea{resize:vertical;min-height:70px;}
+.fld-row{display:grid;grid-template-columns:1fr 1fr;gap:10px;}
+.fld-row-3{display:grid;grid-template-columns:1fr 1fr 1fr;gap:10px;}
+.btn{padding:9px 16px;border-radius:10px;border:none;font-size:12px;font-weight:600;cursor:pointer;font-family:'DM Sans',sans-serif;transition:background .15s,box-shadow .15s;}
+.btn-primary{background:#001c4b;color:#fff;}
+.btn-primary:hover{background:#0F3A7A;box-shadow:0 4px 12px rgba(0,28,75,.3);}
+.btn-danger{background:#DC2626;color:#fff;}
+.btn-danger:hover{background:#B91C1C;}
+.btn-secondary{background:#F3F4F6;color:#374151;}
+.btn-secondary:hover{background:#E5E7EB;}
+.btn-ghost{background:transparent;color:#6B7280;border:1px solid #E5E7EB;}
+.btn-ghost:hover{background:#F9FAFB;color:#111827;}
+.toast{position:fixed;top:20px;right:20px;background:#001c4b;color:#fff;padding:12px 20px;border-radius:12px;font-size:12.5px;font-weight:600;box-shadow:0 8px 28px rgba(0,0,0,.2);z-index:2000;display:none;}
+.toast.show{display:block;animation:toast-in .25s;}
+.toast.error{background:#DC2626;}
+.toast.success{background:#059669;}
+@keyframes toast-in{from{transform:translateY(-12px);opacity:0;}to{transform:translateY(0);opacity:1;}}
+.deal-actions{display:flex;gap:6px;margin-left:8px;flex-shrink:0;}
+.icon-btn{width:28px;height:28px;border-radius:8px;background:#F3F4F6;border:none;cursor:pointer;font-size:12px;color:#6B7280;display:flex;align-items:center;justify-content:center;}
+.icon-btn:hover{background:#E5E7EB;color:#111827;}
+.icon-btn.danger:hover{background:#FEE2E2;color:#B91C1C;}
+.qb{position:relative;}
+.qb[data-action]{user-select:none;}
+.empty-state{text-align:center;padding:32px 20px;color:#9CA3AF;font-size:13px;}
+.empty-state .ico{font-size:32px;display:block;margin-bottom:8px;opacity:.5;}
 </style>
 </head>
 <body>
@@ -182,7 +222,12 @@ body{background:#F0F2F5;}
     <div class="hdr-title">Bonjour, Sophie 👋</div>
     <div class="hdr-date" id="today-date"></div>
   </div>
-  <div class="live-badge"><div class="dot"></div><span id="live-badge-text">Live · Connexion…</span></div>
+  <div style="display:flex;gap:8px;align-items:center;">
+    <button class="btn btn-ghost" data-action="seed-demo" title="Charger des données de démonstration">🌱 Demo</button>
+    <button class="btn btn-ghost" data-action="export-excel" title="Exporter Excel">📥 Excel</button>
+    <button class="btn btn-ghost" data-action="reset-db" title="Vider la base">🗑️ Reset</button>
+    <div class="live-badge"><div class="dot"></div><span id="live-badge-text">Live · Connexion…</span></div>
+  </div>
 </div>
 <div class="alert" id="alert-banner" style="display:none;">
   <div class="alert-ico">⚡</div>
@@ -202,10 +247,10 @@ body{background:#F0F2F5;}
 ══════════════════════════════════════════ -->
 <div class="tab-content on" id="tab-overview">
 <div class="quick">
-  <div class="qb"><div class="qb-ico">➕</div><div class="qb-lbl">Nouveau Deal</div></div>
-  <div class="qb"><div class="qb-ico">🤝</div><div class="qb-lbl">Enregistrer activité</div></div>
-  <div class="qb"><div class="qb-ico">📊</div><div class="qb-lbl">Générer rapport</div></div>
-  <div class="qb"><div class="qb-ico">👤</div><div class="qb-lbl">Nouveau client</div></div>
+  <div class="qb" data-action="new-deal"><div class="qb-ico">➕</div><div class="qb-lbl">Nouveau Deal</div></div>
+  <div class="qb" data-action="new-activity"><div class="qb-ico">🤝</div><div class="qb-lbl">Enregistrer activité</div></div>
+  <div class="qb" data-action="new-sales"><div class="qb-ico">📊</div><div class="qb-lbl">Nouveau Commercial</div></div>
+  <div class="qb" data-action="new-client"><div class="qb-ico">👤</div><div class="qb-lbl">Nouveau Client</div></div>
 </div>
 <div class="kpi-row" id="kpi-row"></div>
 <div class="mid-row">
@@ -538,15 +583,16 @@ function flagFor(country, region) {
 function renderTopDeals(deals) {
   const el = document.getElementById('top-deals');
   if (!deals.length) {
-    el.innerHTML = '<div style="color:#9CA3AF;font-size:12px;padding:14px 0;">Aucun deal enregistré.</div>';
+    el.innerHTML = '<div class="empty-state"><span class="ico">💼</span>Aucun deal enregistré.<br><br>'
+      + '<button class="btn btn-primary" data-action="new-deal">+ Créer le premier deal</button></div>';
     return;
   }
   el.innerHTML = deals.slice(0, 6).map(d => {
     const aum_m = ((d.aum || 0) / 1e6).toFixed(1) + ' M€';
-    return '<div class="deal-row">'
+    return '<div class="deal-row" data-action="edit-deal" data-id="'+d.id+'" style="cursor:pointer;">'
       + '<div class="av">'+flagFor(d.country, d.region)+'</div>'
-      + '<div style="flex:1;min-width:0"><div class="dn">'+(d.client||'')+'</div>'
-      + '<div class="ds">'+(d.fonds||'')+' · '+(d.sales_owner||'—')+'</div></div>'
+      + '<div style="flex:1;min-width:0"><div class="dn">'+escapeHtml(d.client||'')+'</div>'
+      + '<div class="ds">'+escapeHtml(d.fonds||'')+' · '+escapeHtml(d.sales_owner||'—')+'</div></div>'
       + pillHtml(d.statut)
       + '<div class="da"><div class="da-v">'+aum_m+'</div></div></div>';
   }).join('');
@@ -742,17 +788,22 @@ function renderMiniStats(stats) {
 function renderPipelineTable(deals) {
   const el = document.getElementById('pipeline-table');
   if (!deals.length) {
-    el.innerHTML = '<div style="color:#9CA3AF;font-size:12px;padding:14px 0;">Aucun deal.</div>';
+    el.innerHTML = '<div class="empty-state"><span class="ico">📋</span>Aucun deal pour le moment.<br><br>'
+      + '<button class="btn btn-primary" data-action="new-deal">+ Nouveau deal</button></div>';
     return;
   }
   el.innerHTML = deals.map(d => {
     const aum_m = ((d.aum || 0) / 1e6).toFixed(1) + ' M€';
     return '<div class="deal-row">'
       + '<div class="av">'+flagFor(d.country, d.region)+'</div>'
-      + '<div style="flex:1;min-width:0"><div class="dn">'+(d.client||'')+'</div>'
-      + '<div class="ds">'+(d.fonds||'')+' · '+(d.sales_owner||'—')+'</div></div>'
+      + '<div style="flex:1;min-width:0"><div class="dn">'+escapeHtml(d.client||'')+'</div>'
+      + '<div class="ds">'+escapeHtml(d.fonds||'')+' · '+escapeHtml(d.sales_owner||'—')+'</div></div>'
       + pillHtml(d.statut)
-      + '<div class="da"><div class="da-v">'+aum_m+'</div></div></div>';
+      + '<div class="da"><div class="da-v">'+aum_m+'</div></div>'
+      + '<div class="deal-actions">'
+      + '<button class="icon-btn" data-action="edit-deal" data-id="'+d.id+'" title="Modifier">✎</button>'
+      + '<button class="icon-btn danger" data-action="delete-deal" data-id="'+d.id+'" data-label="'+escapeHtml(d.client+' · '+d.fonds)+'" title="Supprimer">🗑</button>'
+      + '</div></div>';
   }).join('');
 }
 
@@ -1082,7 +1133,359 @@ async function boot() {
 }
 
 document.getElementById('crm-search').addEventListener('input', e => buildClientList(e.target.value));
+
+/* ============================================================
+   ACTION HANDLERS — CRUD modals + admin actions
+============================================================ */
+let REFS = null;
+async function loadRefs() {
+  if (REFS) return REFS;
+  REFS = await API('/api/referentials');
+  return REFS;
+}
+
+function toast(msg, kind) {
+  const el = document.getElementById('toast');
+  el.className = 'toast show ' + (kind || 'success');
+  el.textContent = msg;
+  setTimeout(() => { el.className = 'toast'; }, 2400);
+}
+
+function openModal(html) {
+  const root = document.getElementById('modal-root');
+  root.innerHTML = '<div class="modal-backdrop on" id="modal-backdrop"><div class="modal" id="modal-box">'+html+'</div></div>';
+  document.getElementById('modal-backdrop').addEventListener('click', e => {
+    if (e.target.id === 'modal-backdrop') closeModal();
+  });
+}
+function closeModal() {
+  document.getElementById('modal-root').innerHTML = '';
+}
+
+function selectOpts(values, current, includeEmpty) {
+  let html = includeEmpty ? '<option value="">—</option>' : '';
+  values.forEach(v => {
+    html += '<option value="'+escapeHtml(v)+'"'+(v === current ? ' selected' : '')+'>'+escapeHtml(v)+'</option>';
+  });
+  return html;
+}
+
+function escapeHtml(s) {
+  return String(s == null ? '' : s)
+    .replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;')
+    .replace(/"/g,'&quot;').replace(/'/g,'&#39;');
+}
+
+async function postJson(url, body, method) {
+  const res = await fetch(url, {
+    method: method || 'POST',
+    headers: {'Content-Type':'application/json'},
+    body: JSON.stringify(body),
+  });
+  if (!res.ok) {
+    const errText = await res.text();
+    throw new Error(errText || res.statusText);
+  }
+  return res.json();
+}
+
+async function delReq(url) {
+  const res = await fetch(url, {method:'DELETE'});
+  if (!res.ok) throw new Error(await res.text() || res.statusText);
+  return res.json();
+}
+
+/* ── NEW CLIENT ── */
+async function openClientModal(existing) {
+  const refs = await loadRefs();
+  const isEdit = !!existing;
+  const c = existing || {};
+  openModal(`
+    <div class="modal-hdr">
+      <div class="modal-title">${isEdit ? 'Modifier le client' : 'Nouveau client'}</div>
+      <button class="modal-close" onclick="closeModal()">×</button>
+    </div>
+    <div class="modal-body">
+      <div class="fld"><label class="fld-lbl">Nom du client</label>
+        <input class="fld-input" id="cli-nom" value="${escapeHtml(c.nom_client || '')}" placeholder="ex. Allianz Global Inv." required></div>
+      <div class="fld-row">
+        <div class="fld"><label class="fld-lbl">Type</label>
+          <select class="fld-select" id="cli-type">${selectOpts(refs.types_client, c.type_client, true)}</select></div>
+        <div class="fld"><label class="fld-lbl">Région</label>
+          <select class="fld-select" id="cli-region">${selectOpts(refs.regions, c.region, true)}</select></div>
+      </div>
+      <div class="fld-row">
+        <div class="fld"><label class="fld-lbl">Pays</label>
+          <select class="fld-select" id="cli-country">${selectOpts(refs.countries, c.country, true)}</select></div>
+        <div class="fld"><label class="fld-lbl">Tier</label>
+          <select class="fld-select" id="cli-tier">${selectOpts(refs.tiers, c.tier || 'Tier 2', false)}</select></div>
+      </div>
+      <div class="fld-row">
+        <div class="fld"><label class="fld-lbl">KYC</label>
+          <select class="fld-select" id="cli-kyc">${selectOpts(refs.kyc_statuts, c.kyc_status || 'En cours', false)}</select></div>
+        <div class="fld"><label class="fld-lbl">Société mère (optionnel)</label>
+          <select class="fld-select" id="cli-parent"><option value="">— Aucune —</option>${
+            CRM_CACHE.filter(x => x.id !== c.id).map(x =>
+              '<option value="'+x.id+'"'+(c.parent_id === x.id ? ' selected':'')+'>'+escapeHtml(x.nom_client)+'</option>').join('')
+          }</select></div>
+      </div>
+    </div>
+    <div class="modal-ftr">
+      <button class="btn btn-ghost" onclick="closeModal()">Annuler</button>
+      <button class="btn btn-primary" id="cli-save">${isEdit ? 'Enregistrer' : 'Créer'}</button>
+    </div>
+  `);
+  document.getElementById('cli-save').addEventListener('click', async () => {
+    const body = {
+      nom_client: document.getElementById('cli-nom').value.trim(),
+      type_client: document.getElementById('cli-type').value,
+      region: document.getElementById('cli-region').value,
+      country: document.getElementById('cli-country').value,
+      tier: document.getElementById('cli-tier').value,
+      kyc_status: document.getElementById('cli-kyc').value,
+      parent_id: parseInt(document.getElementById('cli-parent').value) || null,
+      product_interests: '',
+    };
+    if (!body.nom_client) { toast('Nom requis', 'error'); return; }
+    try {
+      if (isEdit) await postJson('/api/clients/'+existing.id, body, 'PUT');
+      else        await postJson('/api/clients', body);
+      closeModal();
+      toast(isEdit ? 'Client mis à jour' : 'Client créé', 'success');
+      boot();
+    } catch (e) { toast('Erreur: '+e.message, 'error'); }
+  });
+}
+
+/* ── NEW DEAL ── */
+async function openDealModal(existing) {
+  const refs = await loadRefs();
+  const isEdit = !!existing;
+  if (!CRM_CACHE.length) {
+    CRM_CACHE = await API('/api/clients');
+  }
+  const sales = await API('/api/sales');
+  const d = existing || {};
+  openModal(`
+    <div class="modal-hdr">
+      <div class="modal-title">${isEdit ? 'Modifier le deal' : 'Nouveau deal'}</div>
+      <button class="modal-close" onclick="closeModal()">×</button>
+    </div>
+    <div class="modal-body">
+      <div class="fld"><label class="fld-lbl">Client</label>
+        <select class="fld-select" id="d-client" ${isEdit?'disabled':''}>
+          <option value="">— Choisir —</option>
+          ${CRM_CACHE.map(x => '<option value="'+x.id+'"'+(d.client_id === x.id ? ' selected':'')+'>'+escapeHtml(x.nom_client)+'</option>').join('')}
+        </select></div>
+      <div class="fld-row">
+        <div class="fld"><label class="fld-lbl">Fonds</label>
+          <select class="fld-select" id="d-fonds">${selectOpts(refs.fonds, d.fonds, true)}</select></div>
+        <div class="fld"><label class="fld-lbl">Statut</label>
+          <select class="fld-select" id="d-statut">${selectOpts(refs.statuts, d.statut || 'Prospect', false)}</select></div>
+      </div>
+      <div class="fld-row-3">
+        <div class="fld"><label class="fld-lbl">AUM Cible (M€)</label>
+          <input type="number" step="0.1" min="0" class="fld-input" id="d-target" value="${((d.target_aum_initial || d.target_aum || 0)/1e6) || ''}"></div>
+        <div class="fld"><label class="fld-lbl">AUM Révisé (M€)</label>
+          <input type="number" step="0.1" min="0" class="fld-input" id="d-rev" value="${((d.revised_aum || 0)/1e6) || ''}"></div>
+        <div class="fld"><label class="fld-lbl">AUM Financé (M€)</label>
+          <input type="number" step="0.1" min="0" class="fld-input" id="d-funded" value="${((d.funded_aum || 0)/1e6) || ''}"></div>
+      </div>
+      <div class="fld-row">
+        <div class="fld"><label class="fld-lbl">Probabilité (%)</label>
+          <input type="number" min="0" max="100" step="5" class="fld-input" id="d-prob" value="${d.closing_probability || 50}"></div>
+        <div class="fld"><label class="fld-lbl">Prochaine action</label>
+          <input type="date" class="fld-input" id="d-nad" value="${d.next_action_date || ''}"></div>
+      </div>
+      <div class="fld-row">
+        <div class="fld"><label class="fld-lbl">Commercial</label>
+          <select class="fld-select" id="d-sales">
+            <option value="Non assigne">Non assigné</option>
+            ${sales.map(s => '<option value="'+escapeHtml(s.nom)+'"'+(d.sales_owner === s.nom ? ' selected':'')+'>'+escapeHtml(s.nom)+'</option>').join('')}
+          </select></div>
+        <div class="fld"><label class="fld-lbl">Raison perte</label>
+          <select class="fld-select" id="d-raison">${selectOpts(refs.raisons_perte, d.raison_perte, true)}</select></div>
+      </div>
+    </div>
+    <div class="modal-ftr">
+      <button class="btn btn-ghost" onclick="closeModal()">Annuler</button>
+      <button class="btn btn-primary" id="d-save">${isEdit ? 'Enregistrer' : 'Créer'}</button>
+    </div>
+  `);
+  document.getElementById('d-save').addEventListener('click', async () => {
+    const cid = parseInt(document.getElementById('d-client').value);
+    const fonds = document.getElementById('d-fonds').value;
+    if (!cid) { toast('Client requis', 'error'); return; }
+    if (!fonds) { toast('Fonds requis', 'error'); return; }
+    const body = {
+      client_id: cid,
+      fonds: fonds,
+      statut: document.getElementById('d-statut').value,
+      target_aum_initial: parseFloat(document.getElementById('d-target').value || 0) * 1e6,
+      revised_aum:        parseFloat(document.getElementById('d-rev').value || 0) * 1e6,
+      funded_aum:         parseFloat(document.getElementById('d-funded').value || 0) * 1e6,
+      closing_probability: parseFloat(document.getElementById('d-prob').value || 50),
+      next_action_date: document.getElementById('d-nad').value || null,
+      sales_owner: document.getElementById('d-sales').value,
+      raison_perte: document.getElementById('d-raison').value,
+      concurrent_choisi: '',
+    };
+    try {
+      if (isEdit) await postJson('/api/deals/'+existing.id, body, 'PUT');
+      else        await postJson('/api/deals', body);
+      closeModal();
+      toast(isEdit ? 'Deal mis à jour' : 'Deal créé', 'success');
+      boot();
+    } catch (e) { toast('Erreur: '+e.message, 'error'); }
+  });
+}
+
+/* ── DELETE DEAL ── */
+async function deleteDeal(dealId, label) {
+  if (!confirm('Supprimer le deal "'+(label||'#'+dealId)+'" ?\nCette action est irréversible.')) return;
+  try {
+    await delReq('/api/deals/'+dealId);
+    toast('Deal supprimé', 'success');
+    boot();
+  } catch (e) { toast('Erreur: '+e.message, 'error'); }
+}
+
+/* ── NEW ACTIVITY ── */
+async function openActivityModal(existing) {
+  const refs = await loadRefs();
+  const isEdit = !!existing;
+  if (!CRM_CACHE.length) CRM_CACHE = await API('/api/clients');
+  const a = existing || {};
+  openModal(`
+    <div class="modal-hdr">
+      <div class="modal-title">${isEdit ? 'Modifier l\\'activité' : 'Nouvelle activité'}</div>
+      <button class="modal-close" onclick="closeModal()">×</button>
+    </div>
+    <div class="modal-body">
+      ${isEdit ? '' : `<div class="fld"><label class="fld-lbl">Client</label>
+        <select class="fld-select" id="a-client">
+          <option value="">— Choisir —</option>
+          ${CRM_CACHE.map(x => '<option value="'+x.id+'">'+escapeHtml(x.nom_client)+'</option>').join('')}
+        </select></div>`}
+      <div class="fld-row">
+        <div class="fld"><label class="fld-lbl">Date</label>
+          <input type="date" class="fld-input" id="a-date" value="${a.date || new Date().toISOString().slice(0,10)}"></div>
+        <div class="fld"><label class="fld-lbl">Type</label>
+          <select class="fld-select" id="a-type">${selectOpts(refs.types_interaction, a.type_interaction || 'Call', false)}</select></div>
+      </div>
+      <div class="fld"><label class="fld-lbl">Notes</label>
+        <textarea class="fld-textarea" id="a-notes" rows="4">${escapeHtml(a.notes || '')}</textarea></div>
+    </div>
+    <div class="modal-ftr">
+      <button class="btn btn-ghost" onclick="closeModal()">Annuler</button>
+      <button class="btn btn-primary" id="a-save">${isEdit ? 'Enregistrer' : 'Créer'}</button>
+    </div>
+  `);
+  document.getElementById('a-save').addEventListener('click', async () => {
+    const body = {
+      date: document.getElementById('a-date').value,
+      type_interaction: document.getElementById('a-type').value,
+      notes: document.getElementById('a-notes').value,
+    };
+    try {
+      if (isEdit) {
+        await postJson('/api/activities/'+existing.id, body, 'PUT');
+      } else {
+        const cid = parseInt(document.getElementById('a-client').value);
+        if (!cid) { toast('Client requis', 'error'); return; }
+        body.client_id = cid;
+        await postJson('/api/activities', body);
+      }
+      closeModal();
+      toast(isEdit ? 'Activité mise à jour' : 'Activité enregistrée', 'success');
+      boot();
+    } catch (e) { toast('Erreur: '+e.message, 'error'); }
+  });
+}
+
+/* ── NEW SALES MEMBER ── */
+async function openSalesModal(existing) {
+  const refs = await loadRefs();
+  const isEdit = !!existing;
+  const s = existing || {};
+  const marche_options = [...new Set([...refs.regions, 'Global'])];
+  openModal(`
+    <div class="modal-hdr">
+      <div class="modal-title">${isEdit ? 'Modifier le commercial' : 'Nouveau commercial'}</div>
+      <button class="modal-close" onclick="closeModal()">×</button>
+    </div>
+    <div class="modal-body">
+      <div class="fld"><label class="fld-lbl">Nom complet</label>
+        <input class="fld-input" id="s-nom" value="${escapeHtml(s.nom || '')}" placeholder="ex. Sophie Martin"></div>
+      <div class="fld"><label class="fld-lbl">Marché</label>
+        <select class="fld-select" id="s-marche">${selectOpts(marche_options, s.marche || 'Global', false)}</select></div>
+    </div>
+    <div class="modal-ftr">
+      <button class="btn btn-ghost" onclick="closeModal()">Annuler</button>
+      <button class="btn btn-primary" id="s-save">${isEdit ? 'Enregistrer' : 'Ajouter'}</button>
+    </div>
+  `);
+  document.getElementById('s-save').addEventListener('click', async () => {
+    const body = {
+      nom: document.getElementById('s-nom').value.trim(),
+      marche: document.getElementById('s-marche').value,
+    };
+    if (!body.nom) { toast('Nom requis', 'error'); return; }
+    try {
+      if (isEdit) await postJson('/api/sales/'+existing.id, body, 'PUT');
+      else        await postJson('/api/sales', body);
+      closeModal();
+      toast(isEdit ? 'Commercial mis à jour' : 'Commercial ajouté', 'success');
+      boot();
+    } catch (e) { toast('Erreur: '+e.message, 'error'); }
+  });
+}
+
+/* ── ADMIN: seed demo / reset / export ── */
+async function adminSeedDemo() {
+  if (!confirm('Charger les données de démonstration ?\nCela écrasera la base actuelle.')) return;
+  try {
+    await fetch('/api/admin/seed-demo', {method:'POST'});
+    toast('Données démo chargées', 'success');
+    boot();
+  } catch (e) { toast('Erreur: '+e.message, 'error'); }
+}
+
+async function adminReset() {
+  if (!confirm('VIDER toute la base de données ?\nCette action est irréversible.')) return;
+  try {
+    await fetch('/api/admin/reset', {method:'POST'});
+    toast('Base vidée', 'success');
+    boot();
+  } catch (e) { toast('Erreur: '+e.message, 'error'); }
+}
+
+function adminExportExcel() {
+  window.location.href = '/api/export/excel';
+}
+
+/* ── Hook all data-action triggers ── */
+document.addEventListener('click', e => {
+  const t = e.target.closest('[data-action]');
+  if (!t) return;
+  const action = t.dataset.action;
+  if (action === 'new-client')    openClientModal();
+  if (action === 'new-deal')      openDealModal();
+  if (action === 'new-activity')  openActivityModal();
+  if (action === 'new-sales')     openSalesModal();
+  if (action === 'seed-demo')     adminSeedDemo();
+  if (action === 'reset-db')      adminReset();
+  if (action === 'export-excel')  adminExportExcel();
+  if (action === 'edit-deal')     {
+    const id = parseInt(t.dataset.id);
+    fetch('/api/deals/'+id).then(r => r.json()).then(d => openDealModal(d));
+  }
+  if (action === 'delete-deal')   deleteDeal(parseInt(t.dataset.id), t.dataset.label);
+});
+
 boot();
 </script>
+<div id="modal-root"></div>
+<div id="toast" class="toast"></div>
 </body>
 </html>

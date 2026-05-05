@@ -1,18 +1,20 @@
 # =============================================================================
-# main.py — Meridian CRM · FastAPI backend
-# Serves frontend/revolut_crm_dashboard_v2.html and exposes /api/* JSON endpoints
-# backed by the existing SQLite database (database.py)
+# main.py — Meridian CRM · FastAPI backend (full feature parity)
+# Serves frontend/revolut_crm_dashboard_v2.html and exposes /api/* JSON
+# endpoints for full CRUD + import/export, backed by database.py (SQLite)
 # =============================================================================
 
+import io
 import os
 from datetime import date, datetime, timedelta
-from typing import Optional
+from typing import List, Optional
 
 import numpy as np
 import pandas as pd
-from fastapi import FastAPI, HTTPException
-from fastapi.responses import HTMLResponse, JSONResponse
+from fastapi import FastAPI, File, HTTPException, UploadFile
+from fastapi.responses import HTMLResponse, Response
 from fastapi.staticfiles import StaticFiles
+from pydantic import BaseModel, Field
 
 import database as db
 
@@ -22,14 +24,12 @@ INDEX_PATH   = os.path.join(FRONTEND_DIR, "revolut_crm_dashboard_v2.html")
 
 app = FastAPI(
     title="Meridian CRM API",
-    description="JSON REST API serving the Meridian premium dashboard.",
-    version="1.0.0",
+    description="Full-feature CRM backend (clients, deals, contacts, activities, sales).",
+    version="2.0.0",
 )
 
-# Initialise the SQLite schema on startup
 db.init_db()
 
-# Static assets directory (CSS images later, etc.)
 if os.path.isdir(FRONTEND_DIR):
     app.mount("/static", StaticFiles(directory=FRONTEND_DIR), name="static")
 
@@ -39,18 +39,14 @@ if os.path.isdir(FRONTEND_DIR):
 # ---------------------------------------------------------------------------
 
 def _smart_aum(row) -> float:
-    """Pipeline AUM: revised if > 0, else target. Funded uses funded_aum."""
     statut = str(row.get("statut", ""))
     if statut == "Funded":
         return float(row.get("funded_aum", 0) or 0)
     rev = float(row.get("revised_aum", 0) or 0)
-    if rev > 0:
-        return rev
-    return float(row.get("target_aum_initial", 0) or 0)
+    return rev if rev > 0 else float(row.get("target_aum_initial", 0) or 0)
 
 
 def _safe_dict(d):
-    """Convert numpy/pandas types to JSON-friendly natives."""
     out = {}
     for k, v in d.items():
         if isinstance(v, (np.integer,)):
@@ -68,6 +64,109 @@ def _safe_dict(d):
     return out
 
 
+def _parse_date(s: Optional[str]) -> Optional[str]:
+    """Normalise a date string to YYYY-MM-DD or return None."""
+    if not s:
+        return None
+    s = str(s).strip()
+    if not s:
+        return None
+    for fmt in ("%Y-%m-%d", "%d/%m/%Y", "%Y-%m-%dT%H:%M:%S", "%Y-%m-%dT%H:%M"):
+        try:
+            return datetime.strptime(s, fmt).date().isoformat()
+        except ValueError:
+            continue
+    try:
+        return pd.to_datetime(s).date().isoformat()
+    except Exception:
+        return None
+
+
+# ---------------------------------------------------------------------------
+# PYDANTIC MODELS
+# ---------------------------------------------------------------------------
+
+class ClientCreate(BaseModel):
+    nom_client:        str
+    type_client:       str = ""
+    region:            str = ""
+    country:           str = ""
+    parent_id:         Optional[int] = None
+    tier:              str = "Tier 2"
+    kyc_status:        str = "En cours"
+    product_interests: str = ""
+
+
+class ClientUpdate(ClientCreate):
+    pass
+
+
+class ContactCreate(BaseModel):
+    client_id:  int
+    prenom:     str = ""
+    nom:        str
+    role:       str = ""
+    email:      str = ""
+    telephone:  str = ""
+    linkedin:   str = ""
+    is_primary: bool = False
+
+
+class ContactUpdate(BaseModel):
+    prenom:     str = ""
+    nom:        str
+    role:       str = ""
+    email:      str = ""
+    telephone:  str = ""
+    linkedin:   str = ""
+    is_primary: bool = False
+
+
+class DealCreate(BaseModel):
+    client_id:           int
+    fonds:               str
+    statut:              str = "Prospect"
+    target_aum_initial:  float = 0
+    revised_aum:         float = 0
+    funded_aum:          float = 0
+    raison_perte:        str = ""
+    concurrent_choisi:   str = ""
+    next_action_date:    Optional[str] = None
+    sales_owner:         str = "Non assigne"
+    closing_probability: float = 50
+
+
+class DealUpdate(DealCreate):
+    pass
+
+
+class ActivityCreate(BaseModel):
+    client_id:        int
+    date:             str
+    notes:            str = ""
+    type_interaction: str = "Call"
+
+
+class ActivityUpdate(BaseModel):
+    date:             str
+    notes:            str = ""
+    type_interaction: str = "Call"
+
+
+class SalesMemberCreate(BaseModel):
+    nom:    str
+    marche: str = "Global"
+
+
+class SalesMemberUpdate(BaseModel):
+    nom:    str
+    marche: str = "Global"
+
+
+class BulkDeleteIds(BaseModel):
+    ids: List[int]
+
+
 # ---------------------------------------------------------------------------
 # ROOT — serve the HTML
 # ---------------------------------------------------------------------------
@@ -75,18 +174,18 @@ def _safe_dict(d):
 @app.get("/", response_class=HTMLResponse)
 def root():
     if not os.path.exists(INDEX_PATH):
-        raise HTTPException(status_code=404, detail="Frontend index not found.")
+        raise HTTPException(404, "Frontend not found.")
     with open(INDEX_PATH, "r", encoding="utf-8") as f:
         return HTMLResponse(content=f.read())
 
 
 @app.get("/health")
 def health():
-    return {"status": "ok", "service": "meridian-crm-api"}
+    return {"status": "ok", "service": "meridian-crm-api", "version": "2.0.0"}
 
 
 # ---------------------------------------------------------------------------
-# /api/kpis — header KPIs
+# /api/kpis
 # ---------------------------------------------------------------------------
 
 @app.get("/api/kpis")
@@ -106,7 +205,7 @@ def api_kpis():
 
 
 # ---------------------------------------------------------------------------
-# /api/deals — list of pipeline deals (joined with clients)
+# DEALS — CRUD
 # ---------------------------------------------------------------------------
 
 @app.get("/api/deals")
@@ -140,8 +239,80 @@ def api_deals():
     return items
 
 
+@app.get("/api/deals/{deal_id}")
+def api_deal_detail(deal_id: int):
+    row = db.get_pipeline_row_by_id(deal_id)
+    if not row:
+        raise HTTPException(404, "Deal not found")
+    nad = row.get("next_action_date")
+    row["next_action_date"] = nad.isoformat() if isinstance(nad, date) else None
+    return _safe_dict(row)
+
+
+@app.post("/api/deals", status_code=201)
+def api_deal_create(deal: DealCreate):
+    nad = _parse_date(deal.next_action_date)
+    new_id = db.add_pipeline_entry(
+        client_id=deal.client_id,
+        fonds=deal.fonds,
+        statut=deal.statut,
+        target_aum=deal.target_aum_initial,
+        revised_aum=deal.revised_aum,
+        funded_aum=deal.funded_aum,
+        raison_perte=deal.raison_perte,
+        concurrent_choisi=deal.concurrent_choisi,
+        next_action_date=nad,
+        sales_owner=deal.sales_owner,
+        closing_probability=deal.closing_probability,
+    )
+    return {"id": new_id, "ok": True}
+
+
+@app.put("/api/deals/{deal_id}")
+def api_deal_update(deal_id: int, deal: DealUpdate):
+    nad = _parse_date(deal.next_action_date)
+    ok, err = db.update_pipeline_row({
+        "id":                  deal_id,
+        "fonds":               deal.fonds,
+        "statut":              deal.statut,
+        "target_aum_initial":  deal.target_aum_initial,
+        "revised_aum":         deal.revised_aum,
+        "funded_aum":          deal.funded_aum,
+        "raison_perte":        deal.raison_perte,
+        "concurrent_choisi":   deal.concurrent_choisi,
+        "next_action_date":    nad,
+        "sales_owner":         deal.sales_owner,
+        "closing_probability": deal.closing_probability,
+    })
+    if not ok:
+        raise HTTPException(400, err or "Update failed")
+    return {"id": deal_id, "ok": True}
+
+
+@app.delete("/api/deals/{deal_id}")
+def api_deal_delete(deal_id: int):
+    ok, err = db.delete_pipeline_row(deal_id)
+    if not ok:
+        raise HTTPException(400, err or "Delete failed")
+    return {"id": deal_id, "ok": True}
+
+
+@app.post("/api/deals/bulk-delete")
+def api_deals_bulk_delete(payload: BulkDeleteIds):
+    n = db.delete_pipeline_rows(payload.ids)
+    return {"deleted": n}
+
+
+@app.get("/api/deals/{deal_id}/audit")
+def api_deal_audit(deal_id: int):
+    df = db.get_audit_log(deal_id)
+    if df.empty:
+        return []
+    return [_safe_dict(r.to_dict()) for _, r in df.iterrows()]
+
+
 # ---------------------------------------------------------------------------
-# /api/clients — list of all clients with aggregate AUM
+# CLIENTS — CRUD
 # ---------------------------------------------------------------------------
 
 @app.get("/api/clients")
@@ -153,7 +324,7 @@ def api_clients():
         for cid, grp in df_pipe.groupby("client_id"):
             funded = float(grp[grp["statut"] == "Funded"]["funded_aum"].sum())
             active = grp[grp["statut"].isin(
-                ["Prospect","Initial Pitch","Due Diligence","Soft Commit"])]
+                ["Prospect", "Initial Pitch", "Due Diligence", "Soft Commit"])]
             active_aum = float(active.apply(_smart_aum, axis=1).sum()) if not active.empty else 0.0
             aum_by_client[int(cid)] = funded + active_aum
     out = []
@@ -167,33 +338,31 @@ def api_clients():
             "country":     str(r.get("country", "")),
             "tier":        str(r.get("tier", "")),
             "kyc_status":  str(r.get("kyc_status", "")),
+            "parent_id":   int(r.get("parent_id") or 0),
+            "parent_nom":  str(r.get("parent_nom", "") or ""),
             "aum":         aum_by_client.get(cid, 0.0),
         }))
     out.sort(key=lambda c: c["aum"], reverse=True)
     return out
 
 
-# ---------------------------------------------------------------------------
-# /api/clients/{id} — 360° detail
-# ---------------------------------------------------------------------------
-
 @app.get("/api/clients/{client_id}")
 def api_client_detail(client_id: int):
     df_clients = db.get_client_hierarchy()
     row = df_clients[df_clients["id"] == client_id]
     if row.empty:
-        raise HTTPException(status_code=404, detail="Client not found")
+        raise HTTPException(404, "Client not found")
     c = row.iloc[0].to_dict()
 
-    contacts_df = db.get_contacts(client_id)
+    contacts_df   = db.get_contacts(client_id)
     activities_df = db.get_activities(client_id=client_id)
-    df_pipe = db.get_pipeline_with_clients()
+    df_pipe       = db.get_pipeline_with_clients()
     deals = df_pipe[df_pipe["client_id"] == client_id]
 
     funded_aum = float(deals[deals["statut"] == "Funded"]["funded_aum"].sum()) \
         if not deals.empty else 0.0
     active = deals[deals["statut"].isin(
-        ["Prospect","Initial Pitch","Due Diligence","Soft Commit"])] \
+        ["Prospect", "Initial Pitch", "Due Diligence", "Soft Commit"])] \
         if not deals.empty else deals
     active_aum = float(active.apply(_smart_aum, axis=1).sum()) if not active.empty else 0.0
 
@@ -202,72 +371,63 @@ def api_client_detail(client_id: int):
 
     dominant_statut = "—"
     if not deals.empty:
-        cnt = deals["statut"].value_counts()
-        dominant_statut = str(cnt.index[0])
+        dominant_statut = str(deals["statut"].value_counts().index[0])
 
     primary_contact = None
     if not contacts_df.empty:
         primary = contacts_df[contacts_df["is_primary"] == 1]
-        if not primary.empty:
-            pc = primary.iloc[0]
-            primary_contact = "{} {}".format(pc.get("prenom", ""), pc.get("nom", "")).strip()
-        elif not contacts_df.empty:
-            pc = contacts_df.iloc[0]
-            primary_contact = "{} {}".format(pc.get("prenom", ""), pc.get("nom", "")).strip()
+        pc_row = primary.iloc[0] if not primary.empty else contacts_df.iloc[0]
+        primary_contact = "{} {}".format(pc_row.get("prenom", ""), pc_row.get("nom", "")).strip()
 
     network = db.get_client_network(client_id)
-    fund_links_clean = []
-    for fl in network.get("fund_links", []):
-        fund_links_clean.append(_safe_dict({
-            "fonds":     str(fl.get("fonds", "")),
-            "client_id": int(fl.get("client_id", 0)),
-            "statut":    str(fl.get("statut", "")),
-        }))
-    subs_clean = []
-    for s in network.get("subsidiaries", []):
-        subs_clean.append(_safe_dict({
-            "id":          int(s.get("id", 0)),
-            "nom_client":  str(s.get("nom_client", "")),
-            "type_client": str(s.get("type_client", "")),
-        }))
+    fund_links_clean = [_safe_dict({
+        "fonds":     str(fl.get("fonds", "")),
+        "client_id": int(fl.get("client_id", 0)),
+        "statut":    str(fl.get("statut", "")),
+    }) for fl in network.get("fund_links", [])]
+    subs_clean = [_safe_dict({
+        "id":          int(s.get("id", 0)),
+        "nom_client":  str(s.get("nom_client", "")),
+        "type_client": str(s.get("type_client", "")),
+    }) for s in network.get("subsidiaries", [])]
 
-    contacts_clean = []
-    for _, ct in contacts_df.iterrows():
-        contacts_clean.append(_safe_dict({
-            "id":     int(ct["id"]),
-            "prenom": str(ct.get("prenom", "")),
-            "nom":    str(ct.get("nom", "")),
-            "role":   str(ct.get("role", "")),
-            "email":  str(ct.get("email", "")),
-            "is_primary": bool(int(ct.get("is_primary", 0) or 0)),
-        }))
-    activities_clean = []
-    for _, a in activities_df.iterrows():
-        activities_clean.append(_safe_dict({
-            "id":               int(a["id"]),
-            "date":             str(a.get("date", "")),
-            "notes":            str(a.get("notes", "") or ""),
-            "type_interaction": str(a.get("type_interaction", "") or ""),
-        }))
+    contacts_clean = [_safe_dict({
+        "id":         int(ct["id"]),
+        "prenom":     str(ct.get("prenom", "")),
+        "nom":        str(ct.get("nom", "")),
+        "role":       str(ct.get("role", "")),
+        "email":      str(ct.get("email", "")),
+        "telephone":  str(ct.get("telephone", "")),
+        "linkedin":   str(ct.get("linkedin", "")),
+        "is_primary": bool(int(ct.get("is_primary", 0) or 0)),
+    }) for _, ct in contacts_df.iterrows()]
+
+    activities_clean = [_safe_dict({
+        "id":               int(a["id"]),
+        "date":             str(a.get("date", "")),
+        "notes":            str(a.get("notes", "") or ""),
+        "type_interaction": str(a.get("type_interaction", "") or ""),
+    }) for _, a in activities_df.iterrows()]
 
     return _safe_dict({
-        "id":             int(c["id"]),
-        "nom_client":     str(c["nom_client"]),
-        "type_client":    str(c.get("type_client", "")),
-        "region":         str(c.get("region", "")),
-        "country":        str(c.get("country", "")),
-        "tier":           str(c.get("tier", "Tier 2")),
-        "kyc_status":     str(c.get("kyc_status", "En cours")),
-        "parent_nom":     str(c.get("parent_nom", "") or ""),
+        "id":              int(c["id"]),
+        "nom_client":      str(c["nom_client"]),
+        "type_client":     str(c.get("type_client", "")),
+        "region":          str(c.get("region", "")),
+        "country":         str(c.get("country", "")),
+        "tier":            str(c.get("tier", "Tier 2")),
+        "kyc_status":      str(c.get("kyc_status", "En cours")),
+        "parent_id":       int(c.get("parent_id") or 0),
+        "parent_nom":      str(c.get("parent_nom", "") or ""),
         "primary_contact": primary_contact,
-        "aum_funded":     funded_aum,
-        "aum_active":     active_aum,
-        "aum_total":      funded_aum + active_aum,
+        "aum_funded":      funded_aum,
+        "aum_active":      active_aum,
+        "aum_total":       funded_aum + active_aum,
         "nb_active_deals": int(len(active)),
         "nb_activities":   int(len(activities_clean)),
         "dominant_statut": dominant_statut,
-        "fonds_invested": fonds_invested,
-        "created_year":   None,
+        "fonds_invested":  fonds_invested,
+        "created_year":    None,
         "network": {
             "root":         network.get("root"),
             "subsidiaries": subs_clean,
@@ -278,34 +438,148 @@ def api_client_detail(client_id: int):
     })
 
 
+@app.post("/api/clients", status_code=201)
+def api_client_create(payload: ClientCreate):
+    try:
+        new_id = db.add_client(
+            nom_client=payload.nom_client,
+            type_client=payload.type_client,
+            region=payload.region,
+            country=payload.country,
+            parent_id=payload.parent_id,
+            tier=payload.tier,
+            kyc_status=payload.kyc_status,
+            product_interests=payload.product_interests,
+        )
+        return {"id": new_id, "ok": True}
+    except Exception as e:
+        raise HTTPException(400, str(e))
+
+
+@app.put("/api/clients/{client_id}")
+def api_client_update(client_id: int, payload: ClientUpdate):
+    ok, err = db.update_client(
+        client_id=client_id,
+        nom_client=payload.nom_client,
+        type_client=payload.type_client,
+        region=payload.region,
+        country=payload.country,
+        parent_id=payload.parent_id,
+        tier=payload.tier,
+        kyc_status=payload.kyc_status,
+        product_interests=payload.product_interests,
+    )
+    if not ok:
+        raise HTTPException(400, err or "Update failed")
+    return {"id": client_id, "ok": True}
+
+
+@app.delete("/api/clients/{client_id}")
+def api_client_delete(client_id: int):
+    ok, err = db.delete_client(client_id)
+    if not ok:
+        raise HTTPException(400, err or "Delete failed")
+    return {"id": client_id, "ok": True}
+
+
 # ---------------------------------------------------------------------------
-# /api/activities — recent activities
+# CONTACTS — CRUD
+# ---------------------------------------------------------------------------
+
+@app.get("/api/contacts")
+def api_contacts(client_id: Optional[int] = None):
+    if client_id is None:
+        df_clients = db.get_all_clients()
+        all_contacts = []
+        for cid in df_clients["id"]:
+            df_c = db.get_contacts(int(cid))
+            for _, ct in df_c.iterrows():
+                all_contacts.append(_safe_dict(ct.to_dict()))
+        return all_contacts
+    df = db.get_contacts(client_id)
+    return [_safe_dict(ct.to_dict()) for _, ct in df.iterrows()]
+
+
+@app.post("/api/contacts", status_code=201)
+def api_contact_create(payload: ContactCreate):
+    try:
+        new_id = db.add_contact(
+            client_id=payload.client_id,
+            prenom=payload.prenom, nom=payload.nom,
+            role=payload.role, email=payload.email,
+            telephone=payload.telephone, linkedin=payload.linkedin,
+            is_primary=payload.is_primary,
+        )
+        return {"id": new_id, "ok": True}
+    except Exception as e:
+        raise HTTPException(400, str(e))
+
+
+@app.put("/api/contacts/{contact_id}")
+def api_contact_update(contact_id: int, payload: ContactUpdate):
+    ok, err = db.update_contact(
+        contact_id=contact_id,
+        prenom=payload.prenom, nom=payload.nom,
+        role=payload.role, email=payload.email,
+        telephone=payload.telephone, linkedin=payload.linkedin,
+        is_primary=payload.is_primary,
+    )
+    if not ok:
+        raise HTTPException(400, err or "Update failed")
+    return {"id": contact_id, "ok": True}
+
+
+@app.delete("/api/contacts/{contact_id}")
+def api_contact_delete(contact_id: int):
+    ok, err = db.delete_contact(contact_id)
+    if not ok:
+        raise HTTPException(400, err or "Delete failed")
+    return {"id": contact_id, "ok": True}
+
+
+# ---------------------------------------------------------------------------
+# ACTIVITIES — CRUD
 # ---------------------------------------------------------------------------
 
 @app.get("/api/activities")
-def api_activities():
-    df = db.get_activities()
+def api_activities(client_id: Optional[int] = None):
+    df = db.get_activities(client_id=client_id)
     if df.empty:
         return []
-    out = []
-    for _, a in df.iterrows():
-        out.append(_safe_dict({
-            "id":               int(a["id"]),
-            "nom_client":       str(a.get("nom_client", "")),
-            "date":             str(a.get("date", "")),
-            "type_interaction": str(a.get("type_interaction", "") or ""),
-            "notes":            str(a.get("notes", "") or ""),
-        }))
-    return out
+    return [_safe_dict(a.to_dict()) for _, a in df.iterrows()]
+
+
+@app.post("/api/activities", status_code=201)
+def api_activity_create(payload: ActivityCreate):
+    nad = _parse_date(payload.date) or date.today().isoformat()
+    db.add_activity(payload.client_id, nad, payload.notes, payload.type_interaction)
+    return {"ok": True}
+
+
+@app.put("/api/activities/{activity_id}")
+def api_activity_update(activity_id: int, payload: ActivityUpdate):
+    nad = _parse_date(payload.date) or date.today().isoformat()
+    ok, err = db.update_activity(activity_id, nad, payload.notes, payload.type_interaction)
+    if not ok:
+        raise HTTPException(400, err or "Update failed")
+    return {"id": activity_id, "ok": True}
+
+
+@app.delete("/api/activities/{activity_id}")
+def api_activity_delete(activity_id: int):
+    ok, err = db.delete_activity(activity_id)
+    if not ok:
+        raise HTTPException(400, err or "Delete failed")
+    return {"id": activity_id, "ok": True}
 
 
 # ---------------------------------------------------------------------------
-# /api/sales — sales team metrics (Funded/Pipeline/Conversion per rep)
+# SALES TEAM — CRUD
 # ---------------------------------------------------------------------------
 
 @app.get("/api/sales")
 def api_sales():
-    team_df = db.get_sales_team()
+    team_df    = db.get_sales_team()
     metrics_df = db.get_sales_metrics()
 
     by_owner = {}
@@ -317,29 +591,53 @@ def api_sales():
     for _, t in team_df.iterrows():
         nom = str(t["nom"])
         m = by_owner.get(nom, None)
-        funded_aum  = float(m["AUM_Finance"]) if m is not None else 0.0
-        pipeline    = float(m["Pipeline_Actif"]) if m is not None else 0.0
-        nb_actifs   = int(m["Actifs"]) if m is not None else 0
-        nb_funded   = int(m["Funded"]) if m is not None else 0
-        nb_perdus   = int(m["Perdus"]) if m is not None else 0
-        nb_total    = nb_funded + nb_perdus
-        conversion  = round(nb_funded / nb_total * 100, 0) if nb_total > 0 else 0
+        funded_aum   = float(m["AUM_Finance"])    if m is not None else 0.0
+        pipeline_aum = float(m["Pipeline_Actif"]) if m is not None else 0.0
+        nb_actifs    = int(m["Actifs"])           if m is not None else 0
+        nb_funded    = int(m["Funded"])           if m is not None else 0
+        nb_perdus    = int(m["Perdus"])           if m is not None else 0
+        nb_total     = nb_funded + nb_perdus
+        conversion   = round(nb_funded / nb_total * 100, 0) if nb_total > 0 else 0
         out.append(_safe_dict({
-            "id":          int(t["id"]),
-            "nom":         nom,
-            "marche":      str(t.get("marche", "")),
-            "funded_aum":  funded_aum,
-            "pipeline_aum": pipeline,
-            "nb_actifs":   nb_actifs,
-            "nb_funded":   nb_funded,
-            "conversion":  int(conversion),
+            "id":            int(t["id"]),
+            "nom":           nom,
+            "marche":        str(t.get("marche", "")),
+            "funded_aum":    funded_aum,
+            "pipeline_aum":  pipeline_aum,
+            "nb_actifs":     nb_actifs,
+            "nb_funded":     nb_funded,
+            "conversion":    int(conversion),
         }))
     out.sort(key=lambda s: s["funded_aum"], reverse=True)
     return out
 
 
+@app.post("/api/sales", status_code=201)
+def api_sales_create(payload: SalesMemberCreate):
+    ok = db.add_sales_member(payload.nom, payload.marche)
+    if not ok:
+        raise HTTPException(400, "Sales member already exists or invalid name")
+    return {"ok": True}
+
+
+@app.put("/api/sales/{sales_id}")
+def api_sales_update(sales_id: int, payload: SalesMemberUpdate):
+    ok, err = db.update_sales_member(sales_id, payload.nom, payload.marche)
+    if not ok:
+        raise HTTPException(400, err or "Update failed")
+    return {"id": sales_id, "ok": True}
+
+
+@app.delete("/api/sales/{sales_id}")
+def api_sales_delete(sales_id: int):
+    ok, err = db.delete_sales_member(sales_id)
+    if not ok:
+        raise HTTPException(400, err or "Delete failed")
+    return {"id": sales_id, "ok": True}
+
+
 # ---------------------------------------------------------------------------
-# /api/regions — AUM Funded by region
+# REGIONS / WHITESPACE / NEXT-ACTIONS / FUNDS / MONTHLY / MINI
 # ---------------------------------------------------------------------------
 
 @app.get("/api/regions")
@@ -349,10 +647,6 @@ def api_regions():
     out.sort(key=lambda r: r["aum"], reverse=True)
     return out
 
-
-# ---------------------------------------------------------------------------
-# /api/whitespace — top 5 clients × all funds
-# ---------------------------------------------------------------------------
 
 @app.get("/api/whitespace")
 def api_whitespace():
@@ -372,26 +666,21 @@ def api_whitespace():
     return {"clients": top_clients, "fonds": fonds, "values": values}
 
 
-# ---------------------------------------------------------------------------
-# /api/next-actions — upcoming pipeline actions (30 days)
-# ---------------------------------------------------------------------------
-
 @app.get("/api/next-actions")
 def api_next_actions():
-    today = date.today()
-    horizon = today + timedelta(days=30)
-    overdue_cutoff = today - timedelta(days=60)
+    today    = date.today()
+    horizon  = today + timedelta(days=30)
+    overdue  = today - timedelta(days=60)
     df = db.get_pipeline_with_clients()
     if df.empty:
         return []
-    df = df[df["statut"].isin(
-        ["Prospect","Initial Pitch","Due Diligence","Soft Commit"])].copy()
+    df = df[df["statut"].isin(["Prospect", "Initial Pitch", "Due Diligence", "Soft Commit"])].copy()
     out = []
     for _, r in df.iterrows():
         nad = r.get("next_action_date")
         if not isinstance(nad, date):
             continue
-        if not (overdue_cutoff <= nad <= horizon):
+        if not (overdue <= nad <= horizon):
             continue
         out.append(_safe_dict({
             "id":               int(r["id"]),
@@ -405,54 +694,37 @@ def api_next_actions():
     return out
 
 
-# ---------------------------------------------------------------------------
-# /api/funds-aggregate — Funded AUM aggregated by fund name
-# ---------------------------------------------------------------------------
-
 @app.get("/api/funds-aggregate")
 def api_funds_aggregate():
     df = db.get_pipeline_with_clients()
     if df.empty:
         return {}
     df_f = df[df["statut"] == "Funded"]
-    agg = df_f.groupby("fonds")["funded_aum"].sum().to_dict()
-    return {str(k): float(v) for k, v in agg.items()}
+    return {str(k): float(v) for k, v in df_f.groupby("fonds")["funded_aum"].sum().items()}
 
-
-# ---------------------------------------------------------------------------
-# /api/monthly-aum — synthetic monthly AUM evolution (last 12 months)
-# ---------------------------------------------------------------------------
 
 @app.get("/api/monthly-aum")
 def api_monthly_aum():
-    df = db.get_historical_aum(days_back=365) if hasattr(db, "get_historical_aum") else None
+    df = db.get_historical_aum(days_back=365)
     if df is None or df.empty:
         return []
     df = df.copy()
     df["month"] = pd.to_datetime(df["date"]).dt.to_period("M")
     agg = df.groupby("month")["funded_aum"].max().reset_index()
-    fr_months = ["jan","fév","mar","avr","mai","juin",
-                 "juil","août","sept","oct","nov","déc"]
-    out = []
-    for _, r in agg.tail(12).iterrows():
-        period = r["month"]
-        out.append({
-            "label":  fr_months[period.month - 1],
-            "month":  str(period),
-            "aum":    float(r["funded_aum"]),
-        })
-    return out
+    fr_months = ["jan", "fév", "mar", "avr", "mai", "juin",
+                 "juil", "août", "sept", "oct", "nov", "déc"]
+    return [{
+        "label": fr_months[r["month"].month - 1],
+        "month": str(r["month"]),
+        "aum":   float(r["funded_aum"]),
+    } for _, r in agg.tail(12).iterrows()]
 
-
-# ---------------------------------------------------------------------------
-# /api/mini-stats — bottom row mini-stat cards
-# ---------------------------------------------------------------------------
 
 @app.get("/api/mini-stats")
 def api_mini_stats():
     conn = db.get_connection()
     c = conn.cursor()
-    c.execute("SELECT COUNT(*) FROM clients"); nb_clients = int(c.fetchone()[0])
+    c.execute("SELECT COUNT(*) FROM clients");  nb_clients  = int(c.fetchone()[0])
     c.execute("SELECT COUNT(*) FROM contacts"); nb_contacts = int(c.fetchone()[0])
     cutoff_30d = (date.today() - timedelta(days=30)).isoformat()
     c.execute("SELECT COUNT(*) FROM activites WHERE date >= ?", (cutoff_30d,))
@@ -468,16 +740,138 @@ def api_mini_stats():
     nb_fonds = int(c.fetchone()[0])
     conn.close()
     return {
-        "nb_clients":         nb_clients,
-        "nb_contacts":        nb_contacts,
-        "nb_activities_30d":  nb_activities_30d,
-        "nb_overdue":         nb_overdue,
-        "nb_fonds":           nb_fonds,
+        "nb_clients":        nb_clients,
+        "nb_contacts":       nb_contacts,
+        "nb_activities_30d": nb_activities_30d,
+        "nb_overdue":        nb_overdue,
+        "nb_fonds":          nb_fonds,
     }
 
 
 # ---------------------------------------------------------------------------
-# /api/overview — single aggregate endpoint that powers the whole dashboard
+# REFERENTIELS (for forms)
+# ---------------------------------------------------------------------------
+
+@app.get("/api/referentials")
+def api_referentials():
+    return {
+        "fonds":             list(db.FONDS_REFERENTIEL),
+        "regions":           list(db.REGIONS_REFERENTIEL),
+        "tiers":             list(db.TIERS_REFERENTIEL),
+        "kyc_statuts":       list(db.KYC_STATUTS),
+        "product_interests": list(db.PRODUCT_INTERESTS),
+        "roles_contact":     list(db.ROLES_CONTACT),
+        "types_client":      ["IFA", "Wholesale", "Instit", "Family Office",
+                              "Insurance", "Asset Manager", "Sovereign", "Pension"],
+        "statuts":           ["Prospect", "Initial Pitch", "Due Diligence",
+                              "Soft Commit", "Funded", "Paused", "Lost", "Redeemed"],
+        "types_interaction": ["Call", "Meeting", "Email", "Roadshow", "Conference", "Autre"],
+        "raisons_perte":     ["Pricing", "Track Record", "Macro", "Competitor", "Autre"],
+        "countries":         [
+            "United Arab Emirates", "Saudi Arabia", "Qatar", "Kuwait", "Bahrain", "Oman",
+            "United Kingdom", "France", "Germany", "Switzerland", "Luxembourg", "Netherlands",
+            "Italy", "Spain", "Belgium", "Austria", "Sweden", "Norway", "Denmark", "Finland",
+            "Singapore", "Japan", "Hong Kong", "China", "South Korea", "Australia", "India",
+            "United States", "Canada", "Brazil", "Mexico", "South Africa", "Egypt",
+        ],
+    }
+
+
+# ---------------------------------------------------------------------------
+# IMPORT / EXPORT / ADMIN
+# ---------------------------------------------------------------------------
+
+def _read_uploaded_file(file: UploadFile) -> pd.DataFrame:
+    raw = file.file.read()
+    if not raw:
+        raise HTTPException(400, "Empty file")
+    name = (file.filename or "").lower()
+    bio = io.BytesIO(raw)
+    try:
+        if name.endswith(".csv"):
+            return pd.read_csv(bio)
+        return pd.read_excel(bio)
+    except Exception as e:
+        raise HTTPException(400, "Cannot parse file: {}".format(e))
+
+
+@app.post("/api/import/clients")
+def api_import_clients(file: UploadFile = File(...)):
+    df = _read_uploaded_file(file)
+    inserted, updated = db.upsert_clients_from_df(df)
+    return {"inserted": inserted, "updated": updated}
+
+
+@app.post("/api/import/pipeline")
+def api_import_pipeline(file: UploadFile = File(...)):
+    df = _read_uploaded_file(file)
+    inserted, updated = db.upsert_pipeline_from_df(df)
+    return {"inserted": inserted, "updated": updated}
+
+
+@app.get("/api/export/excel")
+def api_export_excel():
+    data = db.get_excel_backup()
+    return Response(
+        content=data,
+        media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        headers={"Content-Disposition":
+                 "attachment; filename=meridian_backup_{}.xlsx".format(date.today().isoformat())},
+    )
+
+
+@app.post("/api/admin/reset")
+def api_admin_reset():
+    db.reset_database()
+    return {"ok": True}
+
+
+@app.post("/api/admin/seed-demo")
+def api_admin_seed_demo():
+    """Populate the DB with demo data matching the Meridian mockup."""
+    db.reset_database()
+    db.add_sales_member("Sophie Martin",   "GCC")
+    db.add_sales_member("Antoine Dubois",  "EMEA")
+    db.add_sales_member("Liya Chen",       "APAC")
+
+    p1   = db.add_client("Allianz Global Inv.", "Insurance",     "EMEA",          country="Germany")
+    sub1 = db.add_client("Allianz GI Asset",    "Insurance",     "EMEA",          country="Germany",  parent_id=p1)
+    sub2 = db.add_client("PIMCO",               "Asset Manager", "EMEA",          country="United States", parent_id=p1)
+    c2   = db.add_client("Pictet AM",           "Asset Manager", "EMEA",          country="Switzerland")
+    c3   = db.add_client("Norges Bank IM",      "Sovereign",     "Nordics",       country="Norway")
+    c4   = db.add_client("GIC Singapore",       "Sovereign",     "APAC",          country="Singapore")
+    c5   = db.add_client("Amundi Asset Mgmt",   "Asset Manager", "EMEA",          country="France")
+    c6   = db.add_client("ADIA Abu Dhabi",      "Sovereign",     "GCC",           country="United Arab Emirates")
+    c7   = db.add_client("CalPERS",             "Pension",       "North America", country="United States")
+
+    db.add_pipeline_entry(p1,   "Global Value",      "Funded",         142_300_000, 142_300_000, 142_300_000, "", "", None, sales_owner="Sophie Martin")
+    db.add_pipeline_entry(sub1, "Income Builder",    "Funded",          50_000_000,  50_000_000,  50_000_000, "", "", None, sales_owner="Sophie Martin")
+    db.add_pipeline_entry(sub2, "Active ETFs",       "Soft Commit",     30_000_000,  25_000_000,           0, "", "", (date.today() + timedelta(days=14)).isoformat(), sales_owner="Antoine Dubois")
+    db.add_pipeline_entry(c2,   "Private Debt",      "Soft Commit",     90_000_000,  87_000_000,           0, "", "", (date.today() + timedelta(days=7)).isoformat(),  sales_owner="Antoine Dubois")
+    db.add_pipeline_entry(c3,   "Income Builder",    "Funded",         210_500_000, 210_500_000, 210_500_000, "", "", None, sales_owner="Sophie Martin")
+    db.add_pipeline_entry(c4,   "Resilient Equity",  "Due Diligence",   65_000_000,  65_000_000,           0, "", "", (date.today() + timedelta(days=3)).isoformat(),  sales_owner="Liya Chen")
+    db.add_pipeline_entry(c5,   "Active ETFs",       "Funded",         330_000_000, 330_000_000, 330_000_000, "", "", None, sales_owner="Antoine Dubois")
+    db.add_pipeline_entry(c6,   "Global Value",      "Initial Pitch",  175_000_000,           0,           0, "", "", date.today().isoformat(), sales_owner="Liya Chen")
+    db.add_pipeline_entry(c7,   "Income Builder",    "Funded",          95_500_000,  95_500_000,  95_500_000, "", "", None, sales_owner="Sophie Martin")
+    db.add_pipeline_entry(c2,   "Global Value",      "Prospect",        40_000_000,           0,           0, "", "", (date.today() + timedelta(days=21)).isoformat(), sales_owner="Antoine Dubois")
+
+    db.add_contact(p1, "Klaus", "Weber", role="CIO",                email="k.weber@allianz.com",   is_primary=True)
+    db.add_contact(p1, "Anna",  "Bauer", role="Portfolio Manager",  email="a.bauer@allianz.com")
+    db.add_contact(c2, "Claire","Morel", role="CIO",                email="c.morel@pictet.com",    is_primary=True)
+    db.add_contact(c3, "Erik",  "Larsen", role="Head of Allocations", email="e.larsen@nbim.no",   is_primary=True)
+    db.add_contact(c4, "Wei",   "Zhang", role="CIO",                email="w.zhang@gic.sg",        is_primary=True)
+
+    today = date.today()
+    db.add_activity(c3, today.isoformat(),                                 "Présentation Q3 — équipe très engagée sur Income Builder",       "Meeting")
+    db.add_activity(c2, (today - timedelta(days=1)).isoformat(),           "Suivi due diligence Private Debt, docs KYC transmis",            "Call")
+    db.add_activity(c6, (today - timedelta(days=2)).isoformat(),           "Initial pitch réalisé — intérêt confirmé Global Value",         "Roadshow")
+    db.add_activity(c4, (today - timedelta(days=3)).isoformat(),           "Envoi memorandum d'investissement Resilient Equity",             "Email")
+    db.add_activity(p1, (today - timedelta(days=5)).isoformat(),           "Review annuelle — renouvellement Global Value confirmé",         "Meeting")
+    return {"ok": True, "message": "Demo data seeded"}
+
+
+# ---------------------------------------------------------------------------
+# /api/overview — aggregate boot endpoint
 # ---------------------------------------------------------------------------
 
 @app.get("/api/overview")
