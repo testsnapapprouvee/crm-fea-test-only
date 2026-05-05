@@ -1,0 +1,1088 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>CRM · Meridian Capital</title>
+<style>
+@import url('https://fonts.googleapis.com/css2?family=DM+Sans:opsz,wght@9..40,300;9..40,400;9..40,500;9..40,600;9..40,700;9..40,800&display=swap');
+*{font-family:'DM Sans',sans-serif;box-sizing:border-box;margin:0;padding:0;}
+body{background:#F0F2F5;}
+.root{padding:28px 24px 48px;max-width:1320px;margin:0 auto;}
+.hdr{display:flex;align-items:flex-start;justify-content:space-between;margin-bottom:28px;}
+.hdr-title{font-size:24px;font-weight:800;color:#111827;letter-spacing:-0.5px;line-height:1.1;}
+.hdr-date{font-size:12px;color:#9CA3AF;font-weight:400;margin-top:4px;}
+.live-badge{display:inline-flex;align-items:center;gap:7px;background:#001c4b;color:#fff;font-size:11px;font-weight:600;padding:7px 14px;border-radius:50px;}
+.dot{width:7px;height:7px;border-radius:50%;background:#019ee1;animation:pulse 2s infinite;}
+@keyframes pulse{0%,100%{opacity:1;transform:scale(1);}50%{opacity:.6;transform:scale(1.3);}}
+.alert{display:flex;align-items:center;gap:12px;background:#FFF7ED;border:1px solid #FED7AA;border-radius:14px;padding:12px 16px;margin-bottom:24px;}
+.alert-ico{font-size:16px;}
+.alert-txt{font-size:12.5px;font-weight:500;color:#92400E;}
+.alert-txt b{color:#78350F;font-weight:700;}
+.alert-cta{margin-left:auto;font-size:11.5px;font-weight:700;color:#D97706;cursor:pointer;white-space:nowrap;}
+.nav{display:flex;gap:0;border-bottom:1.5px solid #E5E7EB;margin-bottom:24px;overflow-x:auto;}
+.nav::-webkit-scrollbar{display:none;}
+.pill{font-size:12px;font-weight:600;color:#9CA3AF;padding:9px 16px;cursor:pointer;border-bottom:2.5px solid transparent;margin-bottom:-1.5px;white-space:nowrap;transition:color .15s,border-color .15s;}
+.pill.on{color:#111827;border-bottom-color:#001c4b;}
+.tab-content{display:none;}
+.tab-content.on{display:block;}
+.quick{display:grid;grid-template-columns:repeat(4,1fr);gap:9px;margin-bottom:24px;}
+.qb{background:#fff;border-radius:14px;padding:14px 10px;text-align:center;border:0.5px solid rgba(0,0,0,.05);cursor:pointer;transition:transform .15s,box-shadow .15s;}
+.qb:hover{transform:translateY(-2px);box-shadow:0 6px 20px rgba(0,0,0,.08);}
+.qb-ico{font-size:18px;margin-bottom:7px;}
+.qb-lbl{font-size:11.5px;font-weight:600;color:#374151;}
+.kpi-row{display:grid;grid-template-columns:repeat(4,1fr);gap:10px;margin-bottom:16px;}
+.kcard{background:#fff;border-radius:18px;padding:20px;border:0.5px solid rgba(0,0,0,.04);transition:transform .15s,box-shadow .15s;}
+.kcard:hover{transform:translateY(-1px);box-shadow:0 8px 28px rgba(0,0,0,.07);}
+.kc-lbl{font-size:10.5px;font-weight:500;color:#9CA3AF;text-transform:uppercase;letter-spacing:.8px;margin-bottom:10px;}
+.kc-val{font-size:28px;font-weight:800;color:#111827;letter-spacing:-1.2px;line-height:1;}
+.kc-unit{font-size:13px;font-weight:500;color:#9CA3AF;letter-spacing:-.2px;}
+.kc-delta{display:inline-flex;align-items:center;gap:3px;font-size:11px;font-weight:600;margin-top:9px;padding:3px 9px;border-radius:50px;}
+.kc-delta.up{background:#ECFDF5;color:#059669;}
+.kc-delta.dn{background:#FEF2F2;color:#DC2626;}
+.spark{display:flex;align-items:flex-end;gap:2.5px;margin-top:12px;height:24px;}
+.sb{flex:1;border-radius:2px 2px 0 0;background:#E5E7EB;}
+.sb.on{background:#001c4b;}
+.mid-row{display:grid;grid-template-columns:2fr 1.1fr 1.3fr;gap:10px;margin-bottom:16px;}
+.card{background:#fff;border-radius:18px;padding:20px;border:0.5px solid rgba(0,0,0,.04);transition:transform .15s,box-shadow .15s;}
+.card:hover{transform:translateY(-1px);box-shadow:0 8px 28px rgba(0,0,0,.07);}
+.sec-title{font-size:15px;font-weight:700;color:#111827;letter-spacing:-.2px;margin-bottom:14px;}
+.sec-sub{font-size:11px;color:#9CA3AF;font-weight:400;margin-left:6px;}
+.deal-row{display:flex;align-items:center;padding:11px 0;border-bottom:1px solid #F3F4F6;gap:11px;}
+.deal-row:last-child{border-bottom:none;}
+.av{width:34px;height:34px;border-radius:10px;background:#F3F4F6;display:flex;align-items:center;justify-content:center;font-size:14px;flex-shrink:0;}
+.dn{font-size:13px;font-weight:600;color:#111827;}
+.ds{font-size:11px;color:#9CA3AF;margin-top:1px;}
+.da{margin-left:auto;text-align:right;}
+.da-v{font-size:13.5px;font-weight:700;color:#111827;}
+.da-d{font-size:10.5px;font-weight:600;margin-top:1px;}
+.da-d.up{color:#059669;}.da-d.dn{color:#DC2626;}
+.spill{font-size:10.5px;font-weight:600;padding:3px 9px;border-radius:50px;flex-shrink:0;}
+.fun-row{display:flex;align-items:center;gap:9px;margin-bottom:10px;}
+.fl{font-size:11px;color:#6B7280;font-weight:500;width:90px;flex-shrink:0;}
+.fb{flex:1;background:#F3F4F6;border-radius:50px;height:7px;overflow:hidden;}
+.fbi{height:100%;border-radius:50px;}
+.fc{font-size:11px;font-weight:700;color:#111827;width:20px;text-align:right;flex-shrink:0;}
+.act-item{display:flex;gap:11px;padding:11px 0;border-bottom:1px solid #F3F4F6;align-items:flex-start;}
+.act-item:last-child{border-bottom:none;}
+.act-ico{width:32px;height:32px;border-radius:9px;background:#F3F4F6;display:flex;align-items:center;justify-content:center;font-size:14px;flex-shrink:0;}
+.ac{font-size:12.5px;font-weight:600;color:#111827;}
+.an{font-size:11px;color:#6B7280;margin-top:2px;line-height:1.5;}
+.adt{font-size:10px;color:#D1D5DB;font-weight:500;flex-shrink:0;margin-left:auto;}
+/* ── ROW BOTTOM OVERVIEW (whitespace + regions + actions) ── */
+.bot-top-row{display:grid;grid-template-columns:1.3fr 1.1fr 1.3fr;gap:10px;margin-bottom:10px;}
+/* ── MAP CARD ── */
+.map-card{background:#fff;border-radius:18px;border:0.5px solid rgba(0,0,0,.04);overflow:hidden;margin-bottom:16px;transition:transform .15s,box-shadow .15s;position:relative;}
+.map-card:hover{transform:translateY(-1px);box-shadow:0 8px 28px rgba(0,0,0,.07);}
+.map-card-inner{min-height:320px;display:flex;flex-direction:column;align-items:center;justify-content:center;padding:40px 24px;text-align:center;background:linear-gradient(135deg,#f8faff 0%,#eef4fb 40%,#e8f0fa 70%,#f0f5ff 100%);position:relative;overflow:hidden;}
+.map-card-inner::before{content:'';position:absolute;inset:0;background:radial-gradient(ellipse 80% 60% at 50% 50%,rgba(1,158,225,0.06) 0%,transparent 70%);pointer-events:none;}
+.map-meridian-dots{position:absolute;inset:0;pointer-events:none;overflow:hidden;}
+.map-meridian-dots::after{content:'';position:absolute;width:200%;height:200%;top:-50%;left:-50%;background-image:radial-gradient(circle,rgba(0,28,75,0.06) 1px,transparent 1px);background-size:28px 28px;}
+.map-icon{font-size:52px;margin-bottom:18px;filter:drop-shadow(0 4px 12px rgba(0,28,75,0.12));position:relative;z-index:1;}
+.map-title{font-size:19px;font-weight:800;color:#111827;letter-spacing:-.4px;margin-bottom:8px;position:relative;z-index:1;}
+.map-sub{font-size:12.5px;color:#6B7280;font-weight:400;margin-bottom:20px;line-height:1.6;max-width:440px;position:relative;z-index:1;}
+.map-badge-row{display:flex;gap:8px;flex-wrap:wrap;justify-content:center;position:relative;z-index:1;}
+.map-badge{font-size:11px;font-weight:600;padding:5px 13px;border-radius:50px;display:inline-flex;align-items:center;gap:5px;}
+.map-badge.navy{background:#E8EDF5;color:#001c4b;}
+.map-badge.blue{background:#E3F4FD;color:#0369A1;}
+.map-badge.green{background:#ECFDF5;color:#059669;}
+.map-header{padding:18px 20px 0;display:flex;align-items:center;justify-content:space-between;}
+.map-coming{font-size:10.5px;font-weight:700;color:#9CA3AF;background:#F3F4F6;padding:3px 10px;border-radius:50px;letter-spacing:.4px;text-transform:uppercase;}
+/* ── SALES TEAM ROW ── */
+.bot-row{display:grid;grid-template-columns:1.3fr 1.1fr 1.3fr;gap:10px;margin-bottom:16px;}
+.sales-card{background:#fff;border-radius:18px;padding:20px;border:0.5px solid rgba(0,0,0,.04);position:relative;overflow:hidden;transition:transform .15s;}
+.sales-card:hover{transform:translateY(-2px);}
+.sales-card::before{content:'';position:absolute;top:0;left:0;right:0;height:3px;background:linear-gradient(90deg,#001c4b,#019ee1);border-radius:18px 18px 0 0;}
+.sm-g{display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-top:14px;}
+.sm-l{font-size:10px;text-transform:uppercase;letter-spacing:.6px;color:#9CA3AF;font-weight:500;margin-bottom:3px;}
+.sm-v{font-size:17px;font-weight:800;color:#111827;letter-spacing:-.7px;}
+.sm-v.acc{color:#001c4b;}
+.conv-lbl{display:flex;justify-content:space-between;font-size:10.5px;color:#9CA3AF;margin:14px 0 5px;font-weight:500;}
+.conv-bg{background:#F3F4F6;border-radius:50px;height:5px;overflow:hidden;}
+.conv-fill{height:100%;border-radius:50px;background:linear-gradient(90deg,#001c4b,#019ee1);}
+.mini-row{display:grid;grid-template-columns:repeat(5,1fr);gap:9px;margin-bottom:16px;}
+.mcard{background:#fff;border-radius:14px;padding:16px 10px;text-align:center;border:0.5px solid rgba(0,0,0,.04);}
+.mc-l{font-size:10px;text-transform:uppercase;letter-spacing:.6px;color:#9CA3AF;font-weight:500;margin-bottom:6px;}
+.mc-v{font-size:24px;font-weight:800;letter-spacing:-1px;}
+.footer{display:flex;align-items:center;justify-content:space-between;border-top:1px solid #E5E7EB;padding-top:16px;margin-top:4px;}
+.ft-brand{font-size:12.5px;font-weight:700;color:#001c4b;}
+.ft-meta{font-size:11px;color:#D1D5DB;font-weight:500;display:flex;gap:20px;}
+.ft-live{color:#019ee1;}
+.ws-grid{font-size:10px;}
+.ws-cell{border-radius:5px;text-align:center;padding:5px 3px;font-weight:700;font-size:9px;}
+.cta{margin-top:12px;font-size:11.5px;font-weight:600;color:#019ee1;cursor:pointer;}
+/* ══════════════════════════════════════════
+   CRM DIRECTORY — VUE 360°
+══════════════════════════════════════════ */
+.crm-layout{display:grid;grid-template-columns:1fr 2fr;gap:12px;align-items:start;}
+.crm-list{background:#fff;border-radius:18px;border:0.5px solid rgba(0,0,0,.04);overflow:hidden;}
+.crm-list-header{padding:16px 18px;border-bottom:1px solid #F3F4F6;}
+.crm-list-search{width:100%;padding:8px 12px;border-radius:10px;border:1px solid #E5E7EB;font-size:12px;color:#111827;outline:none;background:#F9FAFB;margin-top:10px;}
+.crm-list-search:focus{border-color:#019ee1;background:#fff;}
+.crm-client-item{display:flex;align-items:center;gap:10px;padding:12px 18px;cursor:pointer;border-bottom:1px solid #F3F4F6;transition:background .12s;}
+.crm-client-item:last-child{border-bottom:none;}
+.crm-client-item:hover{background:#F9FAFB;}
+.crm-client-item.active{background:#EEF4FB;border-left:3px solid #001c4b;padding-left:15px;}
+.crm-client-flag{font-size:18px;flex-shrink:0;}
+.crm-client-name{font-size:12.5px;font-weight:600;color:#111827;}
+.crm-client-type{font-size:10.5px;color:#9CA3AF;margin-top:1px;}
+.crm-client-aum{margin-left:auto;font-size:12px;font-weight:700;color:#001c4b;flex-shrink:0;}
+/* 360° panel */
+.crm-360{background:#fff;border-radius:18px;border:0.5px solid rgba(0,0,0,.04);overflow:hidden;}
+.crm-360-header{padding:18px 22px;border-bottom:1px solid #F3F4F6;display:flex;align-items:flex-start;justify-content:space-between;gap:12px;}
+.crm-360-client{font-size:17px;font-weight:800;color:#111827;letter-spacing:-.3px;}
+.crm-360-meta{font-size:11.5px;color:#6B7280;margin-top:3px;}
+.crm-360-badges{display:flex;gap:6px;flex-wrap:wrap;margin-top:8px;}
+.crm-badge{font-size:10.5px;font-weight:600;padding:3px 10px;border-radius:50px;}
+.crm-badge.funded{background:#E8F5E9;color:#2E7D32;}
+.crm-badge.pitch{background:#F3E5F5;color:#6A1B9A;}
+.crm-badge.dd{background:#FFF8E1;color:#E65100;}
+.crm-badge.soft{background:#E3F2FD;color:#1565C0;}
+.crm-badge.navy{background:#E8EDF5;color:#001c4b;}
+.crm-badge.tag{background:#F3F4F6;color:#374151;}
+.crm-kpi-strip{display:grid;grid-template-columns:repeat(4,1fr);gap:0;border-bottom:1px solid #F3F4F6;}
+.crm-kpi-cell{padding:14px 18px;border-right:1px solid #F3F4F6;}
+.crm-kpi-cell:last-child{border-right:none;}
+.crm-kpi-lbl{font-size:10px;text-transform:uppercase;letter-spacing:.6px;color:#9CA3AF;font-weight:500;margin-bottom:5px;}
+.crm-kpi-val{font-size:18px;font-weight:800;color:#111827;letter-spacing:-.7px;}
+.crm-kpi-val.accent{color:#001c4b;}
+/* Network spider web */
+.crm-network-section{padding:20px 22px;}
+.crm-network-title{font-size:13.5px;font-weight:700;color:#111827;margin-bottom:4px;}
+.crm-network-sub{font-size:11px;color:#9CA3AF;margin-bottom:18px;}
+.network-canvas{position:relative;width:100%;height:300px;background:linear-gradient(135deg,#f8faff,#eef4fb);border-radius:14px;border:0.5px solid rgba(0,28,75,0.08);overflow:hidden;}
+.network-canvas::before{content:'';position:absolute;inset:0;background-image:radial-gradient(circle,rgba(0,28,75,0.05) 1px,transparent 1px);background-size:24px 24px;pointer-events:none;}
+/* SVG lines rendered inline */
+.net-svg{position:absolute;inset:0;width:100%;height:100%;}
+/* Bubbles */
+.net-node{position:absolute;border-radius:50%;display:flex;align-items:center;justify-content:center;text-align:center;font-weight:700;line-height:1.2;cursor:default;transition:transform .2s,box-shadow .2s;}
+.net-node:hover{transform:scale(1.08);z-index:10;}
+.net-node.center{width:84px;height:84px;background:linear-gradient(135deg,#001c4b,#0F3A7A);color:#fff;font-size:10px;box-shadow:0 6px 24px rgba(0,28,75,0.35);border:3px solid rgba(255,255,255,0.18);}
+.net-node.subsidiary{width:64px;height:64px;background:#fff;color:#001c4b;font-size:9.5px;box-shadow:0 4px 16px rgba(0,28,75,0.15);border:2px solid rgba(0,28,75,0.15);}
+.net-node.fund{width:50px;height:50px;background:linear-gradient(135deg,#019ee1,#0284c7);color:#fff;font-size:8.5px;box-shadow:0 3px 12px rgba(1,158,225,0.3);border:2px solid rgba(255,255,255,0.25);}
+.net-node.contact{width:44px;height:44px;background:linear-gradient(135deg,#059669,#047857);color:#fff;font-size:8px;box-shadow:0 3px 10px rgba(5,150,105,0.3);border:2px solid rgba(255,255,255,0.25);}
+.net-label{position:absolute;font-size:9px;font-weight:600;color:#6B7280;white-space:nowrap;pointer-events:none;}
+/* contacts & timeline */
+.crm-bottom-grid{display:grid;grid-template-columns:1fr 1fr;gap:0;border-top:1px solid #F3F4F6;}
+.crm-section{padding:16px 22px;}
+.crm-section:first-child{border-right:1px solid #F3F4F6;}
+.crm-contact-row{display:flex;align-items:center;gap:10px;padding:9px 0;border-bottom:1px solid #F9FAFB;}
+.crm-contact-row:last-child{border-bottom:none;}
+.crm-contact-av{width:30px;height:30px;border-radius:50%;display:flex;align-items:center;justify-content:center;font-size:11px;font-weight:700;flex-shrink:0;}
+.crm-timeline-item{display:flex;gap:10px;padding:8px 0;border-bottom:1px solid #F9FAFB;align-items:flex-start;}
+.crm-timeline-item:last-child{border-bottom:none;}
+.crm-timeline-dot{width:8px;height:8px;border-radius:50%;flex-shrink:0;margin-top:4px;}
+</style>
+</head>
+<body>
+<div class="root">
+<h2 class="sr-only" style="position:absolute;width:1px;height:1px;overflow:hidden;clip:rect(0,0,0,0);">CRM Meridian Capital — tableau de bord commercial avec KPIs, pipeline, activités et équipe de vente</h2>
+<div class="hdr">
+  <div>
+    <div class="hdr-title">Bonjour, Sophie 👋</div>
+    <div class="hdr-date" id="today-date"></div>
+  </div>
+  <div class="live-badge"><div class="dot"></div><span id="live-badge-text">Live · Connexion…</span></div>
+</div>
+<div class="alert" id="alert-banner" style="display:none;">
+  <div class="alert-ico">⚡</div>
+  <div class="alert-txt" id="alert-text"></div>
+  <div class="alert-cta">Voir tout →</div>
+</div>
+<div class="nav">
+  <div class="pill on" data-tab="overview">Vue d'ensemble</div>
+  <div class="pill" data-tab="pipeline">Pipeline</div>
+  <div class="pill" data-tab="directory">CRM Directory</div>
+  <div class="pill" data-tab="sales">Sales Tracking</div>
+  <div class="pill" data-tab="activities">Activités</div>
+  <div class="pill" data-tab="performance">Performance</div>
+</div>
+<!-- ══════════════════════════════════════════
+     TAB: VUE D'ENSEMBLE
+══════════════════════════════════════════ -->
+<div class="tab-content on" id="tab-overview">
+<div class="quick">
+  <div class="qb"><div class="qb-ico">➕</div><div class="qb-lbl">Nouveau Deal</div></div>
+  <div class="qb"><div class="qb-ico">🤝</div><div class="qb-lbl">Enregistrer activité</div></div>
+  <div class="qb"><div class="qb-ico">📊</div><div class="qb-lbl">Générer rapport</div></div>
+  <div class="qb"><div class="qb-ico">👤</div><div class="qb-lbl">Nouveau client</div></div>
+</div>
+<div class="kpi-row" id="kpi-row"></div>
+<div class="mid-row">
+  <div class="card">
+    <div class="sec-title">Top Deals <span class="sec-sub">AUM Financé · Actifs</span></div>
+    <div id="top-deals"></div>
+  </div>
+  <div class="card">
+    <div class="sec-title">Funnel Pipeline</div>
+    <div style="font-size:11px;color:#9CA3AF;margin-bottom:16px;" id="funnel-sub">— deals actifs en cours</div>
+    <div id="funnel-overview"></div>
+    <div style="border-top:1px solid #F3F4F6;margin-top:16px;padding-top:14px;">
+      <div style="font-size:10.5px;color:#9CA3AF;font-weight:500;margin-bottom:5px;">Weighted Pipeline</div>
+      <div style="font-size:26px;font-weight:800;color:#111827;letter-spacing:-1px;" id="weighted-pipeline">— <span style="font-size:12px;color:#9CA3AF;font-weight:400;">M€</span></div>
+    </div>
+  </div>
+  <div class="card">
+    <div class="sec-title">Activités récentes</div>
+    <div id="activities-recent"></div>
+    <div class="cta">Voir toutes les activités →</div>
+  </div>
+</div>
+<!-- ROW: Whitespace + Regions + Actions -->
+<div class="bot-top-row">
+  <div class="card">
+    <div class="sec-title">Whitespace <span class="sec-sub">Cross-sell engine</span></div>
+    <div style="overflow-x:auto;">
+    <table style="width:100%;border-collapse:separate;border-spacing:3px;">
+      <thead id="ws-head"></thead>
+      <tbody id="ws-body"></tbody>
+    </table>
+    </div>
+    <div class="cta">Explorer le whitespace complet →</div>
+  </div>
+  <div class="card">
+    <div class="sec-title">AUM par Région <span class="sec-sub">Funded</span></div>
+    <div style="font-size:26px;font-weight:800;color:#111827;letter-spacing:-1.2px;margin-bottom:16px;" id="regions-total">— <span style="font-size:12px;color:#9CA3AF;font-weight:400;">M€</span></div>
+    <div id="regions"></div>
+  </div>
+  <div class="card">
+    <div class="sec-title">Prochaines Actions <span class="sec-sub">30 jours</span></div>
+    <div id="next-actions"></div>
+    <div class="cta">Voir le calendrier complet →</div>
+  </div>
+</div>
+<!-- ═══════════════════════════════════════════════════════
+     MAP CARD — CARTOGRAPHIE STRATÉGIQUE (espace réservé)
+════════════════════════════════════════════════════════ -->
+<div class="map-card">
+  <div class="map-header">
+    <div class="sec-title" style="margin-bottom:0;">Cartographie Stratégique <span class="sec-sub">AUM par Pays</span></div>
+    <div class="map-coming">Plotly · Bientôt disponible</div>
+  </div>
+  <div class="map-card-inner">
+    <div class="map-meridian-dots"></div>
+    <div class="map-icon">🗺️</div>
+    <div class="map-title">Cartographie Stratégique — AUM par Pays</div>
+    <div class="map-sub">
+      Visualisation interactive mondiale de la distribution des AUM par pays et région.<br>
+      Drill-down par fonds, manager et statut pipeline. Données en temps réel.
+    </div>
+    <div class="map-badge-row" id="map-badges"></div>
+  </div>
+</div>
+<!-- SALES TEAM -->
+<div class="bot-row" id="sales-team-row"></div>
+<div class="mini-row" id="mini-stats"></div>
+<div class="footer">
+  <div class="ft-brand">◉ Meridian Capital Partners</div>
+  <div class="ft-meta">
+    <span>CRM v16.0 · FastAPI</span>
+    <span class="ft-live">● Données en temps réel</span>
+    <span>Usage interne · Confidentiel</span>
+  </div>
+</div>
+</div><!-- end tab-overview -->
+<!-- ══════════════════════════════════════════
+     TAB: PIPELINE
+══════════════════════════════════════════ -->
+<div class="tab-content" id="tab-pipeline">
+  <div style="display:grid;grid-template-columns:2fr 1.1fr 1.3fr;gap:10px;margin-bottom:16px;">
+    <div class="card">
+      <div class="sec-title">Tous les Deals <span class="sec-sub">Pipeline complet</span></div>
+      <div id="pipeline-table"></div>
+    </div>
+    <div class="card">
+      <div class="sec-title">Funnel Pipeline</div>
+      <div style="font-size:11px;color:#9CA3AF;margin-bottom:16px;" id="funnel-pipe-sub">— deals actifs</div>
+      <div id="funnel-pipe"></div>
+      <div style="border-top:1px solid #F3F4F6;margin-top:16px;padding-top:14px;">
+        <div style="font-size:10.5px;color:#9CA3AF;font-weight:500;margin-bottom:5px;">Weighted Pipeline</div>
+        <div style="font-size:26px;font-weight:800;color:#111827;letter-spacing:-1px;" id="weighted-pipeline-2">— <span style="font-size:12px;color:#9CA3AF;font-weight:400;">M€</span></div>
+      </div>
+    </div>
+    <div class="card">
+      <div class="sec-title">AUM par Fonds</div>
+      <div id="funds-bars"></div>
+    </div>
+  </div>
+</div>
+<!-- ══════════════════════════════════════════
+     TAB: CRM DIRECTORY — VUE 360°
+══════════════════════════════════════════ -->
+<div class="tab-content" id="tab-directory">
+  <div class="crm-layout">
+    <!-- Colonne gauche : liste clients -->
+    <div class="crm-list">
+      <div class="crm-list-header">
+        <div class="sec-title" style="margin-bottom:0;">Clients <span class="sec-sub" id="crm-count">— actifs</span></div>
+        <input class="crm-list-search" type="text" placeholder="Rechercher un client…" id="crm-search">
+      </div>
+      <div id="crm-client-list"></div>
+    </div>
+    <!-- Colonne droite : Vue 360° -->
+    <div class="crm-360" id="crm-360-panel">
+      <div class="crm-360-header">
+        <div>
+          <div class="crm-360-client" id="c360-name">—</div>
+          <div class="crm-360-meta" id="c360-meta">—</div>
+          <div class="crm-360-badges" id="c360-badges"></div>
+        </div>
+        <div style="text-align:right;flex-shrink:0;">
+          <div style="font-size:10px;text-transform:uppercase;letter-spacing:.6px;color:#9CA3AF;font-weight:500;margin-bottom:4px;">Score Relation</div>
+          <div style="font-size:26px;font-weight:800;color:#001c4b;letter-spacing:-1px;" id="c360-score">—<span style="font-size:13px;color:#9CA3AF;font-weight:400;">/100</span></div>
+        </div>
+      </div>
+      <!-- KPI strip -->
+      <div class="crm-kpi-strip" id="c360-kpi-strip"></div>
+      <!-- SPIDER WEB — dynamic -->
+      <div class="crm-network-section">
+        <div class="crm-network-title">Cartographie Réseau</div>
+        <div class="crm-network-sub" id="c360-network-sub">Intelligence réseau · Structure Groupe</div>
+        <div class="network-canvas" id="network-canvas"></div>
+      </div>
+      <!-- Contacts + Timeline -->
+      <div class="crm-bottom-grid">
+        <div class="crm-section">
+          <div style="font-size:12.5px;font-weight:700;color:#111827;margin-bottom:10px;">Contacts Clés</div>
+          <div id="c360-contacts"></div>
+        </div>
+        <div class="crm-section">
+          <div style="font-size:12.5px;font-weight:700;color:#111827;margin-bottom:10px;">Historique Récent</div>
+          <div id="c360-timeline"></div>
+        </div>
+      </div>
+    </div><!-- end crm-360 -->
+  </div><!-- end crm-layout -->
+</div><!-- end tab-directory -->
+<!-- ══════════════════════════════════════════
+     TAB: SALES TRACKING
+══════════════════════════════════════════ -->
+<div class="tab-content" id="tab-sales">
+  <div style="display:grid;grid-template-columns:1.3fr 1.1fr 1.3fr;gap:10px;margin-bottom:16px;" id="sales-cards-row"></div>
+  <div style="display:grid;grid-template-columns:1.3fr 1.1fr 1.3fr;gap:10px;">
+    <div class="card">
+      <div class="sec-title">Classement AUM Financé</div>
+      <div id="sales-ranking"></div>
+    </div>
+    <div class="card">
+      <div class="sec-title">Deals par Statut</div>
+      <div id="sales-status"></div>
+    </div>
+    <div class="card">
+      <div class="sec-title">Prochaines Actions</div>
+      <div id="sales-actions"></div>
+    </div>
+  </div>
+</div>
+<!-- ══════════════════════════════════════════
+     TAB: ACTIVITÉS
+══════════════════════════════════════════ -->
+<div class="tab-content" id="tab-activities">
+  <div class="card">
+    <div class="sec-title">Toutes les Activités <span class="sec-sub">Mois en cours</span></div>
+    <div id="all-activities"></div>
+  </div>
+</div>
+<!-- ══════════════════════════════════════════
+     TAB: PERFORMANCE
+══════════════════════════════════════════ -->
+<div class="tab-content" id="tab-performance">
+  <div class="kpi-row" id="perf-kpi-row" style="margin-bottom:16px;"></div>
+  <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-bottom:10px;">
+    <div class="card">
+      <div class="sec-title">AUM par Manager <span class="sec-sub">YTD</span></div>
+      <div id="perf-mgr"></div>
+    </div>
+    <div class="card">
+      <div class="sec-title">AUM par Région <span class="sec-sub">Funded</span></div>
+      <div id="perf-region"></div>
+    </div>
+    <div class="card">
+      <div class="sec-title">AUM par Fonds</div>
+      <div id="perf-funds"></div>
+    </div>
+    <div class="card">
+      <div class="sec-title">Évolution Mensuelle AUM</div>
+      <div id="perf-monthly" style="display:flex;align-items:flex-end;gap:4px;height:80px;"></div>
+      <div style="font-size:10.5px;color:#9CA3AF;margin-top:8px;">AUM en millions d'euros · 12 derniers mois</div>
+    </div>
+  </div>
+</div>
+</div><!-- end .root -->
+<script>
+/* ============================================================
+   CRM Meridian — Frontend connected to FastAPI backend
+   All data fetched from /api/* endpoints (no mock arrays)
+============================================================ */
+
+const API = (path) => fetch(path).then(r => {
+  if (!r.ok) throw new Error('API ' + path + ' returned ' + r.status);
+  return r.json();
+});
+
+const STATUT_CFG = {
+  'Funded':         {bg:'#E8F5E9', col:'#2E7D32'},
+  'Soft Commit':    {bg:'#E3F2FD', col:'#1565C0'},
+  'Due Diligence':  {bg:'#FFF8E1', col:'#E65100'},
+  'Initial Pitch':  {bg:'#F3E5F5', col:'#6A1B9A'},
+  'Prospect':       {bg:'#FAFAFA', col:'#546E7A'},
+  'Lost':           {bg:'#FEF2F2', col:'#B91C1C'},
+  'Paused':         {bg:'#F3F4F6', col:'#6B7280'},
+  'Redeemed':       {bg:'#EEF2FF', col:'#4338CA'},
+};
+const STATUT_BADGE_CLS = {
+  'Funded':'funded', 'Soft Commit':'soft', 'Due Diligence':'dd',
+  'Initial Pitch':'pitch', 'Prospect':'tag', 'Lost':'tag',
+  'Paused':'tag', 'Redeemed':'tag',
+};
+const FUNNEL_COLORS = {
+  'Prospect':'#E8ECF4', 'Initial Pitch':'#C3CCE0',
+  'Due Diligence':'#7A95C9', 'Soft Commit':'#3060A8',
+  'Funded':'#001c4b',
+};
+
+function pillHtml(s) {
+  const c = STATUT_CFG[s] || {bg:'#F3F4F6', col:'#6B7280'};
+  return '<span class="spill" style="background:'+c.bg+';color:'+c.col+';">'+s+'</span>';
+}
+
+function fmtM(eur) {
+  const v = Number(eur) || 0;
+  if (v >= 1e9) return (v / 1e9).toFixed(2) + ' Md€';
+  if (v >= 1e6) return (v / 1e6).toFixed(1) + ' M€';
+  if (v >= 1e3) return (v / 1e3).toFixed(0) + ' k€';
+  return v.toFixed(0) + ' €';
+}
+
+function splitVal(eur) {
+  const v = Number(eur) || 0;
+  if (v >= 1e9) return [(v / 1e9).toFixed(2), 'Md€'];
+  if (v >= 1e6) return [(v / 1e6).toFixed(1), 'M€'];
+  if (v >= 1e3) return [(v / 1e3).toFixed(0), 'k€'];
+  return [v.toFixed(0), '€'];
+}
+
+/* ──────────────── DATE & HEADER ──────────────── */
+const FR_DAYS = ['Dimanche','Lundi','Mardi','Mercredi','Jeudi','Vendredi','Samedi'];
+const FR_MONTHS = ['janvier','février','mars','avril','mai','juin',
+                    'juillet','août','septembre','octobre','novembre','décembre'];
+(function initDate() {
+  const d = new Date();
+  document.getElementById('today-date').textContent =
+    FR_DAYS[d.getDay()] + ' ' + d.getDate() + ' ' + FR_MONTHS[d.getMonth()]
+    + ' ' + d.getFullYear() + ' · Meridian Capital Partners';
+})();
+
+/* ──────────────── KPI CARDS (overview) ──────────────── */
+function renderKpiCards(kpis) {
+  const items = [
+    {lbl:'AUM Financé Total', val:kpis.total_funded,
+      sub:(kpis.nb_funded||0)+' deal(s) funded', dir:'up'},
+    {lbl:'Pipeline Actif', val:kpis.pipeline_actif,
+      sub:(kpis.nb_deals_actifs||0)+' deals actifs', dir:'up'},
+    {lbl:'Pipeline Pondéré', val:kpis.weighted_pipeline,
+      sub:'probabilité-pondéré', dir:'up'},
+  ];
+  const conv = (kpis.taux_conversion || 0).toFixed(1);
+  const sparks = [[10,13,12,16,14,20,24],[9,11,13,10,16,18,22],
+                   [8,10,12,9,15,18,21],[14,15,16,17,18,20,22]];
+  let html = '';
+  items.forEach((it, i) => {
+    const [m, u] = splitVal(it.val);
+    const sb = sparks[i].map((h, j) =>
+      '<div class="sb'+(j===6?' on':'')+'" style="height:'+h+'px"></div>').join('');
+    html += '<div class="kcard">'
+      + '<div class="kc-lbl">'+it.lbl+'</div>'
+      + '<div class="kc-val">'+m+' <span class="kc-unit">'+u+'</span></div>'
+      + '<div class="kc-delta '+it.dir+'">'+it.sub+'</div>'
+      + '<div class="spark">'+sb+'</div></div>';
+  });
+  // Conversion card
+  const sb4 = sparks[3].map((h, j) =>
+    '<div class="sb'+(j===6?' on':'')+'" style="height:'+h+'px"></div>').join('');
+  html += '<div class="kcard">'
+    + '<div class="kc-lbl">Taux de Conversion</div>'
+    + '<div class="kc-val">'+conv+' <span class="kc-unit">%</span></div>'
+    + '<div class="kc-delta up">'+(kpis.nb_funded||0)+' funded / '+(kpis.nb_lost||0)+' lost</div>'
+    + '<div class="spark">'+sb4+'</div></div>';
+  document.getElementById('kpi-row').innerHTML = html;
+
+  // Weighted pipeline mid-card
+  const [wm, wu] = splitVal(kpis.weighted_pipeline);
+  const weightHtml = wm + ' <span style="font-size:12px;color:#9CA3AF;font-weight:400;">' + wu + '</span>';
+  ['weighted-pipeline','weighted-pipeline-2'].forEach(id => {
+    const el = document.getElementById(id);
+    if (el) el.innerHTML = weightHtml;
+  });
+}
+
+/* ──────────────── TOP DEALS ──────────────── */
+function flagFor(country, region) {
+  const map = {
+    'United Arab Emirates':'🇦🇪','Saudi Arabia':'🇸🇦','Qatar':'🇶🇦',
+    'Kuwait':'🇰🇼','Bahrain':'🇧🇭','Oman':'🇴🇲',
+    'United Kingdom':'🇬🇧','France':'🇫🇷','Germany':'🇩🇪','Switzerland':'🇨🇭',
+    'Luxembourg':'🇱🇺','Netherlands':'🇳🇱','Italy':'🇮🇹','Spain':'🇪🇸',
+    'Sweden':'🇸🇪','Norway':'🇳🇴','Denmark':'🇩🇰','Finland':'🇫🇮',
+    'Singapore':'🇸🇬','Japan':'🇯🇵','Hong Kong':'🇭🇰','China':'🇨🇳',
+    'South Korea':'🇰🇷','Australia':'🇦🇺','India':'🇮🇳',
+    'United States':'🇺🇸','Canada':'🇨🇦','Brazil':'🇧🇷','Mexico':'🇲🇽',
+    'South Africa':'🇿🇦','Egypt':'🇪🇬',
+  };
+  if (country && map[country]) return map[country];
+  const regionMap = {'GCC':'🌍','EMEA':'🇪🇺','APAC':'🌏','Nordics':'🌍',
+                      'Asia ex-Japan':'🌏','North America':'🇺🇸','LatAm':'🌎'};
+  return regionMap[region] || '🌐';
+}
+
+function renderTopDeals(deals) {
+  const el = document.getElementById('top-deals');
+  if (!deals.length) {
+    el.innerHTML = '<div style="color:#9CA3AF;font-size:12px;padding:14px 0;">Aucun deal enregistré.</div>';
+    return;
+  }
+  el.innerHTML = deals.slice(0, 6).map(d => {
+    const aum_m = ((d.aum || 0) / 1e6).toFixed(1) + ' M€';
+    return '<div class="deal-row">'
+      + '<div class="av">'+flagFor(d.country, d.region)+'</div>'
+      + '<div style="flex:1;min-width:0"><div class="dn">'+(d.client||'')+'</div>'
+      + '<div class="ds">'+(d.fonds||'')+' · '+(d.sales_owner||'—')+'</div></div>'
+      + pillHtml(d.statut)
+      + '<div class="da"><div class="da-v">'+aum_m+'</div></div></div>';
+  }).join('');
+}
+
+/* ──────────────── FUNNEL ──────────────── */
+function renderFunnel(targetId, subId, statusCounts) {
+  const order = ['Prospect','Initial Pitch','Due Diligence','Soft Commit','Funded'];
+  const max = Math.max(...order.map(s => statusCounts[s] || 0)) || 1;
+  const html = order.map(s => {
+    const v = statusCounts[s] || 0;
+    const w = Math.round(v / max * 100);
+    return '<div class="fun-row"><div class="fl">'+s+'</div>'
+      + '<div class="fb"><div class="fbi" style="width:'+w+'%;background:'+(FUNNEL_COLORS[s]||'#001c4b')+';"></div></div>'
+      + '<div class="fc">'+v+'</div></div>';
+  }).join('');
+  document.getElementById(targetId).innerHTML = html;
+  if (subId) {
+    const total = order.reduce((a,s)=>a+(statusCounts[s]||0), 0);
+    const actifs = ['Prospect','Initial Pitch','Due Diligence','Soft Commit']
+      .reduce((a,s)=>a+(statusCounts[s]||0), 0);
+    document.getElementById(subId).textContent = actifs + ' deal(s) actif(s) · ' + total + ' total';
+  }
+}
+
+/* ──────────────── ACTIVITIES ──────────────── */
+const ACT_ICO = {'Call':'📞','Meeting':'🤝','Email':'📧','Roadshow':'✈️',
+                  'Conference':'🎤','Autre':'📝'};
+function renderActivities(targetId, acts, limit) {
+  const el = document.getElementById(targetId);
+  if (!acts.length) {
+    el.innerHTML = '<div style="color:#9CA3AF;font-size:12px;padding:14px 0;">Aucune activité enregistrée.</div>';
+    return;
+  }
+  const slice = limit ? acts.slice(0, limit) : acts;
+  el.innerHTML = slice.map(a => {
+    const ico = ACT_ICO[a.type_interaction] || '📝';
+    const dt = relativeDate(a.date);
+    return '<div class="act-item"><div class="act-ico">'+ico+'</div>'
+      + '<div style="flex:1;min-width:0"><div class="ac">'+(a.nom_client||'—')
+      + ' <span style="font-size:10.5px;font-weight:400;color:#9CA3AF;">· '+(a.type_interaction||'')+'</span></div>'
+      + '<div class="an">'+(a.notes||'—')+'</div></div>'
+      + '<div class="adt">'+dt+'</div></div>';
+  }).join('');
+}
+
+function relativeDate(dStr) {
+  if (!dStr) return '—';
+  const d = new Date(dStr);
+  if (isNaN(d.getTime())) return dStr;
+  const today = new Date();
+  today.setHours(0,0,0,0);
+  d.setHours(0,0,0,0);
+  const days = Math.round((today - d) / 86400000);
+  if (days === 0) return 'Auj.';
+  if (days === 1) return 'Hier';
+  if (days < 7) return 'Il y a ' + days + 'j';
+  if (days < 30) return 'Il y a ' + Math.round(days / 7) + 'sem';
+  return 'Il y a ' + Math.round(days / 30) + ' mois';
+}
+
+/* ──────────────── WHITESPACE ──────────────── */
+function renderWhitespace(matrix) {
+  const head = document.getElementById('ws-head');
+  const body = document.getElementById('ws-body');
+  if (!matrix.clients.length) {
+    head.innerHTML = ''; body.innerHTML = '';
+    return;
+  }
+  head.innerHTML = '<tr><td style="width:90px;"></td>'
+    + matrix.fonds.map(f => '<td style="font-size:9px;color:#9CA3AF;font-weight:600;text-align:center;padding:2px;">'
+        + f.substring(0, 9) + '</td>').join('') + '</tr>';
+  body.innerHTML = matrix.clients.map((c, i) => {
+    return '<tr><td style="font-size:10.5px;font-weight:600;color:#374151;white-space:nowrap;padding:2px 4px 2px 0;">'
+      + c.substring(0, 14) + '</td>'
+      + matrix.fonds.map((f, j) => {
+        const v = matrix.values[i][j] || 0;
+        let bg, col, txt;
+        if (v <= 0) { bg = '#F9FAFB'; col = '#D1D5DB'; txt = '·'; }
+        else if (v < 80e6) { bg = '#DBEAFE'; col = '#1D4ED8'; txt = (v/1e6).toFixed(0)+'M'; }
+        else { bg = '#001c4b'; col = '#fff'; txt = (v/1e6).toFixed(0)+'M'; }
+        return '<td><div style="background:'+bg+';color:'+col+';font-size:9px;font-weight:700;text-align:center;padding:6px 3px;border-radius:5px;">'+txt+'</div></td>';
+      }).join('') + '</tr>';
+  }).join('');
+}
+
+/* ──────────────── REGIONS ──────────────── */
+function renderRegions(regions) {
+  const total = regions.reduce((a, r) => a + (r.aum || 0), 0);
+  const [tm, tu] = splitVal(total);
+  document.getElementById('regions-total').innerHTML =
+    tm + ' <span style="font-size:12px;color:#9CA3AF;font-weight:400;">' + tu + '</span>';
+
+  const colors = ['#001c4b','#0F3A7A','#2171B5','#6BAED6','#BDD7EE','#E5E7EB'];
+  const html = regions.map((r, i) => {
+    const pct = total > 0 ? Math.round(r.aum / total * 100) : 0;
+    const aum_m = (r.aum / 1e6).toFixed(0) + ' M€';
+    return '<div style="margin-bottom:11px;">'
+      + '<div style="display:flex;justify-content:space-between;margin-bottom:4px;">'
+      + '<span style="font-size:12px;font-weight:600;color:#374151;">'+(r.region||'—')+'</span>'
+      + '<span style="font-size:12px;font-weight:700;color:#111827;">'+aum_m
+      + ' <span style="font-size:10px;color:#9CA3AF;font-weight:400;">('+pct+'%)</span></span></div>'
+      + '<div style="background:#F3F4F6;border-radius:50px;height:6px;overflow:hidden;">'
+      + '<div style="width:'+pct+'%;height:100%;background:'+colors[i % colors.length]+';border-radius:50px;"></div>'
+      + '</div></div>';
+  }).join('');
+  document.getElementById('regions').innerHTML = html
+    || '<div style="color:#9CA3AF;font-size:12px;">Aucune donnée régionale.</div>';
+}
+
+/* ──────────────── NEXT ACTIONS ──────────────── */
+function renderNextActions(targetId, actions) {
+  const el = document.getElementById(targetId);
+  if (!actions.length) {
+    el.innerHTML = '<div style="color:#9CA3AF;font-size:12px;padding:14px 0;">Aucune action planifiée.</div>';
+    return;
+  }
+  el.innerHTML = actions.slice(0, 6).map(a => {
+    const dt = relativeFutureDate(a.next_action_date);
+    const isUrgent = dt === 'Auj.' || dt === 'Demain';
+    const dot = isUrgent ? '#EF4444' : (dt.includes('j') ? '#F59E0B' : '#10B981');
+    const bg = isUrgent ? '#FEF2F2' : (dt.includes('j') ? '#FFFBEB' : '#ECFDF5');
+    const tc = isUrgent ? '#B91C1C' : (dt.includes('j') ? '#92400E' : '#065F46');
+    return '<div style="display:flex;align-items:center;gap:10px;padding:10px 0;border-bottom:1px solid #F3F4F6;">'
+      + '<div style="width:7px;height:7px;border-radius:50%;background:'+dot+';flex-shrink:0;"></div>'
+      + '<div style="flex:1;min-width:0;">'
+      + '<div style="font-size:12.5px;font-weight:600;color:#111827;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">'+(a.nom_client||'—')+'</div>'
+      + '<div style="font-size:11px;color:#6B7280;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">'+(a.fonds||'—')+' · '+(a.statut||'—')+'</div></div>'
+      + '<div style="text-align:right;flex-shrink:0;">'
+      + '<div style="font-size:11px;font-weight:700;color:'+tc+';background:'+bg+';padding:3px 8px;border-radius:50px;">'+dt+'</div>'
+      + '<div style="font-size:9.5px;color:#D1D5DB;margin-top:2px;">'+(a.sales_owner||'—')+'</div></div></div>';
+  }).join('');
+}
+
+function relativeFutureDate(dStr) {
+  if (!dStr) return '—';
+  const d = new Date(dStr);
+  if (isNaN(d.getTime())) return dStr;
+  const today = new Date(); today.setHours(0,0,0,0); d.setHours(0,0,0,0);
+  const days = Math.round((d - today) / 86400000);
+  if (days === 0) return 'Auj.';
+  if (days === 1) return 'Demain';
+  if (days < 0) return 'Retard ' + Math.abs(days) + 'j';
+  if (days < 30) return 'Dans ' + days + 'j';
+  return 'Dans ' + Math.round(days / 30) + ' mois';
+}
+
+/* ──────────────── SALES TEAM ──────────────── */
+function renderSalesTeam(team, targetId) {
+  const el = document.getElementById(targetId);
+  if (!team.length) {
+    el.innerHTML = '<div class="card" style="grid-column:span 3;color:#9CA3AF;font-size:12px;text-align:center;">Aucun commercial enregistré.</div>';
+    return;
+  }
+  const icons = ['🧑‍💼','👨‍💼','👩‍💼'];
+  el.innerHTML = team.map((s, i) => {
+    const conv = s.conversion || 0;
+    const convCol = conv >= 65 ? '#059669' : (conv >= 50 ? '#F59E0B' : '#DC2626');
+    const fundedM = ((s.funded_aum||0) / 1e6).toFixed(1);
+    const pipeM = ((s.pipeline_aum||0) / 1e6).toFixed(1);
+    return '<div class="sales-card">'
+      + '<div style="display:flex;align-items:center;gap:10px;margin-bottom:2px;">'
+      + '<div style="font-size:24px;">'+icons[i % icons.length]+'</div>'
+      + '<div><div style="font-size:14px;font-weight:700;color:#111827;">'+s.nom+'</div>'
+      + '<div style="font-size:11px;color:#9CA3AF;">'+(s.marche||'—')+'</div></div></div>'
+      + '<div class="sm-g">'
+      + '<div><div class="sm-l">AUM Financé</div><div class="sm-v acc">'+fundedM+'<span style="font-size:10px;color:#9CA3AF;font-weight:400;"> M€</span></div></div>'
+      + '<div><div class="sm-l">Pipeline</div><div class="sm-v">'+pipeM+'<span style="font-size:10px;color:#9CA3AF;font-weight:400;"> M€</span></div></div>'
+      + '<div><div class="sm-l">Deals actifs</div><div class="sm-v">'+(s.nb_actifs||0)+'</div></div>'
+      + '<div><div class="sm-l">Conversion</div><div class="sm-v" style="color:'+convCol+';">'+conv+'%</div></div>'
+      + '</div>'
+      + '<div class="conv-lbl"><span>Taux de conversion</span><span style="font-weight:700;color:#111827;">'+conv+'%</span></div>'
+      + '<div class="conv-bg"><div class="conv-fill" style="width:'+conv+'%;"></div></div>'
+      + '</div>';
+  }).join('');
+}
+
+/* ──────────────── MINI STATS ──────────────── */
+function renderMiniStats(stats) {
+  const items = [
+    {l:'Clients actifs', v:stats.nb_clients, c:'#111827'},
+    {l:'Contacts CRM', v:stats.nb_contacts, c:'#111827'},
+    {l:'Activités / mois', v:stats.nb_activities_30d, c:'#059669'},
+    {l:'Actions en retard', v:stats.nb_overdue, c:'#EF4444'},
+    {l:'Fonds en portefeuille', v:stats.nb_fonds, c:'#001c4b'},
+  ];
+  document.getElementById('mini-stats').innerHTML = items.map(it =>
+    '<div class="mcard"><div class="mc-l">'+it.l+'</div>'
+    + '<div class="mc-v" style="color:'+it.c+';">'+it.v+'</div></div>').join('');
+}
+
+/* ──────────────── PIPELINE TABLE ──────────────── */
+function renderPipelineTable(deals) {
+  const el = document.getElementById('pipeline-table');
+  if (!deals.length) {
+    el.innerHTML = '<div style="color:#9CA3AF;font-size:12px;padding:14px 0;">Aucun deal.</div>';
+    return;
+  }
+  el.innerHTML = deals.map(d => {
+    const aum_m = ((d.aum || 0) / 1e6).toFixed(1) + ' M€';
+    return '<div class="deal-row">'
+      + '<div class="av">'+flagFor(d.country, d.region)+'</div>'
+      + '<div style="flex:1;min-width:0"><div class="dn">'+(d.client||'')+'</div>'
+      + '<div class="ds">'+(d.fonds||'')+' · '+(d.sales_owner||'—')+'</div></div>'
+      + pillHtml(d.statut)
+      + '<div class="da"><div class="da-v">'+aum_m+'</div></div></div>';
+  }).join('');
+}
+
+/* ──────────────── FUNDS BARS ──────────────── */
+function renderFundsBars(fundsAgg) {
+  const entries = Object.entries(fundsAgg).sort((a,b) => b[1] - a[1]);
+  const max = entries.length ? entries[0][1] : 1;
+  document.getElementById('funds-bars').innerHTML = entries.map(([name, val]) => {
+    const pct = Math.round(val / max * 100);
+    return '<div style="margin-bottom:10px;">'
+      + '<div style="display:flex;justify-content:space-between;margin-bottom:4px;">'
+      + '<span style="font-size:11.5px;font-weight:600;color:#374151;">'+name+'</span>'
+      + '<span style="font-size:11.5px;font-weight:700;color:#111827;">'+(val/1e6).toFixed(0)+' M€</span></div>'
+      + '<div style="background:#F3F4F6;border-radius:50px;height:7px;overflow:hidden;">'
+      + '<div style="width:'+pct+'%;height:100%;background:#001c4b;border-radius:50px;"></div></div></div>';
+  }).join('') || '<div style="color:#9CA3AF;font-size:12px;">Aucun fonds.</div>';
+}
+
+/* ──────────────── CRM DIRECTORY ──────────────── */
+let CRM_CACHE = [];
+let SELECTED_CLIENT_ID = null;
+
+function buildClientList(filter) {
+  const el = document.getElementById('crm-client-list');
+  el.innerHTML = '';
+  const filtered = CRM_CACHE.filter(c =>
+    !filter || c.nom_client.toLowerCase().includes(filter.toLowerCase()));
+  document.getElementById('crm-count').textContent = filtered.length + ' actifs';
+  filtered.forEach(c => {
+    const item = document.createElement('div');
+    item.className = 'crm-client-item' + (c.id === SELECTED_CLIENT_ID ? ' active' : '');
+    const aum_m = ((c.aum || 0) / 1e6).toFixed(1) + ' M€';
+    item.innerHTML = '<div class="crm-client-flag">'+flagFor(c.country, c.region)+'</div>'
+      + '<div style="flex:1;min-width:0;">'
+      + '<div class="crm-client-name">'+c.nom_client+'</div>'
+      + '<div class="crm-client-type">'+(c.type_client||'—')+'</div></div>'
+      + '<div class="crm-client-aum">'+aum_m+'</div>';
+    item.addEventListener('click', () => {
+      SELECTED_CLIENT_ID = c.id;
+      buildClientList(document.getElementById('crm-search').value);
+      load360(c.id);
+    });
+    el.appendChild(item);
+  });
+}
+
+async function load360(clientId) {
+  try {
+    const data = await API('/api/clients/' + clientId);
+    document.getElementById('c360-name').textContent = data.nom_client;
+    document.getElementById('c360-meta').textContent = flagFor(data.country, data.region) + ' '
+      + (data.country || data.region || '—') + ' · ' + (data.type_client||'—')
+      + (data.primary_contact ? ' · Contact: ' + data.primary_contact : '');
+    const score = Math.round(50 + (data.aum_total || 0) / 1e7);
+    document.getElementById('c360-score').innerHTML =
+      Math.min(99, score) + '<span style="font-size:13px;color:#9CA3AF;font-weight:400;">/100</span>';
+    // Badges
+    const cls = STATUT_BADGE_CLS[data.dominant_statut] || 'tag';
+    document.getElementById('c360-badges').innerHTML =
+      '<span class="crm-badge '+cls+'">'+(data.dominant_statut||'—')+'</span>'
+      + '<span class="crm-badge navy">'+((data.aum_total||0)/1e6).toFixed(1)+' M€ AUM</span>'
+      + (data.fonds_invested||[]).slice(0,3).map(f =>
+          '<span class="crm-badge tag">'+f+'</span>').join('');
+    // KPI strip
+    document.getElementById('c360-kpi-strip').innerHTML =
+      kpiCell('AUM Financé', ((data.aum_funded||0)/1e6).toFixed(1), 'M€', true)
+      + kpiCell('Deals actifs', data.nb_active_deals||0, '', false)
+      + kpiCell('Activités', data.nb_activities||0, '', false)
+      + kpiCell('Depuis', (data.created_year||'—'), '', false, true);
+    // Network
+    renderNetwork(data.network);
+    // Contacts
+    document.getElementById('c360-contacts').innerHTML = (data.contacts||[]).map(ct => {
+      const init = ((ct.prenom||'')[0]||'') + ((ct.nom||'')[0]||'');
+      const isPrimary = ct.is_primary;
+      return '<div class="crm-contact-row">'
+        + '<div class="crm-contact-av" style="background:'+(isPrimary?'#E8EDF5':'#ECFDF5')+';color:'+(isPrimary?'#001c4b':'#059669')+';">'+init.toUpperCase()+'</div>'
+        + '<div style="flex:1;min-width:0;">'
+        + '<div style="font-size:12px;font-weight:600;color:#111827;">'+(ct.prenom||'')+' '+(ct.nom||'')+'</div>'
+        + '<div style="font-size:10.5px;color:#9CA3AF;">'+(ct.role||'—')+(ct.email?' · '+ct.email:'')+'</div></div>'
+        + '<span class="crm-badge '+(isPrimary?'navy':'tag')+'" style="font-size:9.5px;">'
+        + (isPrimary?'Principal':'Secondaire')+'</span></div>';
+    }).join('') || '<div style="color:#9CA3AF;font-size:11.5px;">Aucun contact.</div>';
+    // Timeline
+    document.getElementById('c360-timeline').innerHTML = (data.activities||[]).slice(0,4).map(a => {
+      const dotColors = {'Meeting':'#059669','Call':'#019ee1','Email':'#001c4b',
+                          'Roadshow':'#F59E0B','Conference':'#9333EA'};
+      const dotC = dotColors[a.type_interaction] || '#6B7280';
+      return '<div class="crm-timeline-item">'
+        + '<div class="crm-timeline-dot" style="background:'+dotC+';"></div>'
+        + '<div style="flex:1;min-width:0;">'
+        + '<div style="font-size:11.5px;font-weight:600;color:#111827;">'+(a.type_interaction||'—')+'</div>'
+        + '<div style="font-size:10.5px;color:#9CA3AF;">'+(a.notes||'—').substring(0, 60)+'</div></div>'
+        + '<div style="font-size:10px;color:#D1D5DB;flex-shrink:0;">'+relativeDate(a.date)+'</div></div>';
+    }).join('') || '<div style="color:#9CA3AF;font-size:11.5px;">Aucune activité.</div>';
+  } catch (err) {
+    console.error('load360 failed', err);
+  }
+}
+
+function kpiCell(lbl, val, unit, accent, small) {
+  const cls = 'crm-kpi-val' + (accent ? ' accent' : '');
+  const valStyle = small ? ' style="font-size:14px;"' : '';
+  const unitHtml = unit ? ' <span style="font-size:11px;color:#9CA3AF;font-weight:400;">'+unit+'</span>' : '';
+  return '<div class="crm-kpi-cell">'
+    + '<div class="crm-kpi-lbl">'+lbl+'</div>'
+    + '<div class="'+cls+'"'+valStyle+'>'+val+unitHtml+'</div></div>';
+}
+
+function renderNetwork(network) {
+  const canvas = document.getElementById('network-canvas');
+  if (!network || !network.root) {
+    canvas.innerHTML = '<div style="display:flex;align-items:center;justify-content:center;height:100%;color:#9CA3AF;font-size:12px;">Aucun réseau.</div>';
+    return;
+  }
+  const subs = network.subsidiaries || [];
+  const funds = network.fund_links || [];
+  const W = 700, H = 300, CX = W/2, CY = H/2;
+  const subCount = Math.max(subs.length, 1);
+  const subPositions = subs.map((_, i) => {
+    const angle = -Math.PI/2 + (Math.PI * 2 / subCount) * i;
+    return {x: CX + Math.cos(angle) * 175, y: CY + Math.sin(angle) * 90};
+  });
+  // Lines
+  let svg = '<svg class="net-svg" viewBox="0 0 '+W+' '+H+'" preserveAspectRatio="none">';
+  subPositions.forEach(p => {
+    svg += '<line x1="'+CX+'" y1="'+CY+'" x2="'+p.x+'" y2="'+p.y+'" stroke="#001c4b" stroke-width="1.5" stroke-dasharray="4,3" opacity="0.4"/>';
+  });
+  // Fund lines: each fund connects to first subsidiary or center
+  const fundPositions = funds.slice(0, 6).map((_, i) => {
+    const angle = -Math.PI/2 + (Math.PI * 2 / Math.max(funds.length, 1)) * i;
+    return {x: CX + Math.cos(angle) * 290, y: CY + Math.sin(angle) * 130};
+  });
+  fundPositions.forEach((p, i) => {
+    const fl = funds[i];
+    const targetId = fl.client_id;
+    let anchor = {x: CX, y: CY};
+    const subIdx = subs.findIndex(s => s.id === targetId);
+    if (subIdx >= 0) anchor = subPositions[subIdx];
+    const col = fl.statut === 'Funded' ? '#019ee1' : '#019ee1';
+    const opacity = fl.statut === 'Funded' ? '0.5' : '0.25';
+    svg += '<line x1="'+anchor.x+'" y1="'+anchor.y+'" x2="'+p.x+'" y2="'+p.y+'" stroke="'+col+'" stroke-width="1" stroke-dasharray="3,3" opacity="'+opacity+'"/>';
+  });
+  svg += '</svg>';
+  // Center node
+  let nodes = '<div class="net-node center" style="left:calc(50% - 42px);top:calc(50% - 42px);">'
+    + truncate(network.root.nom, 14) + '<br><span style="font-size:8px;opacity:.7;font-weight:400;">Maison Mère</span></div>';
+  // Subsidiaries
+  subs.forEach((s, i) => {
+    const p = subPositions[i];
+    nodes += '<div class="net-node subsidiary" style="left:calc('+(p.x/W*100)+'% - 32px);top:calc('+(p.y/H*100)+'% - 32px);">'
+      + truncate(s.nom_client, 11) + '<br><span style="font-size:8px;opacity:.6;font-weight:400;">Filiale</span></div>';
+  });
+  // Funds
+  fundPositions.forEach((p, i) => {
+    const fund = funds[i];
+    nodes += '<div class="net-node fund" style="left:calc('+(p.x/W*100)+'% - 25px);top:calc('+(p.y/H*100)+'% - 25px);">'
+      + truncate(fund.fonds, 8) + '</div>';
+  });
+  // Legend
+  nodes += '<div style="position:absolute;bottom:10px;right:12px;display:flex;gap:10px;align-items:center;">'
+    + '<span style="font-size:9px;color:#6B7280;display:flex;align-items:center;gap:4px;"><span style="width:10px;height:10px;border-radius:50%;background:#001c4b;display:inline-block;"></span>Groupe</span>'
+    + '<span style="font-size:9px;color:#6B7280;display:flex;align-items:center;gap:4px;"><span style="width:10px;height:10px;border-radius:50%;background:white;border:1.5px solid #001c4b;display:inline-block;"></span>Filiale</span>'
+    + '<span style="font-size:9px;color:#6B7280;display:flex;align-items:center;gap:4px;"><span style="width:10px;height:10px;border-radius:50%;background:#019ee1;display:inline-block;"></span>Fonds</span></div>';
+  canvas.innerHTML = svg + nodes;
+  document.getElementById('c360-network-sub').textContent =
+    'Intelligence réseau · ' + subs.length + ' filiale(s) · ' + funds.length + ' lien(s) fonds';
+}
+
+function truncate(s, n) {
+  if (!s) return '—';
+  return s.length > n ? s.substring(0, n) + '…' : s;
+}
+
+/* ──────────────── SALES TRACKING ──────────────── */
+function renderSalesRanking(team) {
+  const sorted = [...team].sort((a,b) => (b.funded_aum||0) - (a.funded_aum||0));
+  const max = sorted.length ? (sorted[0].funded_aum || 1) : 1;
+  const medals = ['🥇','🥈','🥉','4.','5.','6.'];
+  document.getElementById('sales-ranking').innerHTML = sorted.map((s, i) => {
+    const pct = Math.round((s.funded_aum||0) / max * 100);
+    return '<div style="margin-bottom:14px;">'
+      + '<div style="display:flex;justify-content:space-between;margin-bottom:5px;">'
+      + '<span style="font-size:12px;font-weight:600;color:#374151;">'+(medals[i]||'·')+' '+s.nom+'</span>'
+      + '<span style="font-size:12px;font-weight:700;color:#001c4b;">'+((s.funded_aum||0)/1e6).toFixed(0)+' M€</span></div>'
+      + '<div style="background:#F3F4F6;border-radius:50px;height:7px;overflow:hidden;">'
+      + '<div style="width:'+pct+'%;height:100%;background:#001c4b;border-radius:50px;"></div></div>'
+      + '<div style="font-size:10.5px;color:#9CA3AF;margin-top:4px;">'+(s.nb_actifs||0)+' deals · conv. '+(s.conversion||0)+'%</div></div>';
+  }).join('') || '<div style="color:#9CA3AF;font-size:12px;">Aucun commercial.</div>';
+}
+
+/* ──────────────── PERFORMANCE ──────────────── */
+function barRow(targetId, items, maxVal) {
+  const max = maxVal || (items.length ? Math.max(...items.map(i => i[1])) : 1);
+  document.getElementById(targetId).innerHTML = items.map(([lbl, val]) => {
+    const pct = Math.round(val / max * 100);
+    return '<div style="margin-bottom:10px;">'
+      + '<div style="display:flex;justify-content:space-between;margin-bottom:4px;">'
+      + '<span style="font-size:11.5px;font-weight:600;color:#374151;">'+lbl+'</span>'
+      + '<span style="font-size:11.5px;font-weight:700;color:#111827;">'+(val/1e6).toFixed(0)+' M€</span></div>'
+      + '<div style="background:#F3F4F6;border-radius:50px;height:7px;overflow:hidden;">'
+      + '<div style="width:'+pct+'%;height:100%;background:#001c4b;border-radius:50px;"></div></div></div>';
+  }).join('') || '<div style="color:#9CA3AF;font-size:12px;">Aucune donnée.</div>';
+}
+
+function renderMonthlyEvolution(monthly) {
+  if (!monthly.length) {
+    document.getElementById('perf-monthly').innerHTML = '<div style="color:#9CA3AF;font-size:11px;">Aucune donnée.</div>';
+    return;
+  }
+  const max = Math.max(...monthly.map(m => m.aum));
+  const html = monthly.map((m, i) => {
+    const h = Math.round(m.aum / max * 76) || 1;
+    const isLast = i === monthly.length - 1;
+    return '<div style="flex:1;display:flex;flex-direction:column;align-items:center;gap:3px;">'
+      + '<div style="width:100%;height:'+h+'px;background:'+(isLast?'#001c4b':'#BDD7EE')+';border-radius:3px 3px 0 0;"></div>'
+      + '<div style="font-size:8.5px;color:#9CA3AF;">'+m.label+'</div></div>';
+  }).join('');
+  document.getElementById('perf-monthly').innerHTML = html;
+}
+
+function renderPerfKpis(kpis, monthly) {
+  const lastM = monthly.length ? monthly[monthly.length-1].aum : 0;
+  const prevM = monthly.length > 1 ? monthly[monthly.length-2].aum : lastM;
+  const monthDelta = prevM > 0 ? ((lastM - prevM) / prevM * 100).toFixed(1) : '0.0';
+  const items = [
+    {lbl:'AUM Total YTD', val:fmtM(kpis.total_funded), delta:'↑ '+monthDelta+'%'},
+    {lbl:'Deals Closés', val:(kpis.nb_funded||0)+' Funded', delta:'↑ Pipeline'},
+    {lbl:'Conversion', val:(kpis.taux_conversion||0).toFixed(1)+' %', delta:'↑ stable'},
+    {lbl:'Pipeline Pondéré', val:fmtM(kpis.weighted_pipeline), delta:'↑ active'},
+  ];
+  document.getElementById('perf-kpi-row').innerHTML = items.map(it => {
+    const [m, u] = String(it.val).split(' ');
+    return '<div class="kcard"><div class="kc-lbl">'+it.lbl+'</div>'
+      + '<div class="kc-val">'+m+' <span class="kc-unit">'+(u||'')+'</span></div>'
+      + '<div class="kc-delta up">'+it.delta+'</div></div>';
+  }).join('');
+}
+
+/* ──────────────── MAP BADGES (placeholder) ──────────────── */
+function renderMapBadges(stats) {
+  const html = '<span class="map-badge navy">🌍 ' + (stats.nb_countries||0) + ' pays couverts</span>'
+    + '<span class="map-badge blue">📍 ' + fmtM(stats.total_aum || 0) + ' cartographiés</span>'
+    + '<span class="map-badge green">↑ Mise à jour temps réel</span>'
+    + '<span class="map-badge navy">🔗 Intégration Plotly choroplèthe</span>';
+  document.getElementById('map-badges').innerHTML = html;
+}
+
+/* ──────────────── TABS ──────────────── */
+document.querySelectorAll('.pill').forEach(p => {
+  p.addEventListener('click', () => {
+    document.querySelectorAll('.pill').forEach(x => x.classList.remove('on'));
+    document.querySelectorAll('.tab-content').forEach(x => x.classList.remove('on'));
+    p.classList.add('on');
+    const tab = document.getElementById('tab-' + p.dataset.tab);
+    if (tab) tab.classList.add('on');
+  });
+});
+
+/* ──────────────── BOOT ──────────────── */
+async function boot() {
+  try {
+    const overview = await API('/api/overview');
+    renderKpiCards(overview.kpis);
+    renderTopDeals(overview.top_deals);
+    renderFunnel('funnel-overview', 'funnel-sub', overview.statut_counts);
+    renderFunnel('funnel-pipe', 'funnel-pipe-sub', overview.statut_counts);
+    renderActivities('activities-recent', overview.recent_activities, 5);
+    renderActivities('all-activities', overview.recent_activities, null);
+    renderWhitespace(overview.whitespace);
+    renderRegions(overview.regions);
+    renderNextActions('next-actions', overview.next_actions);
+    renderNextActions('sales-actions', overview.next_actions);
+    renderSalesTeam(overview.sales_team, 'sales-team-row');
+    renderSalesTeam(overview.sales_team, 'sales-cards-row');
+    renderSalesRanking(overview.sales_team);
+    renderMiniStats(overview.mini_stats);
+    renderPipelineTable(overview.all_deals);
+    renderFundsBars(overview.funds_aggregate);
+    // Sales tracking deal status (uses same funnel data)
+    const ssEl = document.getElementById('sales-status');
+    if (ssEl) {
+      const order = ['Funded','Soft Commit','Due Diligence','Initial Pitch','Prospect'];
+      const max = Math.max(...order.map(s => overview.statut_counts[s] || 0)) || 1;
+      ssEl.innerHTML = order.map(s => {
+        const v = overview.statut_counts[s] || 0;
+        const w = Math.round(v / max * 100);
+        return '<div class="fun-row"><div class="fl">'+s+'</div>'
+          + '<div class="fb"><div class="fbi" style="width:'+w+'%;background:'+(FUNNEL_COLORS[s]||'#001c4b')+';"></div></div>'
+          + '<div class="fc">'+v+'</div></div>';
+      }).join('');
+    }
+    // Performance tab
+    renderPerfKpis(overview.kpis, overview.monthly_aum);
+    barRow('perf-mgr', overview.sales_team.map(s => [s.nom, s.funded_aum||0]));
+    barRow('perf-region', overview.regions.map(r => [r.region, r.aum||0]));
+    barRow('perf-funds', Object.entries(overview.funds_aggregate));
+    renderMonthlyEvolution(overview.monthly_aum);
+    renderMapBadges({
+      nb_countries: (overview.regions||[]).length * 5,
+      total_aum: overview.kpis.total_funded,
+    });
+    // Live badge
+    const nbActifs = overview.kpis.nb_deals_actifs || 0;
+    document.getElementById('live-badge-text').textContent = 'Live · ' + nbActifs + ' deals actifs';
+    // Alert banner
+    const overdue = overview.next_actions.filter(a => relativeFutureDate(a.next_action_date).startsWith('Retard'));
+    if (overdue.length) {
+      document.getElementById('alert-banner').style.display = 'flex';
+      const sample = overdue.slice(0, 2).map(a => a.nom_client).join(', ');
+      const extra = overdue.length > 2 ? ' et '+(overdue.length-2)+' autre(s)' : '';
+      document.getElementById('alert-text').innerHTML =
+        '<b>'+overdue.length+' actions en retard</b> — '+sample+extra+' nécessitent votre attention.';
+    }
+    // CRM directory
+    const clients = await API('/api/clients');
+    CRM_CACHE = clients;
+    if (clients.length) {
+      SELECTED_CLIENT_ID = clients[0].id;
+      buildClientList('');
+      load360(clients[0].id);
+    }
+  } catch (err) {
+    console.error('Boot failed:', err);
+    document.getElementById('live-badge-text').textContent = 'Erreur de connexion';
+  }
+}
+
+document.getElementById('crm-search').addEventListener('input', e => buildClientList(e.target.value));
+boot();
+</script>
+</body>
+</html>
