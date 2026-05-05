@@ -1303,6 +1303,29 @@ def auto_assign_sales_owner(conn, client_id):
     return "Non assigne"
 
 
+def get_aum_by_country():
+    """AUM by country: active pipeline + funded, for choropleth map."""
+    conn = get_connection()
+    query = (
+        "SELECT COALESCE(c.country, '') AS country,"
+        " COALESCE(SUM(CASE WHEN p.statut = 'Funded' THEN p.funded_aum ELSE 0 END), 0) AS funded_aum,"
+        " COALESCE(SUM(CASE WHEN p.statut IN ('Prospect','Initial Pitch','Due Diligence','Soft Commit')"
+        "   THEN (CASE WHEN p.revised_aum > 0 THEN p.revised_aum ELSE p.target_aum_initial END)"
+        "   ELSE 0 END), 0) AS pipeline_aum"
+        " FROM pipeline p"
+        " JOIN clients c ON c.id = p.client_id"
+        " WHERE c.country IS NOT NULL AND c.country != ''"
+        " GROUP BY c.country"
+        " ORDER BY funded_aum + pipeline_aum DESC"
+    )
+    df = pd.read_sql_query(query, conn)
+    conn.close()
+    for col in ["funded_aum", "pipeline_aum"]:
+        df[col] = pd.to_numeric(df[col], errors="coerce").fillna(0.0)
+    df["total_aum"] = df["funded_aum"] + df["pipeline_aum"]
+    return df
+
+
 def get_client_network(client_id):
     """Build network graph data for a client: parent, siblings, subsidiaries, and fund links."""
     conn = get_connection()

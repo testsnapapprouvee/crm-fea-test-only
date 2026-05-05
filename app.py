@@ -2864,6 +2864,65 @@ with tab_dash:
                                     margin=dict(l=180, r=20, t=36, b=10))
             st.plotly_chart(fig_fonds, use_container_width=True, config={"displayModeBar": False}, key="chart_bar_fonds")
 
+    # ── Global Roadshow Map — Choropleth ────────────────────────────────────
+    st.divider()
+    st.markdown("#### Global Roadshow Map — AUM par Pays")
+    _df_country_aum = db.get_aum_by_country()
+    if not _df_country_aum.empty and _df_country_aum["total_aum"].sum() > 0:
+        _COUNTRY_ISO = {
+            "United Arab Emirates": "ARE", "Saudi Arabia": "SAU", "Qatar": "QAT",
+            "Kuwait": "KWT", "Bahrain": "BHR", "Oman": "OMN",
+            "United Kingdom": "GBR", "France": "FRA", "Germany": "DEU",
+            "Switzerland": "CHE", "Luxembourg": "LUX", "Netherlands": "NLD",
+            "Italy": "ITA", "Spain": "ESP", "Belgium": "BEL", "Austria": "AUT",
+            "Sweden": "SWE", "Norway": "NOR", "Denmark": "DNK", "Finland": "FIN",
+            "Singapore": "SGP", "Japan": "JPN", "Hong Kong": "HKG",
+            "China": "CHN", "South Korea": "KOR", "Australia": "AUS", "India": "IND",
+            "United States": "USA", "Canada": "CAN", "Brazil": "BRA",
+            "Mexico": "MEX", "South Africa": "ZAF", "Egypt": "EGY",
+        }
+        _df_map = _df_country_aum.copy()
+        _df_map["iso"] = _df_map["country"].map(_COUNTRY_ISO)
+        _df_map = _df_map.dropna(subset=["iso"])
+        _df_map["hover_text"] = _df_map.apply(
+            lambda r: "<b>{}</b><br>Funded: {}<br>Pipeline: {}<br>Total: {}".format(
+                r["country"], fmt_m(r["funded_aum"]),
+                fmt_m(r["pipeline_aum"]), fmt_m(r["total_aum"])), axis=1)
+        if not _df_map.empty:
+            fig_map = go.Figure(go.Choropleth(
+                locations=_df_map["iso"],
+                z=_df_map["total_aum"],
+                text=_df_map["hover_text"],
+                hovertemplate="%{text}<extra></extra>",
+                colorscale=[
+                    [0.0, "#f0f4f8"], [0.2, "#c6dff0"], [0.4, "#6baed6"],
+                    [0.6, "#2171b5"], [0.8, "#1a5e8a"], [1.0, MARINE],
+                ],
+                marker_line_color="#ffffff",
+                marker_line_width=0.5,
+                colorbar=dict(
+                    title=dict(text="AUM (EUR)", font=dict(size=9, color=MARINE)),
+                    tickfont=dict(size=8, color=MARINE),
+                    thickness=12, len=0.6,
+                ),
+            ))
+            fig_map.update_layout(
+                geo=dict(
+                    showframe=False, showcoastlines=True,
+                    coastlinecolor=GRIS, projection_type="natural earth",
+                    bgcolor=BLANC, landcolor="#f8f9fa",
+                    showlakes=False, showcountries=True, countrycolor="#e0e0e0",
+                ),
+                height=360, paper_bgcolor=BLANC,
+                font_color=MARINE,
+                margin=dict(l=0, r=0, t=10, b=10),
+            )
+            st.plotly_chart(fig_map, use_container_width=True,
+                            config={"displayModeBar": False}, key="chart_choropleth")
+            st.caption("AUM total (Funded + Pipeline actif) par pays. Couleur plus foncée = AUM plus élevé.")
+    else:
+        st.info("Aucune donnée géographique disponible pour la carte.")
+
     st.divider()
     _td_col1, _td_col2 = st.columns([3, 1])
     with _td_col1:
@@ -2909,12 +2968,21 @@ with tab_dash:
 
     # ── TOP CLIENTS CONSOLIDE — Stacked Bar horizontal par Fonds ─────────────
     st.divider()
-    st.markdown("#### Top Clients — Vue Consolidee (AUM Finance par Fonds)")
+    _strat_col1, _strat_col2 = st.columns([3, 1])
+    with _strat_col1:
+        st.markdown("#### Top Clients — Vue Consolidee (AUM Finance par Fonds)")
+    with _strat_col2:
+        _strat_region = st.selectbox("Filtrer par Région", ["Toutes"] + REGIONS,
+                                      key="dash_strat_region",
+                                      label_visibility="collapsed")
     _df_top_clients_raw = (
         db.get_pipeline_with_clients()
         .query("statut == 'Funded' and funded_aum > 0")
         .copy()
     )
+    if _strat_region != "Toutes":
+        _df_top_clients_raw = _df_top_clients_raw[
+            _df_top_clients_raw["region"] == _strat_region]
     if not _df_top_clients_raw.empty:
         _df_tc = (
             _df_top_clients_raw
