@@ -1303,6 +1303,71 @@ def auto_assign_sales_owner(conn, client_id):
     return "Non assigne"
 
 
+def get_historical_aum(days_back=365):
+    """Reconstruct daily AUM snapshots from audit_log + current pipeline state.
+    Returns DataFrame with columns: date, funded_aum, pipeline_aum."""
+    conn = get_connection()
+    c = conn.cursor()
+
+    c.execute(
+        "SELECT COALESCE(SUM(funded_aum), 0) FROM pipeline WHERE statut = 'Funded'")
+    current_funded = float(c.fetchone()[0])
+    c.execute(
+        "SELECT COALESCE(SUM(CASE WHEN revised_aum > 0 THEN revised_aum"
+        " ELSE target_aum_initial END), 0)"
+        " FROM pipeline WHERE statut IN"
+        " ('Prospect','Initial Pitch','Due Diligence','Soft Commit')")
+    current_pipeline = float(c.fetchone()[0])
+
+    cutoff = (date.today() - timedelta(days=days_back)).isoformat()
+    c.execute(
+        "SELECT DATE(date_modification) AS dt,"
+        " champ_modifie, ancienne_valeur, nouvelle_valeur"
+        " FROM audit_log"
+        " WHERE DATE(date_modification) >= ?"
+        " AND champ_modifie IN ('statut', 'funded_aum', 'revised_aum', 'target_aum_initial')"
+        " ORDER BY date_modification DESC",
+        (cutoff,))
+    audit_rows = c.fetchall()
+    conn.close()
+
+    dates = pd.date_range(
+        start=date.today() - timedelta(days=days_back),
+        end=date.today(), freq="D")
+
+    funded_vals = [current_funded] * len(dates)
+    pipeline_vals = [current_pipeline] * len(dates)
+
+    if audit_rows:
+        date_to_idx = {d.date(): i for i, d in enumerate(dates)}
+        for row in audit_rows:
+            dt_str = str(row["dt"])
+            try:
+                dt = date.fromisoformat(dt_str)
+            except (ValueError, TypeError):
+                continue
+            if dt not in date_to_idx:
+                continue
+            idx = date_to_idx[dt]
+            champ = str(row["champ_modifie"])
+            if champ == "statut":
+                old_s = str(row["ancienne_valeur"] or "")
+                new_s = str(row["nouvelle_valeur"] or "")
+                if new_s == "Funded" and old_s != "Funded":
+                    for i in range(idx):
+                        funded_vals[i] = max(0, funded_vals[i] - 1_000_000)
+                elif old_s == "Funded" and new_s != "Funded":
+                    for i in range(idx):
+                        funded_vals[i] = funded_vals[i] + 1_000_000
+
+    df = pd.DataFrame({
+        "date": dates,
+        "funded_aum": funded_vals,
+        "pipeline_aum": pipeline_vals,
+    })
+    return df
+
+
 def get_aum_by_country():
     """AUM by country: active pipeline + funded, for choropleth map."""
     conn = get_connection()

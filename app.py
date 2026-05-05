@@ -582,6 +582,96 @@ def generate_global_pptx(kpis: dict, pipeline_df, mode_comex: bool = False) -> b
         _add_plotly_slide(prs, _fig_cf_p, "MONEY IN MOTION — PROJECTED INFLOWS",
                           "AUM pondere = AUM Pipeline x Probabilite de closing")
 
+    # ── Slide 6 : Whitespace Heatmap ─────────────────────────────────────
+    _df_ws_p = db.get_whitespace_matrix()
+    if not _df_ws_p.empty:
+        _ws_clients_p = _df_ws_p.index.tolist()
+        if len(_ws_clients_p) > 20:
+            _aum_totals_p = _df_ws_p.fillna(0).sum(axis=1).sort_values(ascending=False)
+            _ws_clients_p = _aum_totals_p.head(20).index.tolist()
+        _ws_fonds_p = _df_ws_p.columns.tolist()
+        _ws_sub_p = _df_ws_p.loc[_ws_clients_p, _ws_fonds_p]
+        _z_p = [[0.0 if (v is None or (isinstance(v, float) and np.isnan(v)))
+                 else float(v) for v in row] for row in _ws_sub_p.values.tolist()]
+        _txt_p = [[("{:.1f}M".format(v / 1e6) if v > 0 else "")
+                   for v in row] for row in _z_p]
+        _fig_ws_p = go.Figure(go.Heatmap(
+            z=_z_p, x=_ws_fonds_p, y=_ws_clients_p,
+            text=_txt_p, texttemplate="%{text}",
+            textfont=dict(size=8, color="#ffffff"),
+            colorscale=[[0, "#f0f4f8"], [0.001, "#c6dff0"], [0.15, "#6baed6"],
+                        [0.4, "#2171b5"], [0.7, "#1a5e8a"], [1.0, "#001c4b"]],
+            zmin=0, showscale=True, xgap=2, ygap=2,
+            colorbar=dict(title=dict(text="AUM (EUR)", font=dict(size=9)),
+                          tickfont=dict(size=8), thickness=10, len=0.8)))
+        _fig_ws_p.update_layout(
+            height=max(350, 26 * len(_ws_clients_p) + 100),
+            paper_bgcolor="#ffffff", plot_bgcolor="#ffffff", font_color="#001c4b",
+            xaxis=dict(side="top", tickangle=-30), yaxis=dict(autorange="reversed"),
+            margin=dict(l=10, r=60, t=60, b=10))
+        _add_plotly_slide(prs, _fig_ws_p, "WHITESPACE ANALYSIS — CROSS-SELL ENGINE",
+                          "Bleu fonce = AUM Finance eleve. Gris clair = opportunite cross-sell.")
+
+    # ── Slide 7 : Choropleth Map ─────────────────────────────────────────
+    _df_cty_p = db.get_aum_by_country()
+    if not _df_cty_p.empty and _df_cty_p["total_aum"].sum() > 0:
+        _ISO_P = {
+            "United Arab Emirates": "ARE", "Saudi Arabia": "SAU", "Qatar": "QAT",
+            "Kuwait": "KWT", "Bahrain": "BHR", "Oman": "OMN",
+            "United Kingdom": "GBR", "France": "FRA", "Germany": "DEU",
+            "Switzerland": "CHE", "Luxembourg": "LUX", "Netherlands": "NLD",
+            "Italy": "ITA", "Spain": "ESP", "Belgium": "BEL", "Austria": "AUT",
+            "Sweden": "SWE", "Norway": "NOR", "Denmark": "DNK", "Finland": "FIN",
+            "Singapore": "SGP", "Japan": "JPN", "Hong Kong": "HKG",
+            "China": "CHN", "South Korea": "KOR", "Australia": "AUS", "India": "IND",
+            "United States": "USA", "Canada": "CAN", "Brazil": "BRA",
+            "Mexico": "MEX", "South Africa": "ZAF", "Egypt": "EGY",
+        }
+        _df_map_p = _df_cty_p.copy()
+        _df_map_p["iso"] = _df_map_p["country"].map(_ISO_P)
+        _df_map_p = _df_map_p.dropna(subset=["iso"])
+        if not _df_map_p.empty:
+            _fig_map_p = go.Figure(go.Choropleth(
+                locations=_df_map_p["iso"], z=_df_map_p["total_aum"],
+                colorscale=[[0, "#f0f4f8"], [0.2, "#c6dff0"], [0.4, "#6baed6"],
+                            [0.6, "#2171b5"], [0.8, "#1a5e8a"], [1.0, "#001c4b"]],
+                marker_line_color="#ffffff", marker_line_width=0.5,
+                showscale=True,
+                colorbar=dict(title=dict(text="AUM", font=dict(size=9)),
+                              tickfont=dict(size=8), thickness=10, len=0.6)))
+            _fig_map_p.update_layout(
+                geo=dict(showframe=False, showcoastlines=True,
+                         coastlinecolor="#e8e8e8", projection_type="natural earth",
+                         bgcolor="#ffffff", landcolor="#f8f9fa",
+                         showcountries=True, countrycolor="#e0e0e0"),
+                height=420, paper_bgcolor="#ffffff", font_color="#001c4b",
+                margin=dict(l=0, r=0, t=10, b=10))
+            _add_plotly_slide(prs, _fig_map_p, "GLOBAL ROADSHOW MAP — AUM PAR PAYS",
+                              "AUM total (Funded + Pipeline actif) par pays")
+
+    # ── Slide 8 : AUM Time Machine ───────────────────────────────────────
+    _df_hist_p = db.get_historical_aum(days_back=365)
+    if not _df_hist_p.empty:
+        _fig_hist_p = go.Figure()
+        _fig_hist_p.add_trace(go.Scatter(
+            x=_df_hist_p["date"], y=_df_hist_p["funded_aum"],
+            name="Funded AUM", mode="lines",
+            line=dict(color="#001c4b", width=2.5),
+            fill="tozeroy", fillcolor="rgba(0,28,75,0.08)"))
+        _fig_hist_p.add_trace(go.Scatter(
+            x=_df_hist_p["date"], y=_df_hist_p["pipeline_aum"],
+            name="Active Pipeline", mode="lines",
+            line=dict(color="#019ee1", width=2, dash="dot")))
+        _fig_hist_p.update_layout(
+            height=360, paper_bgcolor="#ffffff", plot_bgcolor="#ffffff",
+            font_color="#001c4b",
+            legend=dict(orientation="h", y=1.05, x=0.5, xanchor="center"),
+            xaxis=dict(showgrid=False, tickformat="%b %Y"),
+            yaxis=dict(showgrid=True, gridcolor="#e8e8e8", tickformat=".2s"),
+            margin=dict(l=20, r=20, t=30, b=20))
+        _add_plotly_slide(prs, _fig_hist_p, "AUM TIME MACHINE — EVOLUTION HISTORIQUE",
+                          "Funded AUM et Pipeline Actif sur 12 mois")
+
     buf = io.BytesIO()
     prs.save(buf)
     buf.seek(0)
@@ -1589,13 +1679,71 @@ with st.sidebar:
                         nb_pdf = nb_pdf[cols_k] if cols_k else None
                     _include_perf = (include_perf_pdf and pf_pdf is not None
                                      and hasattr(pf_pdf, "empty") and not pf_pdf.empty)
+                    _bi_pngs = []
+                    try:
+                        _export_cfg = dict(format="png", engine="kaleido",
+                                           width=900, height=500)
+                        _export_layout = dict(
+                            title="", showlegend=True,
+                            margin=dict(l=40, r=40, t=20, b=30),
+                            paper_bgcolor="#ffffff", plot_bgcolor="#ffffff")
+                        import copy as _copy_pdf
+                        _df_cf_pdf = db.get_expected_cashflows()
+                        if not _df_cf_pdf.empty and _df_cf_pdf["aum_pondere"].sum() > 0:
+                            _months_pdf = sorted(_df_cf_pdf["mois"].unique().tolist())
+                            _fig_cf_pdf = go.Figure()
+                            for _i, _f in enumerate(sorted(_df_cf_pdf["fonds"].unique())):
+                                _df_f = _df_cf_pdf[_df_cf_pdf["fonds"] == _f]
+                                _mm = dict(zip(_df_f["mois"], _df_f["aum_pondere"]))
+                                _fig_cf_pdf.add_trace(go.Bar(
+                                    name=_f, x=_months_pdf,
+                                    y=[_mm.get(m, 0) for m in _months_pdf],
+                                    marker_color=PALETTE[_i % len(PALETTE)]))
+                            _fig_cf_pdf.update_layout(barmode="stack", **_export_layout)
+                            _bi_pngs.append(("Money in Motion — Cashflows",
+                                io.BytesIO(_fig_cf_pdf.to_image(**_export_cfg))))
+
+                        _df_ws_pdf = db.get_whitespace_matrix()
+                        if not _df_ws_pdf.empty:
+                            _ws_c = _df_ws_pdf.index.tolist()[:20]
+                            _ws_f = _df_ws_pdf.columns.tolist()
+                            _z = [[0.0 if (v is None or (isinstance(v, float) and np.isnan(v)))
+                                   else float(v) for v in r]
+                                  for r in _df_ws_pdf.loc[_ws_c, _ws_f].values.tolist()]
+                            _fig_ws_pdf = go.Figure(go.Heatmap(
+                                z=_z, x=_ws_f, y=_ws_c,
+                                colorscale=[[0,"#f0f4f8"],[0.5,"#2171b5"],[1,"#001c4b"]],
+                                xgap=2, ygap=2, showscale=True))
+                            _fig_ws_pdf.update_layout(
+                                xaxis=dict(side="top"), yaxis=dict(autorange="reversed"),
+                                **_export_layout)
+                            _bi_pngs.append(("Whitespace Analysis — Cross-Sell",
+                                io.BytesIO(_fig_ws_pdf.to_image(**_export_cfg))))
+
+                        _df_hist_pdf = db.get_historical_aum(days_back=365)
+                        if not _df_hist_pdf.empty:
+                            _fig_h_pdf = go.Figure()
+                            _fig_h_pdf.add_trace(go.Scatter(
+                                x=_df_hist_pdf["date"], y=_df_hist_pdf["funded_aum"],
+                                name="Funded AUM", line=dict(color="#001c4b", width=2),
+                                fill="tozeroy", fillcolor="rgba(0,28,75,0.08)"))
+                            _fig_h_pdf.add_trace(go.Scatter(
+                                x=_df_hist_pdf["date"], y=_df_hist_pdf["pipeline_aum"],
+                                name="Active Pipeline",
+                                line=dict(color="#019ee1", width=2, dash="dot")))
+                            _fig_h_pdf.update_layout(**_export_layout)
+                            _bi_pngs.append(("AUM Time Machine",
+                                io.BytesIO(_fig_h_pdf.to_image(**_export_cfg))))
+                    except Exception:
+                        pass
                     pdf_bytes = pdf_gen.generate_pdf(
                         pipeline_df=pipeline_hub, kpis=kpis_hub,
                         aum_by_region=aum_region_pdf, mode_comex=mode_comex,
                         perf_data=pf_pdf, nav_base100_df=nb_pdf,
                         fonds_perimetre=fonds_perimetre,
                         include_top10=include_top10, include_outflows=include_outflows,
-                        include_perf=_include_perf)
+                        include_perf=_include_perf,
+                        bi_chart_pngs=_bi_pngs if _bi_pngs else None)
                     fname_pdf = "report{}_{}.pdf".format(
                         "_comex" if mode_comex else "", date.today().isoformat())
                     st.download_button("Télécharger le PDF", data=pdf_bytes,
@@ -2750,6 +2898,49 @@ with tab_dash:
             taux=kpis["taux_conversion"], nb_f2=kpis["nb_funded"], nb_l=kpis["nb_lost"],
             card_lp=card_lp),
         unsafe_allow_html=True)
+
+    st.markdown("<br>", unsafe_allow_html=True)
+
+    # ── AUM Time Machine — Historical Line Chart ─────────────────────────
+    st.markdown("#### AUM Time Machine")
+    _tm_options = {"YTD": None, "1M": 30, "3M": 91, "6M": 182, "1Y": 365}
+    _tm_sel = st.selectbox("Période", list(_tm_options.keys()),
+                            index=4, key="dash_time_machine_period",
+                            label_visibility="collapsed")
+    _tm_days = _tm_options[_tm_sel]
+    if _tm_days is None:
+        _tm_days = (date.today() - date(date.today().year, 1, 1)).days or 30
+    _df_hist = db.get_historical_aum(days_back=_tm_days)
+    if not _df_hist.empty:
+        fig_tm = go.Figure()
+        fig_tm.add_trace(go.Scatter(
+            x=_df_hist["date"], y=_df_hist["funded_aum"],
+            name="Funded AUM", mode="lines",
+            line=dict(color=MARINE, width=2.5),
+            fill="tozeroy", fillcolor="rgba(0,28,75,0.08)",
+            hovertemplate="<b>Funded</b><br>%{x|%d/%m/%Y}<br>%{customdata}<extra></extra>",
+            customdata=[fmt_m(v) for v in _df_hist["funded_aum"]]))
+        fig_tm.add_trace(go.Scatter(
+            x=_df_hist["date"], y=_df_hist["pipeline_aum"],
+            name="Active Pipeline", mode="lines",
+            line=dict(color=CIEL, width=2, dash="dot"),
+            hovertemplate="<b>Pipeline</b><br>%{x|%d/%m/%Y}<br>%{customdata}<extra></extra>",
+            customdata=[fmt_m(v) for v in _df_hist["pipeline_aum"]]))
+        fig_tm.update_layout(
+            height=300, paper_bgcolor=BLANC, plot_bgcolor=BLANC,
+            font_color=MARINE,
+            legend=dict(orientation="h", y=1.08, x=0.5, xanchor="center",
+                        font_size=10, bgcolor=BLANC, bordercolor=GRIS, borderwidth=1),
+            xaxis=dict(showgrid=False, tickformat="%b %Y"),
+            yaxis=dict(showgrid=True, gridcolor=GRIS, tickformat=".2s",
+                       title="AUM (EUR)"),
+            margin=dict(l=10, r=10, t=40, b=10))
+        st.plotly_chart(fig_tm, use_container_width=True,
+                        config={"displayModeBar": False}, key="chart_time_machine")
+        st.caption("Evolution historique du Funded AUM et du Pipeline Actif. "
+                   "Période : {}.".format(_tm_sel))
+    else:
+        st.info("Aucune donnée historique disponible.")
 
     st.markdown("<br>", unsafe_allow_html=True)
 
