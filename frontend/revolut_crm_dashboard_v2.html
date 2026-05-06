@@ -236,6 +236,73 @@ body{background:#F0F2F5;}
 .ws-full-cell{padding:5px 4px;text-align:center;border-radius:4px;font-weight:600;}
 .ws-full-row-lbl{font-size:11px;font-weight:600;color:#374151;padding:5px 8px;white-space:nowrap;}
 .ws-full-col-lbl{font-size:9.5px;font-weight:700;color:#9CA3AF;text-align:center;padding:3px 2px;text-transform:uppercase;letter-spacing:.4px;}
+/* ── PIPELINE ANALYTICS — premium cards ── */
+.pipe-an-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(320px,1fr));gap:12px;margin-bottom:16px;}
+.pipe-an-card{background:#fff;border-radius:18px;padding:20px;border:0.5px solid rgba(0,0,0,.04);position:relative;overflow:hidden;transition:transform .15s,box-shadow .15s;}
+.pipe-an-card:hover{transform:translateY(-2px);box-shadow:0 8px 28px rgba(0,0,0,.07);}
+.pipe-an-card::before{content:'';position:absolute;top:0;left:0;right:0;height:3px;background:linear-gradient(90deg,#001c4b,#019ee1);border-radius:18px 18px 0 0;}
+.pipe-an-hdr{display:flex;align-items:flex-start;justify-content:space-between;margin-bottom:14px;gap:10px;}
+.pipe-an-name{font-size:15px;font-weight:800;color:#111827;letter-spacing:-.3px;}
+.pipe-an-sub{font-size:11px;color:#9CA3AF;margin-top:2px;}
+.pipe-an-aum{font-size:22px;font-weight:800;color:#001c4b;letter-spacing:-.7px;line-height:1;}
+.pipe-an-aum-sub{font-size:10px;color:#9CA3AF;text-align:right;margin-top:3px;}
+.pipe-an-stats{display:grid;grid-template-columns:repeat(2,1fr);gap:9px;margin-bottom:12px;}
+.pipe-an-stat-lbl{font-size:9.5px;text-transform:uppercase;letter-spacing:.5px;color:#9CA3AF;font-weight:600;margin-bottom:3px;}
+.pipe-an-stat-val{font-size:14px;font-weight:700;color:#111827;}
+.pipe-an-stat-val.acc{color:#001c4b;}
+.pipe-an-tag-row{display:flex;flex-wrap:wrap;gap:5px;margin-top:8px;}
+.pipe-an-tag{background:#F3F4F6;color:#374151;padding:3px 9px;border-radius:50px;font-size:10.5px;font-weight:600;}
+.pipe-an-tag.flag{background:#EEF4FB;color:#001c4b;}
+.pipe-an-tag.fund{background:#E3F4FD;color:#0369A1;}
+.pipe-an-tag.region{background:#ECFDF5;color:#065F46;}
+.pipe-an-progress{display:flex;height:6px;border-radius:50px;overflow:hidden;background:#F3F4F6;margin:10px 0 4px;}
+.pipe-an-progress-funded{background:linear-gradient(90deg,#001c4b,#0F3A7A);}
+.pipe-an-progress-pipe{background:linear-gradient(90deg,#019ee1,#6BAED6);}
+.pipe-an-legend{display:flex;justify-content:space-between;font-size:9.5px;color:#9CA3AF;font-weight:600;}
+.pipe-an-legend span b{color:#001c4b;font-weight:700;}
+.pipe-an-section-title{font-size:13.5px;font-weight:800;color:#111827;letter-spacing:-.2px;margin:18px 0 10px;display:flex;align-items:center;gap:8px;}
+.pipe-an-section-title::before{content:'';width:3px;height:14px;background:#001c4b;border-radius:50px;}
+/* ── MAP CARD — premium ── */
+.map-card{background:#fff;border-radius:18px;border:0.5px solid rgba(0,0,0,.04);overflow:hidden;margin-bottom:16px;box-shadow:0 1px 3px rgba(0,0,0,.04);}
+.map-header-pro{display:flex;align-items:center;justify-content:space-between;padding:18px 22px;border-bottom:1px solid #F3F4F6;background:linear-gradient(180deg,#fff,#FAFBFC);}
+.map-header-pro .map-title-block{display:flex;align-items:center;gap:10px;}
+.map-header-pro .map-icon-pro{width:36px;height:36px;border-radius:10px;background:linear-gradient(135deg,#001c4b,#0F3A7A);color:#fff;display:flex;align-items:center;justify-content:center;font-size:17px;flex-shrink:0;}
+.map-header-pro .map-title-pro{font-size:15px;font-weight:800;color:#111827;letter-spacing:-.2px;}
+.map-header-pro .map-subtitle-pro{font-size:11px;color:#9CA3AF;margin-top:1px;}
+.map-stats-strip{display:grid;grid-template-columns:repeat(auto-fit,minmax(140px,1fr));gap:0;border-bottom:1px solid #F3F4F6;}
+.map-stat-cell{padding:13px 18px;border-right:1px solid #F3F4F6;}
+.map-stat-cell:last-child{border-right:none;}
+.map-stat-lbl{font-size:9.5px;text-transform:uppercase;letter-spacing:.6px;color:#9CA3AF;font-weight:600;margin-bottom:4px;}
+.map-stat-val{font-size:18px;font-weight:800;color:#001c4b;letter-spacing:-.6px;}
+.map-stat-sub{font-size:10.5px;color:#6B7280;font-weight:500;margin-top:1px;}
+/* ── NETWORK GRAPH — pro ── */
+.network-canvas-pro{position:relative;width:100%;height:340px;background:radial-gradient(circle at 50% 50%,#fff 0%,#F0F4FA 70%,#E5EDF7 100%);border-radius:14px;border:0.5px solid rgba(0,28,75,0.1);overflow:hidden;}
+.network-canvas-pro::before{content:'';position:absolute;inset:0;background-image:radial-gradient(circle,rgba(0,28,75,0.04) 1px,transparent 1.5px);background-size:30px 30px;pointer-events:none;}
+.net-node{position:absolute;border-radius:50%;display:flex;align-items:center;justify-content:center;text-align:center;font-weight:700;line-height:1.15;cursor:default;transition:transform .25s ease,box-shadow .25s ease,filter .25s ease;}
+.net-node:hover{transform:scale(1.12);z-index:20;filter:brightness(1.05);}
+.net-node.center{width:96px;height:96px;background:radial-gradient(circle at 30% 30%,#0F3A7A 0%,#001c4b 70%);color:#fff;font-size:10.5px;box-shadow:0 8px 28px rgba(0,28,75,0.45),inset 0 0 0 3px rgba(255,255,255,0.18);border:none;}
+.net-node.center::after{content:'';position:absolute;inset:-6px;border-radius:50%;background:radial-gradient(circle,rgba(0,28,75,0.12) 0%,transparent 70%);z-index:-1;}
+.net-node.subsidiary{width:68px;height:68px;background:radial-gradient(circle at 30% 30%,#fff 0%,#F4F8FC 100%);color:#001c4b;font-size:10px;box-shadow:0 6px 18px rgba(0,28,75,0.18),inset 0 0 0 2px #001c4b22;}
+.net-node.fund{width:54px;height:54px;background:radial-gradient(circle at 30% 30%,#0EA5E9 0%,#019ee1 60%,#0284c7 100%);color:#fff;font-size:9px;box-shadow:0 5px 14px rgba(1,158,225,0.4),inset 0 0 0 2px rgba(255,255,255,0.3);}
+.net-node.contact{width:46px;height:46px;background:radial-gradient(circle at 30% 30%,#10B981 0%,#059669 70%);color:#fff;font-size:8.5px;box-shadow:0 4px 12px rgba(5,150,105,0.35),inset 0 0 0 2px rgba(255,255,255,0.25);}
+.net-svg-pro{position:absolute;inset:0;width:100%;height:100%;pointer-events:none;}
+.net-legend-pro{position:absolute;bottom:12px;right:12px;display:flex;gap:14px;align-items:center;background:rgba(255,255,255,0.85);backdrop-filter:blur(6px);padding:7px 12px;border-radius:50px;border:0.5px solid rgba(0,0,0,.05);}
+.net-legend-pro span{font-size:10px;color:#374151;display:flex;align-items:center;gap:5px;font-weight:600;}
+.net-legend-pro .dot{width:10px;height:10px;border-radius:50%;display:inline-block;}
+.net-legend-pro .dot.parent{background:#001c4b;}
+.net-legend-pro .dot.sub{background:#fff;border:2px solid #001c4b;width:8px;height:8px;}
+.net-legend-pro .dot.fund{background:#019ee1;}
+.net-legend-pro .dot.contact{background:#059669;}
+/* ── IMPORT MODAL ── */
+.import-zone{border:2px dashed #E5E7EB;border-radius:14px;padding:32px 20px;text-align:center;background:#FAFBFC;cursor:pointer;transition:border-color .15s,background .15s;}
+.import-zone:hover{border-color:#019ee1;background:#F0F9FF;}
+.import-zone.has-file{border-color:#059669;background:#ECFDF5;}
+.import-zone-ico{font-size:32px;margin-bottom:10px;display:block;}
+.import-zone-txt{font-size:13px;font-weight:600;color:#374151;margin-bottom:4px;}
+.import-zone-sub{font-size:11px;color:#9CA3AF;}
+.import-zone input[type=file]{display:none;}
+.import-result{margin-top:14px;padding:14px;border-radius:12px;background:#ECFDF5;color:#065F46;font-size:13px;font-weight:600;}
+.import-result.error{background:#FEF2F2;color:#B91C1C;}
 </style>
 </head>
 <body>
@@ -324,11 +391,20 @@ body{background:#F0F2F5;}
      MAP CARD — CARTOGRAPHIE STRATÉGIQUE (espace réservé)
 ════════════════════════════════════════════════════════ -->
 <div class="map-card">
-  <div class="map-header">
-    <div class="sec-title" style="margin-bottom:0;">Cartographie Stratégique <span class="sec-sub">AUM par Pays · Funded + Pipeline actif</span></div>
-    <div id="map-badges-inline" style="display:flex;gap:6px;flex-wrap:wrap;"></div>
+  <div class="map-header-pro">
+    <div class="map-title-block">
+      <div class="map-icon-pro">🌍</div>
+      <div>
+        <div class="map-title-pro">Cartographie Stratégique</div>
+        <div class="map-subtitle-pro">AUM par pays · Funded + Pipeline actif</div>
+      </div>
+    </div>
+    <div style="display:flex;gap:6px;align-items:center;">
+      <div id="map-badges-inline" style="display:flex;gap:6px;flex-wrap:wrap;"></div>
+    </div>
   </div>
-  <div id="choropleth-map" style="width:100%;height:420px;padding:8px 12px 12px;"></div>
+  <div class="map-stats-strip" id="map-stats-strip"></div>
+  <div id="choropleth-map" style="width:100%;height:440px;background:#fff;"></div>
   <div id="choropleth-empty" class="map-card-inner" style="display:none;">
     <div class="map-meridian-dots"></div>
     <div class="map-icon">🗺️</div>
@@ -383,6 +459,17 @@ body{background:#F0F2F5;}
      TAB: PIPELINE
 ══════════════════════════════════════════ -->
 <div class="tab-content" id="tab-pipeline">
+  <!-- Bouton Import + actions rapides -->
+  <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:16px;flex-wrap:wrap;gap:8px;">
+    <div style="font-size:12.5px;color:#6B7280;">Vue 360° du pipeline · qui est où, qui fait quoi</div>
+    <div style="display:flex;gap:6px;">
+      <button class="btn btn-ghost" data-action="import-pipeline">📥 Importer CSV/Excel</button>
+      <button class="btn btn-ghost" data-action="export-excel">📤 Exporter</button>
+      <button class="btn btn-primary" data-action="new-deal">+ Nouveau Deal</button>
+    </div>
+  </div>
+
+  <!-- Trois cards d'overview Pipeline -->
   <div style="display:grid;grid-template-columns:2fr 1.1fr 1.3fr;gap:10px;margin-bottom:16px;">
     <div class="card">
       <div class="sec-title">Tous les Deals <span class="sec-sub">Pipeline complet</span></div>
@@ -402,6 +489,24 @@ body{background:#F0F2F5;}
       <div id="funds-bars"></div>
     </div>
   </div>
+
+  <!-- ═══════════════════════════════════════════════
+       QUI FAIT QUOI — par commercial (grosses cards)
+  ═══════════════════════════════════════════════ -->
+  <div class="pipe-an-section-title">Qui fait quoi · par commercial</div>
+  <div class="pipe-an-grid" id="pipe-by-sales"></div>
+
+  <!-- ═══════════════════════════════════════════════
+       QUI EST OÙ — par région (grosses cards)
+  ═══════════════════════════════════════════════ -->
+  <div class="pipe-an-section-title">Qui est où · par région</div>
+  <div class="pipe-an-grid" id="pipe-by-region"></div>
+
+  <!-- ═══════════════════════════════════════════════
+       AUM par fonds — drill-down
+  ═══════════════════════════════════════════════ -->
+  <div class="pipe-an-section-title">Concentration · par fonds</div>
+  <div class="pipe-an-grid" id="pipe-by-fonds"></div>
 </div>
 <!-- ══════════════════════════════════════════
      TAB: CRM DIRECTORY — VUE 360°
@@ -975,61 +1080,130 @@ function kpiCell(lbl, val, unit, accent, small) {
 function renderNetwork(network) {
   const canvas = document.getElementById('network-canvas');
   if (!network || !network.root) {
+    canvas.className = 'network-canvas-pro';
     canvas.innerHTML = '<div style="display:flex;align-items:center;justify-content:center;height:100%;color:#9CA3AF;font-size:12px;">Aucun réseau.</div>';
     return;
   }
-  const subs = network.subsidiaries || [];
-  const funds = network.fund_links || [];
-  const W = 700, H = 300, CX = W/2, CY = H/2;
+  // Apply premium styling
+  canvas.className = 'network-canvas-pro';
+
+  const subs   = network.subsidiaries || [];
+  const funds  = network.fund_links || [];
+  const W = 720, H = 340, CX = W/2, CY = H/2;
   const subCount = Math.max(subs.length, 1);
+  const subRadius = subCount <= 2 ? 130 : (subCount <= 4 ? 150 : 165);
+  const fundRadius = subCount <= 2 ? 250 : (subCount <= 4 ? 280 : 300);
+
+  // Subsidiary angular positions (top-half priority, then full circle)
   const subPositions = subs.map((_, i) => {
     const angle = -Math.PI/2 + (Math.PI * 2 / subCount) * i;
-    return {x: CX + Math.cos(angle) * 175, y: CY + Math.sin(angle) * 90};
+    return {x: CX + Math.cos(angle) * subRadius, y: CY + Math.sin(angle) * (subRadius * 0.65), angle: angle};
   });
-  // Lines
-  let svg = '<svg class="net-svg" viewBox="0 0 '+W+' '+H+'" preserveAspectRatio="none">';
-  subPositions.forEach(p => {
-    svg += '<line x1="'+CX+'" y1="'+CY+'" x2="'+p.x+'" y2="'+p.y+'" stroke="#001c4b" stroke-width="1.5" stroke-dasharray="4,3" opacity="0.4"/>';
+
+  // Fund positions: distributed around outer circle, mapped to nearest subsidiary or root
+  const maxFunds = Math.min(funds.length, 8);
+  const fundPositions = [];
+  for (let i = 0; i < maxFunds; i++) {
+    const angle = -Math.PI/2 + (Math.PI * 2 / Math.max(maxFunds, 1)) * i;
+    fundPositions.push({
+      x: CX + Math.cos(angle) * fundRadius,
+      y: CY + Math.sin(angle) * (fundRadius * 0.45),
+    });
+  }
+
+  // SVG with gradient defs + curved connectors + glow
+  let svg = '<svg class="net-svg-pro" viewBox="0 0 '+W+' '+H+'" preserveAspectRatio="xMidYMid meet">';
+  svg += '<defs>'
+    + '<radialGradient id="bgGlow" cx="50%" cy="50%" r="60%">'
+    + '<stop offset="0%" stop-color="rgba(0,28,75,0.06)"/>'
+    + '<stop offset="100%" stop-color="rgba(0,28,75,0)"/>'
+    + '</radialGradient>'
+    + '<linearGradient id="connFunded" x1="0%" y1="0%" x2="100%" y2="0%">'
+    + '<stop offset="0%" stop-color="#019ee1"/>'
+    + '<stop offset="100%" stop-color="#0EA5E9"/>'
+    + '</linearGradient>'
+    + '<linearGradient id="connPipeline" x1="0%" y1="0%" x2="100%" y2="0%">'
+    + '<stop offset="0%" stop-color="#94A3B8"/>'
+    + '<stop offset="100%" stop-color="#019ee1"/>'
+    + '</linearGradient>'
+    + '<linearGradient id="connSub" x1="0%" y1="0%" x2="100%" y2="0%">'
+    + '<stop offset="0%" stop-color="#001c4b"/>'
+    + '<stop offset="100%" stop-color="#3060A8"/>'
+    + '</linearGradient>'
+    + '<filter id="softGlow" x="-50%" y="-50%" width="200%" height="200%">'
+    + '<feGaussianBlur stdDeviation="3" result="coloredBlur"/>'
+    + '<feMerge><feMergeNode in="coloredBlur"/><feMergeNode in="SourceGraphic"/></feMerge>'
+    + '</filter>'
+    + '</defs>';
+
+  // Background glow
+  svg += '<circle cx="'+CX+'" cy="'+CY+'" r="180" fill="url(#bgGlow)"/>';
+
+  // Curved connectors: parent → subsidiaries (smooth bezier)
+  subPositions.forEach((p, i) => {
+    const midX = (CX + p.x) / 2;
+    const midY = (CY + p.y) / 2 - 15;
+    svg += '<path d="M'+CX+','+CY+' Q'+midX+','+midY+' '+p.x+','+p.y+'" stroke="url(#connSub)" stroke-width="2" fill="none" opacity="0.55" stroke-linecap="round"/>';
   });
-  // Fund lines: each fund connects to first subsidiary or center
-  const fundPositions = funds.slice(0, 6).map((_, i) => {
-    const angle = -Math.PI/2 + (Math.PI * 2 / Math.max(funds.length, 1)) * i;
-    return {x: CX + Math.cos(angle) * 290, y: CY + Math.sin(angle) * 130};
-  });
+
+  // Fund connectors (curved)
   fundPositions.forEach((p, i) => {
     const fl = funds[i];
-    const targetId = fl.client_id;
-    let anchor = {x: CX, y: CY};
-    const subIdx = subs.findIndex(s => s.id === targetId);
-    if (subIdx >= 0) anchor = subPositions[subIdx];
-    const col = fl.statut === 'Funded' ? '#019ee1' : '#019ee1';
-    const opacity = fl.statut === 'Funded' ? '0.5' : '0.25';
-    svg += '<line x1="'+anchor.x+'" y1="'+anchor.y+'" x2="'+p.x+'" y2="'+p.y+'" stroke="'+col+'" stroke-width="1" stroke-dasharray="3,3" opacity="'+opacity+'"/>';
+    const subIdx = subs.findIndex(s => s.id === fl.client_id);
+    const anchor = subIdx >= 0 ? subPositions[subIdx] : {x: CX, y: CY};
+    const isFunded = fl.statut === 'Funded';
+    const grad = isFunded ? 'url(#connFunded)' : 'url(#connPipeline)';
+    const op = isFunded ? '0.7' : '0.35';
+    const w = isFunded ? '1.8' : '1.2';
+    const dash = isFunded ? '' : 'stroke-dasharray="3,4"';
+    const midX = (anchor.x + p.x) / 2;
+    const midY = (anchor.y + p.y) / 2 + 10;
+    svg += '<path d="M'+anchor.x+','+anchor.y+' Q'+midX+','+midY+' '+p.x+','+p.y+'" stroke="'+grad+'" stroke-width="'+w+'" fill="none" opacity="'+op+'" '+dash+' stroke-linecap="round"/>';
   });
+
   svg += '</svg>';
-  // Center node
-  let nodes = '<div class="net-node center" style="left:calc(50% - 42px);top:calc(50% - 42px);">'
-    + truncate(network.root.nom, 14) + '<br><span style="font-size:8px;opacity:.7;font-weight:400;">Maison Mère</span></div>';
-  // Subsidiaries
+
+  // Nodes (HTML overlay)
+  let nodes = '<div class="net-node center" style="left:calc(50% - 48px);top:calc(50% - 48px);">'
+    + '<div>'+truncate(network.root.nom, 13)+'</div>'
+    + '<div style="font-size:8px;opacity:.7;font-weight:500;margin-top:2px;letter-spacing:.4px;text-transform:uppercase;">Maison mère</div>'
+    + '</div>';
+
   subs.forEach((s, i) => {
     const p = subPositions[i];
-    nodes += '<div class="net-node subsidiary" style="left:calc('+(p.x/W*100)+'% - 32px);top:calc('+(p.y/H*100)+'% - 32px);">'
-      + truncate(s.nom_client, 11) + '<br><span style="font-size:8px;opacity:.6;font-weight:400;">Filiale</span></div>';
+    const lx = (p.x / W * 100).toFixed(2);
+    const ly = (p.y / H * 100).toFixed(2);
+    nodes += '<div class="net-node subsidiary" style="left:calc('+lx+'% - 34px);top:calc('+ly+'% - 34px);">'
+      + '<div>'+truncate(s.nom_client, 11)+'</div>'
+      + '<div style="font-size:8px;opacity:.55;font-weight:500;margin-top:2px;letter-spacing:.3px;text-transform:uppercase;">Filiale</div>'
+      + '</div>';
   });
-  // Funds
+
   fundPositions.forEach((p, i) => {
     const fund = funds[i];
-    nodes += '<div class="net-node fund" style="left:calc('+(p.x/W*100)+'% - 25px);top:calc('+(p.y/H*100)+'% - 25px);">'
-      + truncate(fund.fonds, 8) + '</div>';
+    const lx = (p.x / W * 100).toFixed(2);
+    const ly = (p.y / H * 100).toFixed(2);
+    const isFunded = fund.statut === 'Funded';
+    const opacity = isFunded ? '1' : '0.7';
+    nodes += '<div class="net-node fund" style="left:calc('+lx+'% - 27px);top:calc('+ly+'% - 27px);opacity:'+opacity+';" title="'+escapeHtml(fund.fonds + ' · ' + fund.statut)+'">'
+      + truncate(fund.fonds, 8)
+      + '</div>';
   });
-  // Legend
-  nodes += '<div style="position:absolute;bottom:10px;right:12px;display:flex;gap:10px;align-items:center;">'
-    + '<span style="font-size:9px;color:#6B7280;display:flex;align-items:center;gap:4px;"><span style="width:10px;height:10px;border-radius:50%;background:#001c4b;display:inline-block;"></span>Groupe</span>'
-    + '<span style="font-size:9px;color:#6B7280;display:flex;align-items:center;gap:4px;"><span style="width:10px;height:10px;border-radius:50%;background:white;border:1.5px solid #001c4b;display:inline-block;"></span>Filiale</span>'
-    + '<span style="font-size:9px;color:#6B7280;display:flex;align-items:center;gap:4px;"><span style="width:10px;height:10px;border-radius:50%;background:#019ee1;display:inline-block;"></span>Fonds</span></div>';
+
+  // Premium legend
+  nodes += '<div class="net-legend-pro">'
+    + '<span><span class="dot parent"></span>Groupe</span>'
+    + '<span><span class="dot sub"></span>Filiale</span>'
+    + '<span><span class="dot fund"></span>Fonds</span>'
+    + '</div>';
+
   canvas.innerHTML = svg + nodes;
-  document.getElementById('c360-network-sub').textContent =
-    'Intelligence réseau · ' + subs.length + ' filiale(s) · ' + funds.length + ' lien(s) fonds';
+  const subEl = document.getElementById('c360-network-sub');
+  if (subEl) {
+    subEl.textContent = 'Intelligence réseau · ' + subs.length + ' filiale(s) · '
+      + funds.length + ' lien(s) fonds · '
+      + funds.filter(f => f.statut === 'Funded').length + ' actif(s)';
+  }
 }
 
 function truncate(s, n) {
@@ -1102,27 +1276,40 @@ function renderPerfKpis(kpis, monthly) {
   }).join('');
 }
 
-/* ──────────────── CHOROPLETH MAP (Plotly) ──────────────── */
+/* ──────────────── CHOROPLETH MAP (Plotly) — premium ──────────────── */
 function renderChoropleth(payload) {
   const countries = (payload && payload.countries) ? payload.countries.filter(c => c.iso) : [];
   const mapEl   = document.getElementById('choropleth-map');
   const emptyEl = document.getElementById('choropleth-empty');
   const badgesEl = document.getElementById('map-badges-inline');
+  const stripEl = document.getElementById('map-stats-strip');
 
   if (!countries.length) {
     if (mapEl) mapEl.style.display = 'none';
     if (emptyEl) emptyEl.style.display = 'flex';
     if (badgesEl) badgesEl.innerHTML = '';
+    if (stripEl) stripEl.innerHTML = '';
     return;
   }
   if (mapEl) mapEl.style.display = 'block';
   if (emptyEl) emptyEl.style.display = 'none';
 
-  const totalAum = countries.reduce((a, c) => a + (c.total_aum || 0), 0);
+  const totalAum    = countries.reduce((a, c) => a + (c.total_aum || 0), 0);
+  const totalFunded = countries.reduce((a, c) => a + (c.funded_aum || 0), 0);
+  const totalPipe   = countries.reduce((a, c) => a + (c.pipeline_aum || 0), 0);
+  const totalCli    = countries.reduce((a, c) => a + (c.nb_clients || 0), 0);
+  const top1 = countries[0] || {country:'—', total_aum:0};
+
   if (badgesEl) {
-    badgesEl.innerHTML = '<span class="map-badge navy">🌍 ' + countries.length + ' pays</span>'
-      + '<span class="map-badge blue">📍 ' + fmtM(totalAum) + '</span>'
-      + '<span class="map-badge green">● Live</span>';
+    badgesEl.innerHTML = '<span class="map-badge green">● Live</span>';
+  }
+  if (stripEl) {
+    stripEl.innerHTML =
+      '<div class="map-stat-cell"><div class="map-stat-lbl">Pays couverts</div><div class="map-stat-val">'+countries.length+'</div><div class="map-stat-sub">'+totalCli+' clients</div></div>'
+      + '<div class="map-stat-cell"><div class="map-stat-lbl">AUM Total</div><div class="map-stat-val">'+fmtM(totalAum)+'</div><div class="map-stat-sub">cartographié</div></div>'
+      + '<div class="map-stat-cell"><div class="map-stat-lbl">AUM Funded</div><div class="map-stat-val">'+fmtM(totalFunded)+'</div><div class="map-stat-sub">déjà placé</div></div>'
+      + '<div class="map-stat-cell"><div class="map-stat-lbl">Pipeline actif</div><div class="map-stat-val">'+fmtM(totalPipe)+'</div><div class="map-stat-sub">en cours</div></div>'
+      + '<div class="map-stat-cell"><div class="map-stat-lbl">Top pays</div><div class="map-stat-val" style="font-size:14px;">'+escapeHtml(top1.country)+'</div><div class="map-stat-sub">'+fmtM(top1.total_aum)+'</div></div>';
   }
 
   if (typeof Plotly === 'undefined') {
@@ -1135,40 +1322,270 @@ function renderChoropleth(payload) {
     locations: countries.map(c => c.iso),
     z:         countries.map(c => c.total_aum / 1e6),
     text:      countries.map(c =>
-      '<b>' + c.country + '</b><br>'
-      + 'Funded: ' + fmtM(c.funded_aum)
-      + '<br>Pipeline: ' + fmtM(c.pipeline_aum)
-      + '<br>Total: ' + fmtM(c.total_aum)
-      + '<br>' + c.nb_clients + ' client(s)'),
+      '<b style="font-size:13px;">' + c.country + '</b><br>'
+      + '<span style="color:#001c4b;font-weight:600;">Funded</span> · ' + fmtM(c.funded_aum)
+      + '<br><span style="color:#019ee1;font-weight:600;">Pipeline</span> · ' + fmtM(c.pipeline_aum)
+      + '<br><b>Total · ' + fmtM(c.total_aum) + '</b>'
+      + '<br><span style="color:#6B7280;">' + c.nb_clients + ' client(s)</span>'),
     hovertemplate: '%{text}<extra></extra>',
-    colorscale: [
-      [0,    '#E8EDF5'],
-      [0.25, '#9EB7DC'],
-      [0.5,  '#3060A8'],
-      [0.75, '#0F3A7A'],
-      [1,    '#001c4b'],
-    ],
-    marker: {line: {color: '#fff', width: 0.6}},
-    colorbar: {
-      title: {text: 'M€', font: {size: 10, color: '#6B7280', family: 'DM Sans'}},
-      thickness: 8, len: 0.7, x: 1.02,
-      tickfont: {size: 9, color: '#6B7280', family: 'DM Sans'},
+    hoverlabel: {
+      bgcolor:     '#fff',
+      bordercolor: '#001c4b',
+      font: {family: 'DM Sans', size: 11, color: '#111827'},
     },
+    colorscale: [
+      [0.0,  '#F0F4FA'],
+      [0.05, '#D6E1F2'],
+      [0.20, '#9EB7DC'],
+      [0.45, '#3060A8'],
+      [0.75, '#0F3A7A'],
+      [1.0,  '#001c4b'],
+    ],
+    marker: {line: {color: '#fff', width: 0.5}},
+    colorbar: {
+      title: {text: 'AUM (M€)', font: {size: 10, color: '#6B7280', family: 'DM Sans'}},
+      thickness: 8, len: 0.6, x: 0.99, y: 0.5,
+      tickfont: {size: 10, color: '#6B7280', family: 'DM Sans'},
+      outlinewidth: 0,
+      bgcolor: 'rgba(255,255,255,0.7)',
+    },
+    showscale: true,
+    zmin: 0,
   };
   const layout = {
     geo: {
-      showframe: false, showcoastlines: true, coastlinecolor: '#D1D5DB',
-      showland: true, landcolor: '#F9FAFB',
-      showcountries: true, countrycolor: '#E5E7EB',
-      projection: {type: 'natural earth'},
-      bgcolor: '#fff',
+      showframe:       false,
+      showcoastlines:  true, coastlinecolor: '#CBD5E1', coastlinewidth: 0.4,
+      showland:        true, landcolor:      '#F8FAFC',
+      showocean:       true, oceancolor:     '#F0F4FA',
+      showcountries:   true, countrycolor:   '#E2E8F0', countrywidth: 0.5,
+      showlakes:       true, lakecolor:      '#F0F4FA',
+      projection:      {type: 'natural earth'},
+      bgcolor:         '#F8FAFC',
+      lataxis:         {showgrid: false},
+      lonaxis:         {showgrid: false},
     },
-    margin: {l:0, r:0, t:0, b:0},
-    paper_bgcolor: '#fff', plot_bgcolor: '#fff',
-    font: {family: 'DM Sans', color: '#111827'},
-    height: 400,
+    margin:        {l: 0, r: 0, t: 8, b: 0},
+    paper_bgcolor: '#F8FAFC',
+    plot_bgcolor:  '#F8FAFC',
+    font:          {family: 'DM Sans', color: '#111827'},
+    height:        440,
+    dragmode:      false,
   };
-  Plotly.newPlot('choropleth-map', [trace], layout, {displayModeBar: false, responsive: true});
+  Plotly.newPlot('choropleth-map', [trace], layout, {
+    displayModeBar: false, responsive: true,
+    scrollZoom: false, doubleClick: false,
+  });
+}
+
+/* ──────────────── PIPELINE ANALYTICS ──────────────── */
+const SALES_AVATARS = ['🧑‍💼','👨‍💼','👩‍💼','🧑‍💼','👨‍💼','👩‍💼'];
+const REGION_FLAGS  = {GCC:'🌍', EMEA:'🇪🇺', APAC:'🌏', Nordics:'🌐',
+                        'Asia ex-Japan':'🌏', 'North America':'🇺🇸', LatAm:'🌎'};
+const FUND_ICONS    = {'Global Value':'💎','Private Debt':'🏦','Income Builder':'💰',
+                        'Resilient Equity':'🛡️','Active ETFs':'📊'};
+
+async function loadPipelineMatrix() {
+  try {
+    const data = await API('/api/pipeline-matrix');
+    renderPipeBySales(data.by_sales || []);
+    renderPipeByRegion(data.by_region || []);
+    renderPipeByFonds(data.by_fonds || []);
+  } catch (err) {
+    console.error('pipeline-matrix', err);
+  }
+}
+
+function progressBar(funded, pipeline) {
+  const total = funded + pipeline;
+  if (total <= 0) return '';
+  const fp = (funded / total * 100).toFixed(1);
+  const pp = (pipeline / total * 100).toFixed(1);
+  return '<div class="pipe-an-progress">'
+    + '<div class="pipe-an-progress-funded" style="width:'+fp+'%;"></div>'
+    + '<div class="pipe-an-progress-pipe" style="width:'+pp+'%;"></div>'
+    + '</div>'
+    + '<div class="pipe-an-legend">'
+    + '<span><b>'+fmtM(funded)+'</b> Funded</span>'
+    + '<span><b>'+fmtM(pipeline)+'</b> Pipeline</span>'
+    + '</div>';
+}
+
+function renderPipeBySales(sales) {
+  const el = document.getElementById('pipe-by-sales');
+  if (!el) return;
+  if (!sales.length) {
+    el.innerHTML = '<div class="empty-state" style="grid-column:1/-1;"><span class="ico">👤</span>Aucun commercial avec des deals.<br><br><button class="btn btn-primary" data-action="new-sales">+ Ajouter un commercial</button></div>';
+    return;
+  }
+  el.innerHTML = sales.map((s, i) => {
+    const ico = SALES_AVATARS[i % SALES_AVATARS.length];
+    const regionTags = (s.regions || []).slice(0, 4).map(r =>
+      '<span class="pipe-an-tag region">'+(REGION_FLAGS[r]||'')+' '+escapeHtml(r)+'</span>').join('');
+    const fundTags = (s.fonds || []).slice(0, 4).map(f =>
+      '<span class="pipe-an-tag fund">'+(FUND_ICONS[f]||'•')+' '+escapeHtml(f)+'</span>').join('');
+    const countryFlags = (s.countries || []).slice(0, 6).map(c => flagFor(c, '')).join(' ');
+    return '<div class="pipe-an-card">'
+      + '<div class="pipe-an-hdr">'
+      + '<div style="display:flex;align-items:center;gap:10px;">'
+      + '<div style="font-size:30px;">'+ico+'</div>'
+      + '<div><div class="pipe-an-name">'+escapeHtml(s.sales_owner)+'</div>'
+      + '<div class="pipe-an-sub">'+s.nb_clients+' client(s) · '+(s.regions||[]).length+' région(s)</div></div>'
+      + '</div>'
+      + '<div style="text-align:right;"><div class="pipe-an-aum">'+fmtM(s.total_aum)+'</div>'
+      + '<div class="pipe-an-aum-sub">total géré</div></div>'
+      + '</div>'
+      + '<div class="pipe-an-stats">'
+      + '<div><div class="pipe-an-stat-lbl">Funded</div><div class="pipe-an-stat-val acc">'+s.nb_funded+' deal(s)</div></div>'
+      + '<div><div class="pipe-an-stat-lbl">Pipeline actif</div><div class="pipe-an-stat-val">'+s.nb_active+' deal(s)</div></div>'
+      + '</div>'
+      + progressBar(s.funded_aum, s.pipeline_aum)
+      + (regionTags ? '<div class="pipe-an-tag-row" style="margin-top:10px;">'+regionTags+'</div>' : '')
+      + (fundTags   ? '<div class="pipe-an-tag-row">'+fundTags+'</div>' : '')
+      + (countryFlags ? '<div style="font-size:18px;margin-top:8px;letter-spacing:2px;">'+countryFlags+'</div>' : '')
+      + '</div>';
+  }).join('');
+}
+
+function renderPipeByRegion(regions) {
+  const el = document.getElementById('pipe-by-region');
+  if (!el) return;
+  if (!regions.length) {
+    el.innerHTML = '<div class="empty-state" style="grid-column:1/-1;"><span class="ico">🌍</span>Aucune région avec des deals.</div>';
+    return;
+  }
+  el.innerHTML = regions.map(r => {
+    const flag = REGION_FLAGS[r.region] || '🌐';
+    const ownerTags = (r.sales_owners || []).map(o =>
+      '<span class="pipe-an-tag">'+escapeHtml(o)+'</span>').join('');
+    const countryFlags = (r.countries || []).map(c => flagFor(c, '')).join(' ');
+    return '<div class="pipe-an-card">'
+      + '<div class="pipe-an-hdr">'
+      + '<div style="display:flex;align-items:center;gap:10px;">'
+      + '<div style="font-size:30px;">'+flag+'</div>'
+      + '<div><div class="pipe-an-name">'+escapeHtml(r.region)+'</div>'
+      + '<div class="pipe-an-sub">'+r.nb_clients+' client(s) · '+r.nb_deals+' deal(s)</div></div>'
+      + '</div>'
+      + '<div style="text-align:right;"><div class="pipe-an-aum">'+fmtM(r.total_aum)+'</div>'
+      + '<div class="pipe-an-aum-sub">AUM total</div></div>'
+      + '</div>'
+      + progressBar(r.funded_aum, r.pipeline_aum)
+      + (ownerTags ? '<div class="pipe-an-tag-row" style="margin-top:10px;"><span style="font-size:9.5px;color:#9CA3AF;font-weight:600;text-transform:uppercase;letter-spacing:.5px;align-self:center;">Sales :</span>'+ownerTags+'</div>' : '')
+      + (countryFlags ? '<div style="font-size:18px;margin-top:8px;letter-spacing:2px;">'+countryFlags+'</div>' : '')
+      + '</div>';
+  }).join('');
+}
+
+function renderPipeByFonds(fonds) {
+  const el = document.getElementById('pipe-by-fonds');
+  if (!el) return;
+  if (!fonds.length) {
+    el.innerHTML = '<div class="empty-state" style="grid-column:1/-1;"><span class="ico">💎</span>Aucun fonds en pipeline.</div>';
+    return;
+  }
+  el.innerHTML = fonds.map(f => {
+    const ico = FUND_ICONS[f.fonds] || '•';
+    const ownerTags = (f.sales_owners || []).map(o =>
+      '<span class="pipe-an-tag">'+escapeHtml(o)+'</span>').join('');
+    const regionTags = (f.regions || []).map(r =>
+      '<span class="pipe-an-tag region">'+(REGION_FLAGS[r]||'')+' '+escapeHtml(r)+'</span>').join('');
+    return '<div class="pipe-an-card">'
+      + '<div class="pipe-an-hdr">'
+      + '<div style="display:flex;align-items:center;gap:10px;">'
+      + '<div style="font-size:28px;">'+ico+'</div>'
+      + '<div><div class="pipe-an-name">'+escapeHtml(f.fonds)+'</div>'
+      + '<div class="pipe-an-sub">'+f.nb_clients+' client(s) · '+f.nb_deals+' deal(s)</div></div>'
+      + '</div>'
+      + '<div style="text-align:right;"><div class="pipe-an-aum">'+fmtM(f.total_aum)+'</div>'
+      + '<div class="pipe-an-aum-sub">collecté + pipeline</div></div>'
+      + '</div>'
+      + progressBar(f.funded_aum, f.pipeline_aum)
+      + (ownerTags ? '<div class="pipe-an-tag-row" style="margin-top:10px;"><span style="font-size:9.5px;color:#9CA3AF;font-weight:600;text-transform:uppercase;letter-spacing:.5px;align-self:center;">Vendu par :</span>'+ownerTags+'</div>' : '')
+      + (regionTags ? '<div class="pipe-an-tag-row">'+regionTags+'</div>' : '')
+      + '</div>';
+  }).join('');
+}
+
+/* ──────────────── IMPORT MODAL ──────────────── */
+function openImportModal(target) {
+  // target = 'pipeline' | 'clients'
+  const t = target || 'pipeline';
+  const titleMap = {pipeline: 'Importer un pipeline (CSV / Excel)',
+                     clients:  'Importer des clients (CSV / Excel)'};
+  const colsHint = t === 'pipeline'
+    ? 'Colonnes attendues : <code>nom_client</code>, <code>fonds</code>, <code>statut</code>, <code>target_aum_initial</code>, <code>revised_aum</code>, <code>funded_aum</code>, <code>sales_owner</code>, <code>next_action_date</code>, <code>closing_probability</code>'
+    : 'Colonnes attendues : <code>nom_client</code>, <code>type_client</code>, <code>region</code>';
+  openModal(`
+    <div class="modal-hdr">
+      <div class="modal-title">${titleMap[t]}</div>
+      <button class="modal-close" onclick="closeModal()">×</button>
+    </div>
+    <div class="modal-body">
+      <div style="display:flex;gap:6px;margin-bottom:14px;">
+        <button class="btn-tab ${t==='pipeline'?'on':''}" id="imp-tab-pipeline">Pipeline</button>
+        <button class="btn-tab ${t==='clients'?'on':''}" id="imp-tab-clients">Clients</button>
+      </div>
+      <label class="import-zone" id="imp-zone">
+        <span class="import-zone-ico">📁</span>
+        <div class="import-zone-txt">Cliquer pour choisir un fichier</div>
+        <div class="import-zone-sub">CSV (.csv) ou Excel (.xlsx, .xls)</div>
+        <input type="file" id="imp-file" accept=".csv,.xlsx,.xls"/>
+      </label>
+      <div style="margin-top:12px;font-size:11.5px;color:#6B7280;line-height:1.6;">${colsHint}</div>
+      <div id="imp-result"></div>
+    </div>
+    <div class="modal-ftr">
+      <button class="btn btn-ghost" onclick="closeModal()">Annuler</button>
+      <button class="btn btn-primary" id="imp-upload" disabled>Importer</button>
+    </div>
+  `);
+  let currentTarget = t;
+  const setTarget = (newT) => {
+    currentTarget = newT;
+    document.getElementById('imp-tab-pipeline').classList.toggle('on', newT === 'pipeline');
+    document.getElementById('imp-tab-clients').classList.toggle('on', newT === 'clients');
+    document.querySelector('#modal-box .modal-title').textContent = titleMap[newT];
+    document.querySelector('#modal-box .modal-body div[style*="line-height"]').innerHTML =
+      newT === 'pipeline'
+        ? 'Colonnes attendues : <code>nom_client</code>, <code>fonds</code>, <code>statut</code>, <code>target_aum_initial</code>, <code>revised_aum</code>, <code>funded_aum</code>, <code>sales_owner</code>, <code>next_action_date</code>, <code>closing_probability</code>'
+        : 'Colonnes attendues : <code>nom_client</code>, <code>type_client</code>, <code>region</code>';
+  };
+  document.getElementById('imp-tab-pipeline').addEventListener('click', () => setTarget('pipeline'));
+  document.getElementById('imp-tab-clients').addEventListener('click', () => setTarget('clients'));
+
+  const fileInput = document.getElementById('imp-file');
+  const zone = document.getElementById('imp-zone');
+  const upload = document.getElementById('imp-upload');
+  fileInput.addEventListener('change', () => {
+    if (fileInput.files.length) {
+      zone.classList.add('has-file');
+      zone.querySelector('.import-zone-txt').textContent = '✓ ' + fileInput.files[0].name;
+      zone.querySelector('.import-zone-ico').textContent = '✅';
+      upload.disabled = false;
+    }
+  });
+
+  upload.addEventListener('click', async () => {
+    if (!fileInput.files.length) return;
+    upload.disabled = true;
+    upload.textContent = 'Import en cours…';
+    const fd = new FormData();
+    fd.append('file', fileInput.files[0]);
+    try {
+      const res = await fetch('/api/import/' + currentTarget, {method:'POST', body: fd});
+      if (!res.ok) throw new Error(await res.text());
+      const json = await res.json();
+      document.getElementById('imp-result').innerHTML =
+        '<div class="import-result">✅ Import réussi · '+json.inserted+' créé(s) · '+json.updated+' mis à jour</div>';
+      toast('Import réussi : '+(json.inserted+json.updated)+' ligne(s)', 'success');
+      setTimeout(() => { closeModal(); boot(); }, 1500);
+    } catch (e) {
+      document.getElementById('imp-result').innerHTML =
+        '<div class="import-result error">❌ Erreur : '+escapeHtml(e.message)+'</div>';
+      upload.disabled = false;
+      upload.textContent = 'Réessayer';
+    }
+  });
 }
 
 /* ──────────────── TOP 10 BI ──────────────── */
@@ -1346,6 +1763,7 @@ async function boot() {
     renderMonthlyEvolution(overview.monthly_aum);
     renderChoropleth(overview.aum_by_country);
     refreshTop10();
+    loadPipelineMatrix();
     // Live badge
     const nbActifs = overview.kpis.nb_deals_actifs || 0;
     document.getElementById('live-badge-text').textContent = 'Live · ' + nbActifs + ' deals actifs';
@@ -1741,6 +2159,8 @@ document.addEventListener('click', e => {
     if (!SELECTED_CLIENT_ID) { toast('Sélectionnez un client', 'error'); return; }
     openDealModal({client_id: SELECTED_CLIENT_ID});
   }
+  if (action === 'import-pipeline') openImportModal('pipeline');
+  if (action === 'import-clients')  openImportModal('clients');
 });
 
 boot();

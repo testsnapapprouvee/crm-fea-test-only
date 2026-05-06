@@ -742,6 +742,148 @@ def api_whitespace_full():
     }
 
 
+@app.get("/api/pipeline-matrix")
+def api_pipeline_matrix():
+    """Cross-tab analytics for the Pipeline tab.
+    Returns 4 grouped views: by sales × region, by sales × fonds,
+    by region × statut, and a 'who-where' summary per sales rep."""
+    df = db.get_pipeline_with_clients()
+    if df.empty:
+        return {
+            "by_sales":     [],
+            "by_region":    [],
+            "by_fonds":     [],
+            "who_does_what": [],
+            "where":        [],
+        }
+    df["_aum_p"] = df.apply(_smart_aum, axis=1)
+    df["funded_aum"] = pd.to_numeric(df["funded_aum"], errors="coerce").fillna(0.0)
+
+    # By sales — total Funded + Pipeline + nb deals + regions covered
+    by_sales = []
+    for owner, grp in df.groupby("sales_owner"):
+        funded   = float(grp[grp["statut"] == "Funded"]["funded_aum"].sum())
+        active   = grp[grp["statut"].isin(
+            ["Prospect","Initial Pitch","Due Diligence","Soft Commit"])]
+        pipe_aum = float(active["_aum_p"].sum())
+        regions  = sorted([r for r in grp["region"].dropna().unique() if r])
+        funds    = sorted([f for f in grp["fonds"].dropna().unique() if f])
+        countries = sorted([c for c in grp["country"].dropna().unique() if c])
+        by_sales.append({
+            "sales_owner": str(owner) if owner else "Non assigné",
+            "funded_aum":  funded,
+            "pipeline_aum": pipe_aum,
+            "total_aum":   funded + pipe_aum,
+            "nb_deals":    int(len(grp)),
+            "nb_funded":   int((grp["statut"] == "Funded").sum()),
+            "nb_active":   int(len(active)),
+            "regions":     regions,
+            "fonds":       funds,
+            "countries":   countries,
+            "nb_clients":  int(grp["client_id"].nunique()),
+        })
+    by_sales.sort(key=lambda x: x["total_aum"], reverse=True)
+
+    # By region — total Funded + Pipeline + sales reps active
+    by_region = []
+    for region, grp in df.groupby("region"):
+        if not region:
+            continue
+        funded   = float(grp[grp["statut"] == "Funded"]["funded_aum"].sum())
+        active   = grp[grp["statut"].isin(
+            ["Prospect","Initial Pitch","Due Diligence","Soft Commit"])]
+        pipe_aum = float(active["_aum_p"].sum())
+        owners   = sorted([o for o in grp["sales_owner"].dropna().unique()
+                           if o and o != "Non assigne"])
+        countries = sorted([c for c in grp["country"].dropna().unique() if c])
+        by_region.append({
+            "region":      str(region),
+            "funded_aum":  funded,
+            "pipeline_aum": pipe_aum,
+            "total_aum":   funded + pipe_aum,
+            "nb_deals":    int(len(grp)),
+            "nb_clients":  int(grp["client_id"].nunique()),
+            "sales_owners": owners,
+            "countries":   countries,
+        })
+    by_region.sort(key=lambda x: x["total_aum"], reverse=True)
+
+    # By fonds — total Funded + Pipeline + clients/sales
+    by_fonds = []
+    for fonds, grp in df.groupby("fonds"):
+        if not fonds:
+            continue
+        funded   = float(grp[grp["statut"] == "Funded"]["funded_aum"].sum())
+        active   = grp[grp["statut"].isin(
+            ["Prospect","Initial Pitch","Due Diligence","Soft Commit"])]
+        pipe_aum = float(active["_aum_p"].sum())
+        owners   = sorted([o for o in grp["sales_owner"].dropna().unique()
+                           if o and o != "Non assigne"])
+        regions  = sorted([r for r in grp["region"].dropna().unique() if r])
+        by_fonds.append({
+            "fonds":         str(fonds),
+            "funded_aum":    funded,
+            "pipeline_aum":  pipe_aum,
+            "total_aum":     funded + pipe_aum,
+            "nb_deals":      int(len(grp)),
+            "nb_clients":    int(grp["client_id"].nunique()),
+            "sales_owners":  owners,
+            "regions":       regions,
+        })
+    by_fonds.sort(key=lambda x: x["total_aum"], reverse=True)
+
+    # who-does-what: sales × fonds matrix
+    who_does_what = []
+    sales_list = sorted([s for s in df["sales_owner"].dropna().unique() if s])
+    fonds_list = sorted([f for f in df["fonds"].dropna().unique() if f])
+    for owner in sales_list:
+        row = {"sales_owner": owner, "by_fonds": {}}
+        for fonds in fonds_list:
+            sub = df[(df["sales_owner"] == owner) & (df["fonds"] == fonds)]
+            if sub.empty:
+                continue
+            funded = float(sub[sub["statut"] == "Funded"]["funded_aum"].sum())
+            pipe   = float(sub[sub["statut"].isin(
+                ["Prospect","Initial Pitch","Due Diligence","Soft Commit"])]["_aum_p"].sum())
+            row["by_fonds"][fonds] = {
+                "funded_aum":  funded,
+                "pipeline_aum": pipe,
+                "total_aum":   funded + pipe,
+                "nb_deals":    int(len(sub)),
+            }
+        who_does_what.append(row)
+
+    # where: country × sales matrix (top 10 countries)
+    where = []
+    for country, grp in df.groupby("country"):
+        if not country:
+            continue
+        funded   = float(grp[grp["statut"] == "Funded"]["funded_aum"].sum())
+        pipe_aum = float(grp[grp["statut"].isin(
+            ["Prospect","Initial Pitch","Due Diligence","Soft Commit"])]["_aum_p"].sum())
+        owners = sorted([o for o in grp["sales_owner"].dropna().unique()
+                         if o and o != "Non assigne"])
+        clients = sorted([c for c in grp["nom_client"].dropna().unique() if c])
+        where.append({
+            "country":      str(country),
+            "funded_aum":   funded,
+            "pipeline_aum": pipe_aum,
+            "total_aum":    funded + pipe_aum,
+            "sales_owners": owners,
+            "clients":      clients,
+            "nb_deals":     int(len(grp)),
+        })
+    where.sort(key=lambda x: x["total_aum"], reverse=True)
+
+    return {
+        "by_sales":      by_sales,
+        "by_region":     by_region,
+        "by_fonds":      by_fonds,
+        "who_does_what": who_does_what,
+        "where":         where[:12],
+    }
+
+
 @app.get("/api/top-deals")
 def api_top_deals(period: str = "all", group_by: str = "deal", limit: int = 10):
     """Top deals BI endpoint.
