@@ -284,13 +284,17 @@ body{background:#F0F2F5;}
 .network-zoom-btn{width:28px;height:28px;border:none;border-radius:7px;background:transparent;cursor:pointer;font-size:14px;font-weight:800;color:#001c4b;display:flex;align-items:center;justify-content:center;transition:background .12s;}
 .network-zoom-btn:hover{background:#EEF4FB;}
 .network-zoom-btn.reset{font-size:11px;}
-.net-node{position:absolute;border-radius:50%;display:flex;align-items:center;justify-content:center;text-align:center;font-weight:700;line-height:1.15;cursor:default;transition:transform .25s ease,box-shadow .25s ease,filter .25s ease;}
-.net-node:hover{transform:scale(1.12);z-index:20;filter:brightness(1.05);}
-.net-node.center{width:96px;height:96px;background:radial-gradient(circle at 30% 30%,#0F3A7A 0%,#001c4b 70%);color:#fff;font-size:10.5px;box-shadow:0 8px 28px rgba(0,28,75,0.45),inset 0 0 0 3px rgba(255,255,255,0.18);border:none;}
-.net-node.center::after{content:'';position:absolute;inset:-6px;border-radius:50%;background:radial-gradient(circle,rgba(0,28,75,0.12) 0%,transparent 70%);z-index:-1;}
-.net-node.subsidiary{width:68px;height:68px;background:radial-gradient(circle at 30% 30%,#fff 0%,#F4F8FC 100%);color:#001c4b;font-size:10px;box-shadow:0 6px 18px rgba(0,28,75,0.18),inset 0 0 0 2px #001c4b22;}
-.net-node.fund{width:54px;height:54px;background:radial-gradient(circle at 30% 30%,#0EA5E9 0%,#019ee1 60%,#0284c7 100%);color:#fff;font-size:9px;box-shadow:0 5px 14px rgba(1,158,225,0.4),inset 0 0 0 2px rgba(255,255,255,0.3);}
-.net-node.contact{width:46px;height:46px;background:radial-gradient(circle at 30% 30%,#10B981 0%,#059669 70%);color:#fff;font-size:8.5px;box-shadow:0 4px 12px rgba(5,150,105,0.35),inset 0 0 0 2px rgba(255,255,255,0.25);}
+.net-node{position:absolute;display:flex;flex-direction:column;align-items:center;justify-content:center;text-align:center;font-weight:700;line-height:1.18;cursor:default;transition:transform .25s ease,box-shadow .25s ease,filter .25s ease;padding:6px 8px;}
+.net-node:hover{transform:scale(1.10);z-index:20;filter:brightness(1.06);}
+.net-node.center{width:130px;height:130px;border-radius:50%;background:radial-gradient(circle at 30% 30%,#0F3A7A 0%,#001c4b 70%);color:#fff;font-size:12px;box-shadow:0 10px 32px rgba(0,28,75,0.45),inset 0 0 0 3px rgba(255,255,255,0.18);border:none;padding:14px 12px;}
+.net-node.center::after{content:'';position:absolute;inset:-8px;border-radius:50%;background:radial-gradient(circle,rgba(0,28,75,0.12) 0%,transparent 70%);z-index:-1;}
+.net-node.subsidiary{width:104px;height:104px;border-radius:50%;background:radial-gradient(circle at 30% 30%,#fff 0%,#F4F8FC 100%);color:#001c4b;font-size:11px;box-shadow:0 8px 22px rgba(0,28,75,0.20),inset 0 0 0 2px #001c4b25;padding:10px;}
+.net-node.fund{min-width:108px;height:62px;border-radius:14px;background:radial-gradient(circle at 30% 30%,#0EA5E9 0%,#019ee1 55%,#0284c7 100%);color:#fff;font-size:10px;box-shadow:0 6px 16px rgba(1,158,225,0.42),inset 0 0 0 2px rgba(255,255,255,0.3);padding:7px 12px;}
+.net-node.fund.pipeline{background:radial-gradient(circle at 30% 30%,#94A3B8 0%,#64748B 70%);box-shadow:0 5px 14px rgba(100,116,139,0.35),inset 0 0 0 2px rgba(255,255,255,0.25);opacity:0.92;}
+.net-node.contact{width:54px;height:54px;border-radius:50%;background:radial-gradient(circle at 30% 30%,#10B981 0%,#059669 70%);color:#fff;font-size:9px;box-shadow:0 4px 12px rgba(5,150,105,0.35),inset 0 0 0 2px rgba(255,255,255,0.25);}
+.net-node-name{font-weight:700;line-height:1.15;}
+.net-node-aum{font-weight:800;font-size:11px;margin-top:2px;letter-spacing:-.2px;}
+.net-node-tag{font-size:8.5px;font-weight:500;opacity:.7;letter-spacing:.4px;text-transform:uppercase;margin-top:2px;}
 .net-svg-pro{position:absolute;inset:0;width:100%;height:100%;pointer-events:none;}
 .net-legend-pro{position:absolute;bottom:12px;right:12px;display:flex;gap:14px;align-items:center;background:rgba(255,255,255,0.85);backdrop-filter:blur(6px);padding:7px 12px;border-radius:50px;border:0.5px solid rgba(0,0,0,.05);}
 .net-legend-pro span{font-size:10px;color:#374151;display:flex;align-items:center;gap:5px;font-weight:600;}
@@ -309,6 +313,11 @@ body{background:#F0F2F5;}
 .import-zone input[type=file]{display:none;}
 .import-result{margin-top:14px;padding:14px;border-radius:12px;background:#ECFDF5;color:#065F46;font-size:13px;font-weight:600;}
 .import-result.error{background:#FEF2F2;color:#B91C1C;}
+/* ── ANON MODE ── */
+.btn.anon-active{background:#001c4b !important;color:#fff !important;border-color:#001c4b !important;}
+.btn.anon-active:hover{background:#0F3A7A !important;}
+body.anon-mode::before{content:'🕶 MODE ANONYME ACTIF · Noms clients masqués';position:fixed;top:0;left:0;right:0;height:24px;background:#001c4b;color:#fff;font-size:11px;font-weight:700;letter-spacing:.5px;display:flex;align-items:center;justify-content:center;z-index:999;text-transform:uppercase;}
+body.anon-mode .root{padding-top:48px;}
 </style>
 </head>
 <body>
@@ -326,6 +335,7 @@ body{background:#F0F2F5;}
       <button class="btn-tab" data-action="export-excel" title="Télécharger le backup Excel">📥 Excel</button>
       <button class="btn-tab" data-action="export-mail"  title="Envoyer le rapport par email">✉️ Email</button>
     </div>
+    <button class="btn btn-ghost" data-action="toggle-anon" id="btn-anon" title="Anonymiser les noms de clients (mode COMEX)">🕶 Anonyme</button>
     <button class="btn btn-ghost" data-action="seed-demo" title="Charger des données de démonstration">🌱 Demo</button>
     <button class="btn btn-ghost" data-action="reset-db" title="Vider la base">🗑️ Reset</button>
     <div class="live-badge"><div class="dot"></div><span id="live-badge-text">Live · Connexion…</span></div>
@@ -543,13 +553,10 @@ body{background:#F0F2F5;}
           <div class="crm-360-meta" id="c360-meta">—</div>
           <div class="crm-360-badges" id="c360-badges"></div>
         </div>
-        <div style="text-align:right;flex-shrink:0;display:flex;flex-direction:column;align-items:flex-end;gap:6px;">
-          <div title="Score de Santé Client : agrège AUM, deals actifs, activités récentes et statut KYC.&#10;Calcul : 30% AUM total + 25% nb deals actifs + 25% activités/mois + 20% KYC validé">
-            <div style="font-size:10px;text-transform:uppercase;letter-spacing:.6px;color:#9CA3AF;font-weight:500;margin-bottom:4px;display:flex;align-items:center;gap:4px;justify-content:flex-end;">
-              Score Santé <span style="cursor:help;font-size:11px;">ⓘ</span>
-            </div>
-            <div style="font-size:26px;font-weight:800;color:#001c4b;letter-spacing:-1px;" id="c360-score">—<span style="font-size:13px;color:#9CA3AF;font-weight:400;">/100</span></div>
-            <div id="c360-score-detail" style="font-size:9.5px;color:#9CA3AF;margin-top:3px;font-weight:500;">—</div>
+        <div style="text-align:right;flex-shrink:0;display:flex;flex-direction:column;align-items:flex-end;gap:8px;">
+          <div>
+            <div style="font-size:10px;text-transform:uppercase;letter-spacing:.6px;color:#9CA3AF;font-weight:500;margin-bottom:4px;">AUM Total</div>
+            <div style="font-size:26px;font-weight:800;color:#001c4b;letter-spacing:-1px;" id="c360-aum-total">—</div>
           </div>
           <div style="display:flex;gap:6px;flex-wrap:wrap;">
             <button class="btn btn-ghost" data-action="edit-client" title="Modifier le client">✎ Modifier</button>
@@ -672,6 +679,38 @@ function pillHtml(s) {
   return '<span class="spill" style="background:'+c.bg+';color:'+c.col+';">'+s+'</span>';
 }
 
+// ── Anonymous mode (toggle in header) ───────────────────────
+let ANON = localStorage.getItem('meridian_anon') === '1';
+function applyAnonState() {
+  document.body.classList.toggle('anon-mode', ANON);
+  const btn = document.getElementById('btn-anon');
+  if (btn) btn.classList.toggle('anon-active', ANON);
+}
+function toggleAnon() {
+  ANON = !ANON;
+  localStorage.setItem('meridian_anon', ANON ? '1' : '0');
+  applyAnonState();
+  toast(ANON ? 'Mode anonyme activé' : 'Mode anonyme désactivé', 'success');
+  boot();
+}
+function displayName(name, clientId) {
+  if (!ANON) return name || '—';
+  if (clientId) return 'Client #' + String(clientId).padStart(3, '0');
+  // Hash fallback
+  const s = String(name || '');
+  let h = 0;
+  for (let i = 0; i < s.length; i++) h = (h * 31 + s.charCodeAt(i)) % 1000;
+  return 'Client #' + String(h).padStart(3, '0');
+}
+function displayContact(prenom, nom, idx) {
+  if (!ANON) return ((prenom||'') + ' ' + (nom||'')).trim();
+  return 'Contact #' + String((idx||0)+1).padStart(2, '0');
+}
+function displayInitials(prenom, nom, idx) {
+  if (!ANON) return ((prenom||'')[0] || '') + ((nom||'')[0] || '');
+  return 'C' + String((idx||0)+1);
+}
+
 function fmtM(eur) {
   const v = Number(eur) || 0;
   if (v >= 1e9) return (v / 1e9).toFixed(2) + ' Md€';
@@ -770,9 +809,10 @@ function renderTopDeals(deals) {
   }
   el.innerHTML = deals.slice(0, 6).map(d => {
     const aum_m = ((d.aum || 0) / 1e6).toFixed(1) + ' M€';
+    const cliName = displayName(d.client, d.client_id);
     return '<div class="deal-row" data-action="edit-deal" data-id="'+d.id+'" style="cursor:pointer;">'
       + '<div class="av">'+flagFor(d.country, d.region)+'</div>'
-      + '<div style="flex:1;min-width:0"><div class="dn">'+escapeHtml(d.client||'')+'</div>'
+      + '<div style="flex:1;min-width:0"><div class="dn">'+escapeHtml(cliName)+'</div>'
       + '<div class="ds">'+escapeHtml(d.fonds||'')+' · '+escapeHtml(d.sales_owner||'—')+'</div></div>'
       + pillHtml(d.statut)
       + '<div class="da"><div class="da-v">'+aum_m+'</div></div></div>';
@@ -812,10 +852,11 @@ function renderActivities(targetId, acts, limit) {
   el.innerHTML = slice.map(a => {
     const ico = ACT_ICO[a.type_interaction] || '📝';
     const dt = relativeDate(a.date);
+    const cliName = displayName(a.nom_client, a.client_id);
     return '<div class="act-item"><div class="act-ico">'+ico+'</div>'
-      + '<div style="flex:1;min-width:0"><div class="ac">'+(a.nom_client||'—')
+      + '<div style="flex:1;min-width:0"><div class="ac">'+escapeHtml(cliName)
       + ' <span style="font-size:10.5px;font-weight:400;color:#9CA3AF;">· '+(a.type_interaction||'')+'</span></div>'
-      + '<div class="an">'+(a.notes||'—')+'</div></div>'
+      + '<div class="an">'+escapeHtml(a.notes||'—')+'</div></div>'
       + '<div class="adt">'+dt+'</div></div>';
   }).join('');
 }
@@ -897,10 +938,11 @@ function renderNextActions(targetId, actions) {
     const dot = isUrgent ? '#EF4444' : (dt.includes('j') ? '#F59E0B' : '#10B981');
     const bg = isUrgent ? '#FEF2F2' : (dt.includes('j') ? '#FFFBEB' : '#ECFDF5');
     const tc = isUrgent ? '#B91C1C' : (dt.includes('j') ? '#92400E' : '#065F46');
+    const cliName = displayName(a.nom_client, a.client_id);
     return '<div style="display:flex;align-items:center;gap:10px;padding:10px 0;border-bottom:1px solid #F3F4F6;">'
       + '<div style="width:7px;height:7px;border-radius:50%;background:'+dot+';flex-shrink:0;"></div>'
       + '<div style="flex:1;min-width:0;">'
-      + '<div style="font-size:12.5px;font-weight:600;color:#111827;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">'+(a.nom_client||'—')+'</div>'
+      + '<div style="font-size:12.5px;font-weight:600;color:#111827;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">'+escapeHtml(cliName)+'</div>'
       + '<div style="font-size:11px;color:#6B7280;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">'+(a.fonds||'—')+' · '+(a.statut||'—')+'</div></div>'
       + '<div style="text-align:right;flex-shrink:0;">'
       + '<div style="font-size:11px;font-weight:700;color:'+tc+';background:'+bg+';padding:3px 8px;border-radius:50px;">'+dt+'</div>'
@@ -975,15 +1017,16 @@ function renderPipelineTable(deals) {
   }
   el.innerHTML = deals.map(d => {
     const aum_m = ((d.aum || 0) / 1e6).toFixed(1) + ' M€';
+    const cliName = displayName(d.client, d.client_id);
     return '<div class="deal-row">'
       + '<div class="av">'+flagFor(d.country, d.region)+'</div>'
-      + '<div style="flex:1;min-width:0"><div class="dn">'+escapeHtml(d.client||'')+'</div>'
+      + '<div style="flex:1;min-width:0"><div class="dn">'+escapeHtml(cliName)+'</div>'
       + '<div class="ds">'+escapeHtml(d.fonds||'')+' · '+escapeHtml(d.sales_owner||'—')+'</div></div>'
       + pillHtml(d.statut)
       + '<div class="da"><div class="da-v">'+aum_m+'</div></div>'
       + '<div class="deal-actions">'
       + '<button class="icon-btn" data-action="edit-deal" data-id="'+d.id+'" title="Modifier">✎</button>'
-      + '<button class="icon-btn danger" data-action="delete-deal" data-id="'+d.id+'" data-label="'+escapeHtml(d.client+' · '+d.fonds)+'" title="Supprimer">🗑</button>'
+      + '<button class="icon-btn danger" data-action="delete-deal" data-id="'+d.id+'" data-label="'+escapeHtml(cliName+' · '+d.fonds)+'" title="Supprimer">🗑</button>'
       + '</div></div>';
   }).join('');
 }
@@ -1010,16 +1053,22 @@ let SELECTED_CLIENT_ID = null;
 function buildClientList(filter) {
   const el = document.getElementById('crm-client-list');
   el.innerHTML = '';
-  const filtered = CRM_CACHE.filter(c =>
-    !filter || c.nom_client.toLowerCase().includes(filter.toLowerCase()));
+  // In anon mode, search by client_id pattern too
+  const filtered = CRM_CACHE.filter(c => {
+    if (!filter) return true;
+    const f = filter.toLowerCase();
+    const dn = displayName(c.nom_client, c.id).toLowerCase();
+    return c.nom_client.toLowerCase().includes(f) || dn.includes(f);
+  });
   document.getElementById('crm-count').textContent = filtered.length + ' actifs';
   filtered.forEach(c => {
     const item = document.createElement('div');
     item.className = 'crm-client-item' + (c.id === SELECTED_CLIENT_ID ? ' active' : '');
     const aum_m = ((c.aum || 0) / 1e6).toFixed(1) + ' M€';
+    const cliName = displayName(c.nom_client, c.id);
     item.innerHTML = '<div class="crm-client-flag">'+flagFor(c.country, c.region)+'</div>'
       + '<div style="flex:1;min-width:0;">'
-      + '<div class="crm-client-name">'+c.nom_client+'</div>'
+      + '<div class="crm-client-name">'+escapeHtml(cliName)+'</div>'
       + '<div class="crm-client-type">'+(c.type_client||'—')+'</div></div>'
       + '<div class="crm-client-aum">'+aum_m+'</div>';
     item.addEventListener('click', () => {
@@ -1034,26 +1083,14 @@ function buildClientList(filter) {
 async function load360(clientId) {
   try {
     const data = await API('/api/clients/' + clientId);
-    document.getElementById('c360-name').textContent = data.nom_client;
+    document.getElementById('c360-name').textContent = displayName(data.nom_client, data.id);
+    const primaryName = ANON ? 'Contact #01' : (data.primary_contact || '');
     document.getElementById('c360-meta').textContent = flagFor(data.country, data.region) + ' '
       + (data.country || data.region || '—') + ' · ' + (data.type_client||'—')
-      + (data.primary_contact ? ' · Contact: ' + data.primary_contact : '');
-    // Transparent Health Score formula (0-100)
-    // 30% AUM (capped at 200M), 25% active deals, 25% activities, 20% KYC
-    const aumScore   = Math.min((data.aum_total || 0) / 200e6, 1) * 30;
-    const dealsScore = Math.min((data.nb_active_deals || 0) / 5, 1) * 25;
-    const actScore   = Math.min((data.nb_activities || 0) / 10, 1) * 25;
-    const kycScore   = data.kyc_status === 'Validé' ? 20 : (data.kyc_status === 'En cours' ? 10 : 0);
-    const score = Math.round(aumScore + dealsScore + actScore + kycScore);
-    const scoreFinal = Math.max(0, Math.min(100, score));
-    const scoreColor = scoreFinal >= 70 ? '#059669' : (scoreFinal >= 40 ? '#F59E0B' : '#DC2626');
-    document.getElementById('c360-score').innerHTML =
-      '<span style="color:'+scoreColor+';">'+scoreFinal+'</span><span style="font-size:13px;color:#9CA3AF;font-weight:400;">/100</span>';
-    const detailEl = document.getElementById('c360-score-detail');
-    if (detailEl) {
-      detailEl.innerHTML = 'AUM: '+Math.round(aumScore)+' · Deals: '+Math.round(dealsScore)
-                         + ' · Act: '+Math.round(actScore)+' · KYC: '+kycScore;
-    }
+      + (primaryName ? ' · Contact: ' + primaryName : '');
+    // AUM total replaces the previous health score
+    const aumEl = document.getElementById('c360-aum-total');
+    if (aumEl) aumEl.textContent = fmtM(data.aum_total || 0);
     // Badges
     const cls = STATUT_BADGE_CLS[data.dominant_statut] || 'tag';
     document.getElementById('c360-badges').innerHTML =
@@ -1070,14 +1107,16 @@ async function load360(clientId) {
     // Network
     renderNetwork(data.network);
     // Contacts
-    document.getElementById('c360-contacts').innerHTML = (data.contacts||[]).map(ct => {
-      const init = ((ct.prenom||'')[0]||'') + ((ct.nom||'')[0]||'');
+    document.getElementById('c360-contacts').innerHTML = (data.contacts||[]).map((ct, i) => {
+      const init = displayInitials(ct.prenom, ct.nom, i);
+      const fullName = displayContact(ct.prenom, ct.nom, i);
+      const email = ANON ? '••••@••••' : (ct.email || '');
       const isPrimary = ct.is_primary;
       return '<div class="crm-contact-row">'
         + '<div class="crm-contact-av" style="background:'+(isPrimary?'#E8EDF5':'#ECFDF5')+';color:'+(isPrimary?'#001c4b':'#059669')+';">'+init.toUpperCase()+'</div>'
         + '<div style="flex:1;min-width:0;">'
-        + '<div style="font-size:12px;font-weight:600;color:#111827;">'+(ct.prenom||'')+' '+(ct.nom||'')+'</div>'
-        + '<div style="font-size:10.5px;color:#9CA3AF;">'+(ct.role||'—')+(ct.email?' · '+ct.email:'')+'</div></div>'
+        + '<div style="font-size:12px;font-weight:600;color:#111827;">'+escapeHtml(fullName)+'</div>'
+        + '<div style="font-size:10.5px;color:#9CA3AF;">'+(ct.role||'—')+(email?' · '+email:'')+'</div></div>'
         + '<span class="crm-badge '+(isPrimary?'navy':'tag')+'" style="font-size:9.5px;">'
         + (isPrimary?'Principal':'Secondaire')+'</span></div>';
     }).join('') || '<div style="color:#9CA3AF;font-size:11.5px;">Aucun contact.</div>';
@@ -1114,34 +1153,62 @@ function renderNetwork(network) {
     canvas.innerHTML = '<div style="display:flex;align-items:center;justify-content:center;height:100%;color:#9CA3AF;font-size:12px;">Aucun réseau.</div>';
     return;
   }
-  // Apply premium styling
   canvas.className = 'network-canvas-pro';
 
   const subs   = network.subsidiaries || [];
   const funds  = network.fund_links || [];
-  const W = 720, H = 340, CX = W/2, CY = H/2;
-  const subCount = Math.max(subs.length, 1);
-  const subRadius = subCount <= 2 ? 130 : (subCount <= 4 ? 150 : 165);
-  const fundRadius = subCount <= 2 ? 250 : (subCount <= 4 ? 280 : 300);
+  const W = 1200, H = 600, CX = W/2, CY = H/2;
+  const rootId = network.root.id;
 
-  // Subsidiary angular positions (top-half priority, then full circle)
-  const subPositions = subs.map((_, i) => {
-    const angle = -Math.PI/2 + (Math.PI * 2 / subCount) * i;
-    return {x: CX + Math.cos(angle) * subRadius, y: CY + Math.sin(angle) * (subRadius * 0.65), angle: angle};
+  // Group fund links by parent client_id
+  const fundsByParent = {};
+  funds.forEach(fl => {
+    const pid = fl.client_id;
+    (fundsByParent[pid] = fundsByParent[pid] || []).push(fl);
   });
 
-  // Fund positions: distributed around outer circle, mapped to nearest subsidiary or root
-  const maxFunds = Math.min(funds.length, 8);
-  const fundPositions = [];
-  for (let i = 0; i < maxFunds; i++) {
-    const angle = -Math.PI/2 + (Math.PI * 2 / Math.max(maxFunds, 1)) * i;
-    fundPositions.push({
-      x: CX + Math.cos(angle) * fundRadius,
-      y: CY + Math.sin(angle) * (fundRadius * 0.45),
-    });
-  }
+  // Subsidiary positions: place on a circle around the center with enough spacing
+  const subCount  = Math.max(subs.length, 1);
+  const subRadius = subCount <= 1 ? 320 : (subCount <= 4 ? 340 : 360);
+  const subPositions = subs.map((_, i) => {
+    // Distribute on full circle, starting at -90° so top is first
+    const angle = -Math.PI/2 + (Math.PI * 2 / subCount) * i;
+    return {
+      x: CX + Math.cos(angle) * subRadius,
+      y: CY + Math.sin(angle) * (subRadius * 0.45), // ellipse, less vertical
+      angle: angle,
+    };
+  });
+  // Build a lookup: client_id → {x, y, angle, isRoot}
+  const anchorByClient = {};
+  anchorByClient[rootId] = {x: CX, y: CY, angle: 0, isRoot: true};
+  subs.forEach((s, i) => {
+    anchorByClient[s.id] = {x: subPositions[i].x, y: subPositions[i].y,
+                              angle: subPositions[i].angle, isRoot: false};
+  });
 
-  // SVG with gradient defs + curved connectors + glow
+  // Fund positions: each fund radiates outward from its anchor, spaced angularly
+  const fundPositions = []; // [{x, y, fund, anchor}]
+  Object.keys(fundsByParent).forEach(pid => {
+    const anchor = anchorByClient[pid] || anchorByClient[rootId];
+    const list = fundsByParent[pid];
+    const baseAngle = anchor.isRoot ? -Math.PI/2 : anchor.angle;
+    const spread = Math.PI / 2.2; // angular fan width
+    list.forEach((fl, idx) => {
+      const t = list.length === 1 ? 0 : (idx / (list.length - 1) - 0.5);
+      const ang = baseAngle + t * spread;
+      // Push outward 180-220px from anchor
+      const dist = anchor.isRoot ? 200 : 180;
+      let fx = anchor.x + Math.cos(ang) * dist;
+      let fy = anchor.y + Math.sin(ang) * (dist * 0.62);
+      // Clamp inside canvas
+      fx = Math.max(70, Math.min(W - 70, fx));
+      fy = Math.max(40, Math.min(H - 40, fy));
+      fundPositions.push({x: fx, y: fy, fund: fl, anchor: anchor});
+    });
+  });
+
+  // SVG with gradient defs + curved connectors
   let svg = '<svg class="net-svg-pro" viewBox="0 0 '+W+' '+H+'" preserveAspectRatio="xMidYMid meet">';
   svg += '<defs>'
     + '<radialGradient id="bgGlow" cx="50%" cy="50%" r="60%">'
@@ -1150,73 +1217,75 @@ function renderNetwork(network) {
     + '</radialGradient>'
     + '<linearGradient id="connFunded" x1="0%" y1="0%" x2="100%" y2="0%">'
     + '<stop offset="0%" stop-color="#019ee1"/>'
-    + '<stop offset="100%" stop-color="#0EA5E9"/>'
-    + '</linearGradient>'
+    + '<stop offset="100%" stop-color="#0EA5E9"/></linearGradient>'
     + '<linearGradient id="connPipeline" x1="0%" y1="0%" x2="100%" y2="0%">'
     + '<stop offset="0%" stop-color="#94A3B8"/>'
-    + '<stop offset="100%" stop-color="#019ee1"/>'
-    + '</linearGradient>'
+    + '<stop offset="100%" stop-color="#64748B"/></linearGradient>'
     + '<linearGradient id="connSub" x1="0%" y1="0%" x2="100%" y2="0%">'
     + '<stop offset="0%" stop-color="#001c4b"/>'
-    + '<stop offset="100%" stop-color="#3060A8"/>'
-    + '</linearGradient>'
-    + '<filter id="softGlow" x="-50%" y="-50%" width="200%" height="200%">'
-    + '<feGaussianBlur stdDeviation="3" result="coloredBlur"/>'
-    + '<feMerge><feMergeNode in="coloredBlur"/><feMergeNode in="SourceGraphic"/></feMerge>'
-    + '</filter>'
+    + '<stop offset="100%" stop-color="#3060A8"/></linearGradient>'
     + '</defs>';
 
   // Background glow
-  svg += '<circle cx="'+CX+'" cy="'+CY+'" r="180" fill="url(#bgGlow)"/>';
+  svg += '<circle cx="'+CX+'" cy="'+CY+'" r="280" fill="url(#bgGlow)"/>';
 
-  // Curved connectors: parent → subsidiaries (smooth bezier)
-  subPositions.forEach((p, i) => {
+  // Parent → subsidiaries connectors (curved bezier)
+  subPositions.forEach((p) => {
     const midX = (CX + p.x) / 2;
-    const midY = (CY + p.y) / 2 - 15;
-    svg += '<path d="M'+CX+','+CY+' Q'+midX+','+midY+' '+p.x+','+p.y+'" stroke="url(#connSub)" stroke-width="2" fill="none" opacity="0.55" stroke-linecap="round"/>';
+    const midY = (CY + p.y) / 2 - 25;
+    svg += '<path d="M'+CX+','+CY+' Q'+midX+','+midY+' '+p.x+','+p.y+'" stroke="url(#connSub)" stroke-width="2.5" fill="none" opacity="0.55" stroke-linecap="round"/>';
   });
 
-  // Fund connectors (curved)
-  fundPositions.forEach((p, i) => {
-    const fl = funds[i];
-    const subIdx = subs.findIndex(s => s.id === fl.client_id);
-    const anchor = subIdx >= 0 ? subPositions[subIdx] : {x: CX, y: CY};
+  // Anchor → fund connectors (curved)
+  fundPositions.forEach((fp) => {
+    const fl = fp.fund;
     const isFunded = fl.statut === 'Funded';
     const grad = isFunded ? 'url(#connFunded)' : 'url(#connPipeline)';
-    const op = isFunded ? '0.7' : '0.35';
-    const w = isFunded ? '1.8' : '1.2';
-    const dash = isFunded ? '' : 'stroke-dasharray="3,4"';
-    const midX = (anchor.x + p.x) / 2;
-    const midY = (anchor.y + p.y) / 2 + 10;
-    svg += '<path d="M'+anchor.x+','+anchor.y+' Q'+midX+','+midY+' '+p.x+','+p.y+'" stroke="'+grad+'" stroke-width="'+w+'" fill="none" opacity="'+op+'" '+dash+' stroke-linecap="round"/>';
+    const op = isFunded ? '0.7' : '0.42';
+    const w  = isFunded ? '2'   : '1.5';
+    const dash = isFunded ? '' : 'stroke-dasharray="4,5"';
+    const a = fp.anchor;
+    const midX = (a.x + fp.x) / 2;
+    const midY = (a.y + fp.y) / 2 + 18;
+    svg += '<path d="M'+a.x+','+a.y+' Q'+midX+','+midY+' '+fp.x+','+fp.y+'" stroke="'+grad+'" stroke-width="'+w+'" fill="none" opacity="'+op+'" '+dash+' stroke-linecap="round"/>';
   });
 
   svg += '</svg>';
 
-  // Nodes (HTML overlay)
-  let nodes = '<div class="net-node center" style="left:calc(50% - 48px);top:calc(50% - 48px);">'
-    + '<div>'+truncate(network.root.nom, 13)+'</div>'
-    + '<div style="font-size:8px;opacity:.7;font-weight:500;margin-top:2px;letter-spacing:.4px;text-transform:uppercase;">Maison mère</div>'
+  // Helper: pixel position → percent absolute placement
+  const pos = (x, y, w, h) => 'left:calc('+(x/W*100).toFixed(2)+'% - '+(w/2)+'px);top:calc('+(y/H*100).toFixed(2)+'% - '+(h/2)+'px);';
+
+  // Center node (parent)
+  const rootName = displayName(network.root.nom, network.root.id);
+  let nodes = '<div class="net-node center" style="'+pos(CX, CY, 130, 130)+'" title="'+escapeHtml(rootName)+'">'
+    + '<div class="net-node-name">'+escapeHtml(rootName)+'</div>'
+    + '<div class="net-node-tag">Maison mère</div>'
     + '</div>';
 
+  // Subsidiaries
   subs.forEach((s, i) => {
     const p = subPositions[i];
-    const lx = (p.x / W * 100).toFixed(2);
-    const ly = (p.y / H * 100).toFixed(2);
-    nodes += '<div class="net-node subsidiary" style="left:calc('+lx+'% - 34px);top:calc('+ly+'% - 34px);">'
-      + '<div>'+truncate(s.nom_client, 11)+'</div>'
-      + '<div style="font-size:8px;opacity:.55;font-weight:500;margin-top:2px;letter-spacing:.3px;text-transform:uppercase;">Filiale</div>'
+    const sName = displayName(s.nom_client, s.id);
+    nodes += '<div class="net-node subsidiary" style="'+pos(p.x, p.y, 104, 104)+'" title="'+escapeHtml(sName)+'">'
+      + '<div class="net-node-name">'+escapeHtml(sName)+'</div>'
+      + '<div class="net-node-tag">Filiale</div>'
       + '</div>';
   });
 
-  fundPositions.forEach((p, i) => {
-    const fund = funds[i];
-    const lx = (p.x / W * 100).toFixed(2);
-    const ly = (p.y / H * 100).toFixed(2);
-    const isFunded = fund.statut === 'Funded';
-    const opacity = isFunded ? '1' : '0.7';
-    nodes += '<div class="net-node fund" style="left:calc('+lx+'% - 27px);top:calc('+ly+'% - 27px);opacity:'+opacity+';" title="'+escapeHtml(fund.fonds + ' · ' + fund.statut)+'">'
-      + truncate(fund.fonds, 8)
+  // Funds — show fonds name + AUM
+  fundPositions.forEach((fp) => {
+    const fl = fp.fund;
+    const isFunded = fl.statut === 'Funded';
+    const cls = isFunded ? 'fund' : 'fund pipeline';
+    const aum = fl.aum || 0;
+    const aumLabel = aum > 0 ? fmtM(aum) : (isFunded ? '—' : 'pipeline');
+    const owner = fl.client_nom ? displayName(fl.client_nom, fl.client_id) : '';
+    const tip = (fl.fonds || '') + ' · ' + (fl.statut || '')
+              + (aum > 0 ? ' · ' + fmtM(aum) : '')
+              + (owner ? ' · ' + owner : '');
+    nodes += '<div class="net-node '+cls+'" style="'+pos(fp.x, fp.y, 108, 62)+'" title="'+escapeHtml(tip)+'">'
+      + '<div class="net-node-name">'+escapeHtml(fl.fonds || '—')+'</div>'
+      + '<div class="net-node-aum">'+escapeHtml(aumLabel)+'</div>'
       + '</div>';
   });
 
@@ -1886,6 +1955,7 @@ async function boot() {
 
 document.getElementById('crm-search').addEventListener('input', e => buildClientList(e.target.value));
 initTop10Controls();
+applyAnonState();
 
 /* ============================================================
    ACTION HANDLERS — CRUD modals + admin actions
@@ -2213,19 +2283,21 @@ async function adminReset() {
   } catch (e) { toast('Erreur: '+e.message, 'error'); }
 }
 
+function _anonQS() { return ANON ? '?anon=1' : ''; }
+
 function adminExportExcel() {
-  window.location.href = '/api/export/excel';
-  toast('Téléchargement Excel…', 'success');
+  window.location.href = '/api/export/excel' + _anonQS();
+  toast('Téléchargement Excel…' + (ANON ? ' (anonymisé)' : ''), 'success');
 }
 
 function adminExportPdf() {
-  window.location.href = '/api/export/pdf';
-  toast('Téléchargement PDF…', 'success');
+  window.location.href = '/api/export/pdf' + _anonQS();
+  toast('Téléchargement PDF…' + (ANON ? ' (anonymisé)' : ''), 'success');
 }
 
 function adminExportPptx() {
-  window.location.href = '/api/export/pptx';
-  toast('Téléchargement PowerPoint…', 'success');
+  window.location.href = '/api/export/pptx' + _anonQS();
+  toast('Téléchargement PowerPoint…' + (ANON ? ' (anonymisé)' : ''), 'success');
 }
 
 async function adminExportMail() {
@@ -2245,8 +2317,8 @@ async function adminExportMail() {
       'Bien cordialement,\n— Meridian Capital CRM');
     // Open mail client + auto-download the PDF for attachment
     window.open('mailto:?subject=' + subject + '&body=' + body, '_blank');
-    setTimeout(() => { window.location.href = '/api/export/pdf'; }, 600);
-    toast('Email + PDF préparés', 'success');
+    setTimeout(() => { window.location.href = '/api/export/pdf' + _anonQS(); }, 600);
+    toast('Email + PDF préparés' + (ANON ? ' (anonymisé)' : ''), 'success');
   } catch (e) {
     toast('Erreur: ' + e.message, 'error');
   }
@@ -2267,6 +2339,7 @@ document.addEventListener('click', e => {
   if (action === 'export-pdf')    adminExportPdf();
   if (action === 'export-pptx')   adminExportPptx();
   if (action === 'export-mail')   adminExportMail();
+  if (action === 'toggle-anon')   toggleAnon();
   if (action === 'edit-deal')     {
     const id = parseInt(t.dataset.id);
     fetch('/api/deals/'+id).then(r => r.json()).then(d => openDealModal(d));

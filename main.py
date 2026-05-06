@@ -381,9 +381,11 @@ def api_client_detail(client_id: int):
 
     network = db.get_client_network(client_id)
     fund_links_clean = [_safe_dict({
-        "fonds":     str(fl.get("fonds", "")),
-        "client_id": int(fl.get("client_id", 0)),
-        "statut":    str(fl.get("statut", "")),
+        "fonds":       str(fl.get("fonds", "")),
+        "client_id":   int(fl.get("client_id", 0)),
+        "client_nom":  str(fl.get("nom_client", "")),
+        "statut":      str(fl.get("statut", "")),
+        "aum":         float(fl.get("aum", 0) or 0),
     }) for fl in network.get("fund_links", [])]
     subs_clean = [_safe_dict({
         "id":          int(s.get("id", 0)),
@@ -1089,18 +1091,79 @@ def api_import_pipeline(file: UploadFile = File(...)):
 
 
 @app.get("/api/export/excel")
-def api_export_excel():
-    data = db.get_excel_backup()
+def api_export_excel(anon: int = 0):
+    if anon:
+        # Generate anonymised version on the fly
+        df_pipe = db.get_pipeline_with_clients().copy()
+        df_pipe["nom_client"] = df_pipe.apply(
+            lambda r: _anonymize_label(r.get("nom_client"), int(r.get("client_id", 0))), axis=1)
+        # Rebuild a minimal Excel with the anonymised pipeline
+        bio = io.BytesIO()
+        with pd.ExcelWriter(bio, engine="openpyxl") as w:
+            df_pipe.to_excel(w, sheet_name="Pipeline_Anonyme", index=False)
+        data = bio.getvalue()
+    else:
+        data = db.get_excel_backup()
+    suffix = "_anon" if anon else ""
     return Response(
         content=data,
         media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
         headers={"Content-Disposition":
-                 "attachment; filename=meridian_backup_{}.xlsx".format(date.today().isoformat())},
+                 "attachment; filename=meridian_backup{}_{}.xlsx".format(suffix, date.today().isoformat())},
     )
 
 
-def _build_pdf_report() -> bytes:
-    """Generate an executive PDF report (KPIs, top deals, sales team, regions)."""
+def _anonymize_label(name: str, client_id: int = 0) -> str:
+    if client_id:
+        return "Client #{:03d}".format(int(client_id))
+    h = abs(hash(str(name or ""))) % 1000
+    return "Client #{:03d}".format(h)
+
+
+def _fmt_aum(v) -> str:
+    try:
+        v = float(v or 0)
+    except (TypeError, ValueError):
+        return "—"
+    if v >= 1e9:  return "{:.2f} Md€".format(v / 1e9)
+    if v >= 1e6:  return "{:.1f} M€".format(v / 1e6)
+    if v >= 1e3:  return "{:.0f} k€".format(v / 1e3)
+    return "{:.0f} €".format(v)
+
+
+def _make_chart_png(plot_fn, w_inch=6.5, h_inch=3.2, dpi=140):
+    """Run plot_fn(ax) under a Meridian-styled matplotlib context, return PNG bytes."""
+    import matplotlib
+    matplotlib.use("Agg")
+    import matplotlib.pyplot as plt
+    plt.rcParams.update({
+        "font.family":         "DejaVu Sans",
+        "font.size":           9,
+        "axes.spines.top":     False,
+        "axes.spines.right":   False,
+        "axes.edgecolor":      "#E5E7EB",
+        "axes.linewidth":      0.6,
+        "axes.labelcolor":     "#001c4b",
+        "xtick.color":         "#374151",
+        "ytick.color":         "#374151",
+        "figure.facecolor":    "#FFFFFF",
+        "axes.facecolor":      "#FFFFFF",
+        "grid.color":          "#F3F4F6",
+        "grid.linewidth":      0.5,
+    })
+    fig, ax = plt.subplots(figsize=(w_inch, h_inch), dpi=dpi)
+    plot_fn(ax)
+    fig.tight_layout()
+    buf = io.BytesIO()
+    fig.savefig(buf, format="png", dpi=dpi, bbox_inches="tight",
+                facecolor="#FFFFFF", pad_inches=0.05)
+    plt.close(fig)
+    buf.seek(0)
+    return buf
+
+
+def _build_pdf_report(anon: bool = False) -> bytes:
+    """Multi-page executive PDF with charts."""
     from reportlab.lib.pagesizes import A4
     from reportlab.lib.units import cm
     from reportlab.lib.styles import ParagraphStyle
@@ -1108,183 +1171,385 @@ def _build_pdf_report() -> bytes:
     from reportlab.lib.enums import TA_LEFT, TA_RIGHT, TA_CENTER
     from reportlab.platypus import (
         SimpleDocTemplate, Paragraph, Spacer, Table, TableStyle, PageBreak,
+        Image as RLImage, KeepTogether,
     )
+    from reportlab.platypus.flowables import Flowable
 
     MARINE = HexColor("#001c4b")
     CIEL   = HexColor("#019ee1")
     GREY   = HexColor("#6B7280")
     LIGHT  = HexColor("#F3F4F6")
-    GREEN  = HexColor("#059669")
     BLANC  = HexColor("#FFFFFF")
+    DARKB  = HexColor("#0F3A7A")
+    SOFT   = HexColor("#7ab8d8")
 
-    s_h1   = ParagraphStyle("h1",   fontName="Helvetica-Bold", fontSize=22, textColor=BLANC, leading=26)
-    s_h2   = ParagraphStyle("h2",   fontName="Helvetica-Bold", fontSize=14, textColor=MARINE, spaceBefore=12, spaceAfter=8)
-    s_meta = ParagraphStyle("meta", fontName="Helvetica",      fontSize=9,  textColor=HexColor("#7ab8d8"), leading=12)
-    s_body = ParagraphStyle("body", fontName="Helvetica",      fontSize=9,  textColor=HexColor("#374151"), leading=12)
-    s_kpi_lbl = ParagraphStyle("kpi_lbl", fontName="Helvetica",      fontSize=8,  textColor=HexColor("#7ab8d8"), alignment=TA_CENTER)
-    s_kpi_val = ParagraphStyle("kpi_val", fontName="Helvetica-Bold", fontSize=16, textColor=BLANC,            alignment=TA_CENTER)
-    s_th      = ParagraphStyle("th",      fontName="Helvetica-Bold", fontSize=8,  textColor=BLANC, alignment=TA_LEFT)
-    s_th_r    = ParagraphStyle("th_r",    fontName="Helvetica-Bold", fontSize=8,  textColor=BLANC, alignment=TA_RIGHT)
-    s_td      = ParagraphStyle("td",      fontName="Helvetica",      fontSize=8.5, textColor=MARINE, alignment=TA_LEFT)
-    s_td_r    = ParagraphStyle("td_r",    fontName="Helvetica",      fontSize=8.5, textColor=MARINE, alignment=TA_RIGHT)
+    PAGE_W, PAGE_H = A4
+    MARGIN_H, MARGIN_V = 2 * cm, 1.8 * cm
+    USABLE_W = PAGE_W - 2 * MARGIN_H
 
-    def fmt(v):
-        v = float(v or 0)
-        if v >= 1e9:  return "{:.2f} Md€".format(v/1e9)
-        if v >= 1e6:  return "{:.1f} M€".format(v/1e6)
-        if v >= 1e3:  return "{:.0f} k€".format(v/1e3)
-        return "{:.0f} €".format(v)
+    class ColorRect(Flowable):
+        def __init__(self, w, h, color):
+            super().__init__()
+            self.width, self.height, self.color = w, h, color
+        def draw(self):
+            self.canv.setFillColor(self.color)
+            self.canv.rect(0, 0, self.width, self.height, fill=1, stroke=0)
 
+    class CoverHero(Flowable):
+        """Full-bleed navy hero section for the cover."""
+        def __init__(self, width, height, title, subtitle, date_str, anon_flag):
+            super().__init__()
+            self.width  = width; self.height = height
+            self.title    = title
+            self.subtitle = subtitle
+            self.date_str = date_str
+            self.anon     = anon_flag
+        def draw(self):
+            c = self.canv
+            c.saveState()
+            c.setFillColor(MARINE)
+            c.rect(0, 0, self.width, self.height, fill=1, stroke=0)
+            c.setFillColor(CIEL)
+            c.rect(0, 0, self.width, 4, fill=1, stroke=0)
+            # Brand mark
+            c.setFillColor(SOFT)
+            c.setFont("Helvetica", 8)
+            c.drawString(22, self.height - 22,
+                         "MERIDIAN CAPITAL  ·  ASSET MANAGEMENT")
+            if self.anon:
+                c.setFillColor(HexColor("#f07d00"))
+                c.setFont("Helvetica-Bold", 8)
+                c.drawRightString(self.width - 22, self.height - 22,
+                                  "MODE ANONYME · COMEX")
+            # Title
+            c.setFillColor(BLANC)
+            c.setFont("Helvetica-Bold", 26)
+            c.drawString(22, self.height - 70, self.title)
+            c.setFillColor(SOFT)
+            c.setFont("Helvetica", 13)
+            c.drawString(22, self.height - 92, self.subtitle)
+            # Date
+            c.setFillColor(SOFT)
+            c.setFont("Helvetica", 10)
+            c.drawString(22, 18, self.date_str.upper())
+            c.restoreState()
+
+    s_h2   = ParagraphStyle("h2",   fontName="Helvetica-Bold", fontSize=13, textColor=MARINE, spaceBefore=10, spaceAfter=6)
+    s_sub  = ParagraphStyle("sub",  fontName="Helvetica-Oblique", fontSize=8.5, textColor=GREY, spaceAfter=8)
+    s_body = ParagraphStyle("body", fontName="Helvetica", fontSize=9, textColor=HexColor("#374151"), leading=12)
+    s_kpi_lbl = ParagraphStyle("kpi_lbl", fontName="Helvetica",      fontSize=8,  textColor=SOFT,  alignment=TA_CENTER)
+    s_kpi_val = ParagraphStyle("kpi_val", fontName="Helvetica-Bold", fontSize=18, textColor=BLANC, alignment=TA_CENTER)
+    s_th      = ParagraphStyle("th",   fontName="Helvetica-Bold", fontSize=8,   textColor=BLANC,  alignment=TA_LEFT)
+    s_th_r    = ParagraphStyle("th_r", fontName="Helvetica-Bold", fontSize=8,   textColor=BLANC,  alignment=TA_RIGHT)
+    s_td      = ParagraphStyle("td",   fontName="Helvetica",      fontSize=8.5, textColor=MARINE, alignment=TA_LEFT)
+    s_td_r    = ParagraphStyle("td_r", fontName="Helvetica",      fontSize=8.5, textColor=MARINE, alignment=TA_RIGHT)
+    s_disc    = ParagraphStyle("disc", fontName="Helvetica-Oblique", fontSize=7, textColor=GREY, alignment=TA_CENTER)
+    s_caption = ParagraphStyle("cap",  fontName="Helvetica-Oblique", fontSize=7.5, textColor=GREY, alignment=TA_CENTER, spaceAfter=6)
+
+    def header_footer(canvas_obj, doc):
+        canvas_obj.saveState()
+        if doc.page > 1:
+            # Top accent line
+            canvas_obj.setStrokeColor(CIEL)
+            canvas_obj.setLineWidth(1.6)
+            canvas_obj.line(0, PAGE_H - 0.4*cm, PAGE_W, PAGE_H - 0.4*cm)
+            # Footer bar
+            canvas_obj.setFillColor(MARINE)
+            canvas_obj.rect(0, 0, PAGE_W, 0.85*cm, fill=1, stroke=0)
+            canvas_obj.setFillColor(SOFT)
+            canvas_obj.setFont("Helvetica", 7)
+            label = "Meridian Capital · Executive Report"
+            if anon:
+                label += "  ·  MODE ANONYME"
+            canvas_obj.drawString(2*cm, 0.3*cm, label)
+            canvas_obj.drawRightString(PAGE_W - 2*cm, 0.3*cm,
+                                        "Page {} · CONFIDENTIEL".format(doc.page))
+        canvas_obj.restoreState()
+
+    deals_all = api_deals()
+    sales     = api_sales()
+    regions   = api_regions()
+    k         = api_kpis()
+    funds_agg = api_funds_aggregate()
+
+    if anon:
+        for d in deals_all:
+            d["client"] = _anonymize_label(d.get("client"), d.get("client_id", 0))
+        # Sales reps stay (internal staff), but their owner names in deals stay too.
+
+    funded = [d for d in deals_all if d["statut"] == "Funded"]
+    funded_sorted = sorted(funded, key=lambda d: d["funded_aum"], reverse=True)
+
+    # ── BUILD ─────────────────────────────────────────────────
     buf = io.BytesIO()
     doc = SimpleDocTemplate(buf, pagesize=A4,
-                            leftMargin=2*cm, rightMargin=2*cm,
-                            topMargin=1.6*cm, bottomMargin=1.4*cm,
+                            leftMargin=MARGIN_H, rightMargin=MARGIN_H,
+                            topMargin=1.4*cm, bottomMargin=1.4*cm,
                             title="Meridian Capital — Executive Report",
                             author="Meridian Capital Partners")
     story = []
 
-    # ── COVER ─────────────────────────────────────────────────
-    cover_text = ("<font color='#7ab8d8' size='8'>CONFIDENTIEL · USAGE INTERNE</font><br/><br/>"
-                  + "<b>Meridian Capital</b><br/>"
-                  + "<font size='14'>Executive Report</font><br/>"
-                  + "<font color='#7ab8d8' size='9'>" + date.today().strftime("%d %B %Y").upper() + "</font>")
-    cover = Table([[Paragraph(cover_text, s_h1)]], colWidths=[doc.width])
-    cover.setStyle(TableStyle([
-        ("BACKGROUND",    (0,0),(-1,-1), MARINE),
-        ("TOPPADDING",    (0,0),(-1,-1), 36),
-        ("BOTTOMPADDING", (0,0),(-1,-1), 36),
-        ("LEFTPADDING",   (0,0),(-1,-1), 22),
-    ]))
-    story.append(cover)
+    # ── PAGE 1 — COVER + KPIs ─────────────────────────────────────────────
+    story.append(CoverHero(USABLE_W, 200,
+                            "Executive Report",
+                            "Pipeline · Performance · Distribution",
+                            date.today().strftime("%d %B %Y"), anon))
     story.append(Spacer(1, 14))
 
-    # ── KPI ROW ─────────────────────────────────────────────────
-    k = api_kpis()
-    kpis = [
-        ("AUM Financé Total", fmt(k["total_funded"])),
-        ("Pipeline Actif",    fmt(k["pipeline_actif"])),
-        ("Pipeline Pondéré",  fmt(k["weighted_pipeline"])),
-        ("Conversion",        "{:.1f} %".format(k["taux_conversion"])),
+    kpi_items = [
+        ("AUM Financé Total",  _fmt_aum(k["total_funded"])),
+        ("Pipeline Actif",     _fmt_aum(k["pipeline_actif"])),
+        ("Pipeline Pondéré",   _fmt_aum(k["weighted_pipeline"])),
+        ("Taux de Conversion", "{:.1f} %".format(k["taux_conversion"])),
     ]
-    kpi_data = [[Paragraph(lbl, s_kpi_lbl) for lbl, _ in kpis],
-                [Paragraph(val, s_kpi_val) for _, val in kpis]]
-    kpi_tbl = Table(kpi_data, colWidths=[doc.width/4]*4, rowHeights=[14, 26])
+    kpi_tbl = Table(
+        [[Paragraph(lbl, s_kpi_lbl) for lbl, _ in kpi_items],
+         [Paragraph(val, s_kpi_val) for _, val in kpi_items]],
+        colWidths=[USABLE_W / 4] * 4,
+        rowHeights=[0.7*cm, 1.2*cm],
+    )
     kpi_tbl.setStyle(TableStyle([
         ("BACKGROUND",    (0,0),(-1,-1), MARINE),
-        ("LINEAFTER",     (0,0),(2,-1),  0.4, CIEL),
-        ("TOPPADDING",    (0,0),(-1,-1), 7),
-        ("BOTTOMPADDING", (0,0),(-1,-1), 7),
+        ("LINEAFTER",     (0,0),(2,-1),  0.6, CIEL),
+        ("VALIGN",        (0,0),(-1,-1), "MIDDLE"),
+        ("TOPPADDING",    (0,0),(-1,-1), 6),
+        ("BOTTOMPADDING", (0,0),(-1,-1), 6),
     ]))
     story.append(kpi_tbl)
     story.append(Spacer(1, 14))
 
-    # ── TOP DEALS ─────────────────────────────────────────────────
-    story.append(Paragraph("Top Deals — Funded AUM", s_h2))
-    deals = api_deals()
-    funded = [d for d in deals if d["statut"] == "Funded"][:10]
-    if funded:
-        ratios = [0.05, 0.32, 0.20, 0.17, 0.13, 0.13]
-        col_w  = [doc.width * r for r in ratios]
-        rows = [[Paragraph(h, s_th_r if i==0 or i==5 else s_th)
-                 for i, h in enumerate(["#", "Client", "Fonds", "Pays", "Commercial", "AUM Financé"])]]
-        for i, d in enumerate(funded, 1):
+    # Summary stats line
+    nb_clients = api_mini_stats()["nb_clients"]
+    nb_deals_active = k.get("nb_deals_actifs", 0)
+    nb_funded       = k.get("nb_funded", 0)
+    summary_html = (
+        "<font color='#001c4b' size='10'><b>Synthèse exécutive.</b></font> "
+        + "Le portefeuille compte <b>{nb_clients} client(s)</b>, "
+        + "<b>{nb_funded} deal(s) Funded</b> et <b>{nb_active} deal(s) actif(s)</b> "
+        + "couvrant <b>{nb_regions} région(s)</b> et <b>{nb_funds} fonds</b>. "
+        + "Le pipeline pondéré (probabilité de closing) atteint <b>{wp}</b>, "
+        + "soit un potentiel additionnel de <b>{wp_pct:.0f} %</b> de l'AUM financé."
+    ).format(
+        nb_clients=nb_clients, nb_funded=nb_funded,
+        nb_active=nb_deals_active, nb_regions=len(regions), nb_funds=len(funds_agg),
+        wp=_fmt_aum(k["weighted_pipeline"]),
+        wp_pct=(k["weighted_pipeline"] / k["total_funded"] * 100)
+                if k["total_funded"] > 0 else 0,
+    )
+    story.append(Paragraph(summary_html, s_body))
+    story.append(Spacer(1, 14))
+
+    # ── CHART 1 — AUM par fonds (horizontal bar) ──────────────────────────
+    story.append(Paragraph("Distribution AUM par fonds", s_h2))
+    story.append(Paragraph("Concentration des encours financés sur les principaux véhicules.", s_sub))
+    if funds_agg:
+        items = sorted(funds_agg.items(), key=lambda x: x[1], reverse=True)[:8]
+        names = [n for n, _ in items]
+        vals  = [v for _, v in items]
+        def plot_funds(ax):
+            colors = ["#001c4b","#1a5e8a","#3060A8","#6BAED6","#94A3B8","#CBD5E1","#9AB0CF","#E5E7EB"]
+            bars = ax.barh(range(len(names)), [v/1e6 for v in vals],
+                           color=colors[:len(names)], edgecolor="white", height=0.7)
+            ax.set_yticks(range(len(names)))
+            ax.set_yticklabels(names, fontsize=9, color="#001c4b")
+            ax.invert_yaxis()
+            ax.set_xlabel("AUM (M€)", fontsize=8, color="#6B7280")
+            ax.tick_params(axis="x", labelsize=7.5, color="#94A3B8")
+            ax.grid(axis="x", alpha=0.3)
+            for i, b in enumerate(bars):
+                w = b.get_width()
+                ax.text(w + max(vals)/1e6 * 0.012, b.get_y() + b.get_height()/2,
+                        _fmt_aum(vals[i]), va="center", fontsize=8,
+                        color="#001c4b", fontweight="bold")
+            ax.set_xlim(0, max(vals)/1e6 * 1.22)
+        png = _make_chart_png(plot_funds, w_inch=6.7, h_inch=2.8)
+        story.append(RLImage(png, width=USABLE_W, height=USABLE_W * 0.42))
+        story.append(Paragraph("Figure 1 — AUM Financé par fonds (M€)", s_caption))
+    story.append(PageBreak())
+
+    # ── PAGE 2 — TOP 10 DEALS ─────────────────────────────────────────────
+    story.append(Paragraph("Top Deals — AUM Financé", s_h2))
+    story.append(Paragraph("Classement des dix plus importants deals Funded.", s_sub))
+    if funded_sorted:
+        ratios = [0.05, 0.30, 0.20, 0.16, 0.16, 0.13]
+        col_w  = [USABLE_W * r for r in ratios]
+        rows = [[Paragraph(h, s_th_r if i in (0, 5) else s_th)
+                 for i, h in enumerate(["#", "Client", "Fonds", "Pays / Région", "Commercial", "AUM Financé"])]]
+        for i, d in enumerate(funded_sorted[:10], 1):
             rows.append([
                 Paragraph(str(i), s_td_r),
-                Paragraph((d["client"] or "")[:40], s_td),
-                Paragraph((d["fonds"] or "")[:24], s_td),
+                Paragraph(str(d["client"])[:36], s_td),
+                Paragraph(str(d.get("fonds", ""))[:24], s_td),
                 Paragraph((d.get("country") or d.get("region") or "—")[:18], s_td),
-                Paragraph((d.get("sales_owner") or "—")[:20], s_td),
-                Paragraph(fmt(d["funded_aum"]), s_td_r),
+                Paragraph(str(d.get("sales_owner", "—"))[:20], s_td),
+                Paragraph(_fmt_aum(d["funded_aum"]), s_td_r),
             ])
         tbl = Table(rows, colWidths=col_w, repeatRows=1)
         tbl.setStyle(TableStyle([
-            ("BACKGROUND", (0,0),(-1,0), MARINE),
-            ("LINEBELOW",  (0,0),(-1,0), 1.2, CIEL),
+            ("BACKGROUND",     (0,0),(-1,0), MARINE),
+            ("LINEBELOW",      (0,0),(-1,0), 1.4, CIEL),
             ("ROWBACKGROUNDS", (0,1),(-1,-1), [LIGHT, BLANC]),
-            ("VALIGN",     (0,0),(-1,-1), "MIDDLE"),
-            ("TOPPADDING", (0,0),(-1,-1), 4),
-            ("BOTTOMPADDING", (0,0),(-1,-1), 4),
-            ("LEFTPADDING",   (0,0),(-1,-1), 6),
-            ("RIGHTPADDING",  (0,0),(-1,-1), 6),
+            ("VALIGN",         (0,0),(-1,-1), "MIDDLE"),
+            ("TOPPADDING",     (0,0),(-1,-1), 5),
+            ("BOTTOMPADDING",  (0,0),(-1,-1), 5),
+            ("LEFTPADDING",    (0,0),(-1,-1), 6),
+            ("RIGHTPADDING",   (0,0),(-1,-1), 6),
         ]))
         story.append(tbl)
     else:
-        story.append(Paragraph("Aucun deal funded enregistré.", s_body))
-    story.append(Spacer(1, 14))
+        story.append(Paragraph("Aucun deal Funded enregistré.", s_body))
 
-    # ── SALES TEAM ─────────────────────────────────────────────────
+    story.append(Spacer(1, 16))
+    story.append(Paragraph("Statuts du pipeline", s_h2))
+    story.append(Paragraph("Répartition des deals par étape (count).", s_sub))
+    statut_rep = k.get("statut_repartition", {})
+    if statut_rep:
+        order = ["Prospect", "Initial Pitch", "Due Diligence", "Soft Commit", "Funded", "Lost", "Paused", "Redeemed"]
+        labels_p = [s for s in order if statut_rep.get(s, 0) > 0]
+        vals_p   = [statut_rep[s] for s in labels_p]
+        def plot_funnel(ax):
+            colors = {"Prospect":"#94A3B8","Initial Pitch":"#6BAED6",
+                      "Due Diligence":"#3060A8","Soft Commit":"#1a5e8a",
+                      "Funded":"#001c4b","Lost":"#DC2626","Paused":"#A1A1AA","Redeemed":"#7C3AED"}
+            bars = ax.barh(range(len(labels_p)), vals_p,
+                           color=[colors.get(l, "#001c4b") for l in labels_p],
+                           edgecolor="white", height=0.65)
+            ax.set_yticks(range(len(labels_p)))
+            ax.set_yticklabels(labels_p, fontsize=9, color="#001c4b")
+            ax.invert_yaxis()
+            ax.set_xlabel("Nombre de deals", fontsize=8, color="#6B7280")
+            ax.grid(axis="x", alpha=0.3)
+            for i, b in enumerate(bars):
+                ax.text(b.get_width() + 0.1, b.get_y() + b.get_height()/2,
+                        str(vals_p[i]), va="center", fontsize=8,
+                        color="#001c4b", fontweight="bold")
+            ax.set_xlim(0, max(vals_p) * 1.18)
+        png = _make_chart_png(plot_funnel, w_inch=6.7, h_inch=2.4)
+        story.append(RLImage(png, width=USABLE_W, height=USABLE_W * 0.36))
+        story.append(Paragraph("Figure 2 — Distribution des deals par statut", s_caption))
+    story.append(PageBreak())
+
+    # ── PAGE 3 — SALES PERFORMANCE ─────────────────────────────────────────
     story.append(Paragraph("Performance commerciale", s_h2))
-    sales = api_sales()
+    story.append(Paragraph("AUM Financé et Pipeline actif par membre de l'équipe commerciale.", s_sub))
     if sales:
-        ratios = [0.30, 0.18, 0.20, 0.17, 0.15]
-        col_w  = [doc.width * r for r in ratios]
+        labels_s = [s["nom"][:18] for s in sales]
+        funded_s = [s["funded_aum"]/1e6 for s in sales]
+        pipe_s   = [s["pipeline_aum"]/1e6 for s in sales]
+        def plot_sales(ax):
+            import numpy as _np
+            x = _np.arange(len(labels_s))
+            w = 0.35
+            ax.bar(x - w/2, funded_s, w, color="#001c4b", label="AUM Funded", edgecolor="white")
+            ax.bar(x + w/2, pipe_s,  w, color="#019ee1", label="AUM Pipeline", edgecolor="white")
+            ax.set_xticks(x); ax.set_xticklabels(labels_s, fontsize=9, color="#001c4b")
+            ax.set_ylabel("AUM (M€)", fontsize=8, color="#6B7280")
+            ax.legend(fontsize=8, frameon=False, labelcolor="#001c4b", loc="upper right")
+            ax.grid(axis="y", alpha=0.3)
+            for i, v in enumerate(funded_s):
+                if v > 0: ax.text(i - w/2, v + max(funded_s+pipe_s)*0.01,
+                                  "{:.0f}".format(v), ha="center", fontsize=7.5, color="#001c4b")
+            for i, v in enumerate(pipe_s):
+                if v > 0: ax.text(i + w/2, v + max(funded_s+pipe_s)*0.01,
+                                  "{:.0f}".format(v), ha="center", fontsize=7.5, color="#019ee1")
+        png = _make_chart_png(plot_sales, w_inch=6.7, h_inch=3.0)
+        story.append(RLImage(png, width=USABLE_W, height=USABLE_W * 0.45))
+        story.append(Paragraph("Figure 3 — AUM Funded vs Pipeline par commercial (M€)", s_caption))
+        story.append(Spacer(1, 10))
+
+        # Sales table
+        ratios = [0.32, 0.18, 0.20, 0.16, 0.14]
+        col_w  = [USABLE_W * r for r in ratios]
         rows = [[Paragraph(h, s_th_r if i in (1,2,4) else s_th)
                  for i, h in enumerate(["Commercial", "AUM Financé", "Pipeline Actif", "Marché", "Conversion"])]]
         for s in sales:
             rows.append([
-                Paragraph(s["nom"][:32], s_td),
-                Paragraph(fmt(s["funded_aum"]), s_td_r),
-                Paragraph(fmt(s["pipeline_aum"]), s_td_r),
+                Paragraph(s["nom"][:30], s_td),
+                Paragraph(_fmt_aum(s["funded_aum"]), s_td_r),
+                Paragraph(_fmt_aum(s["pipeline_aum"]), s_td_r),
                 Paragraph(s.get("marche", "")[:18], s_td),
                 Paragraph("{} %".format(s["conversion"]), s_td_r),
             ])
         tbl = Table(rows, colWidths=col_w, repeatRows=1)
         tbl.setStyle(TableStyle([
-            ("BACKGROUND", (0,0),(-1,0), MARINE),
-            ("LINEBELOW",  (0,0),(-1,0), 1.2, CIEL),
+            ("BACKGROUND",     (0,0),(-1,0), MARINE),
+            ("LINEBELOW",      (0,0),(-1,0), 1.4, CIEL),
             ("ROWBACKGROUNDS", (0,1),(-1,-1), [LIGHT, BLANC]),
-            ("VALIGN",     (0,0),(-1,-1), "MIDDLE"),
-            ("TOPPADDING", (0,0),(-1,-1), 4),
-            ("BOTTOMPADDING", (0,0),(-1,-1), 4),
-            ("LEFTPADDING",   (0,0),(-1,-1), 6),
-            ("RIGHTPADDING",  (0,0),(-1,-1), 6),
+            ("VALIGN",         (0,0),(-1,-1), "MIDDLE"),
+            ("TOPPADDING",     (0,0),(-1,-1), 5),
+            ("BOTTOMPADDING",  (0,0),(-1,-1), 5),
+            ("LEFTPADDING",    (0,0),(-1,-1), 6),
+            ("RIGHTPADDING",   (0,0),(-1,-1), 6),
         ]))
         story.append(tbl)
     else:
         story.append(Paragraph("Équipe commerciale non renseignée.", s_body))
-    story.append(Spacer(1, 14))
+    story.append(PageBreak())
 
-    # ── REGIONS ─────────────────────────────────────────────────
-    story.append(Paragraph("AUM Financé par région", s_h2))
-    regions = api_regions()
+    # ── PAGE 4 — REGIONAL DISTRIBUTION ─────────────────────────────────────
+    story.append(Paragraph("Distribution géographique", s_h2))
+    story.append(Paragraph("Répartition de l'AUM Financé par région.", s_sub))
     if regions:
+        labels_r = [r["region"] for r in regions]
+        vals_r   = [r["aum"]    for r in regions]
+        def plot_regions(ax):
+            colors = ["#001c4b","#1a5e8a","#3060A8","#6BAED6","#94A3B8","#CBD5E1"]
+            wedges, _, autotxt = ax.pie(vals_r, labels=labels_r,
+                                          colors=colors[:len(labels_r)],
+                                          autopct="%1.0f%%", pctdistance=0.78,
+                                          wedgeprops={"width": 0.45, "edgecolor": "white", "linewidth": 1.4},
+                                          textprops={"fontsize": 8.5, "color":"#001c4b"})
+            for at in autotxt:
+                at.set_color("white"); at.set_fontweight("bold"); at.set_fontsize(8)
+            total = sum(vals_r)
+            ax.text(0, 0.05, _fmt_aum(total), ha="center", va="center",
+                    fontsize=11, fontweight="bold", color="#001c4b")
+            ax.text(0, -0.10, "AUM Financé total", ha="center", va="center",
+                    fontsize=7.5, color="#6B7280")
+        png = _make_chart_png(plot_regions, w_inch=5.6, h_inch=3.0)
+        story.append(RLImage(png, width=USABLE_W * 0.7, height=USABLE_W * 0.4))
+        story.append(Paragraph("Figure 4 — Répartition AUM Financé par région", s_caption))
+        story.append(Spacer(1, 10))
+
+        # Regions table
         ratios = [0.50, 0.30, 0.20]
-        col_w  = [doc.width * r for r in ratios]
-        rows = [[Paragraph(h, s_th_r if i>0 else s_th)
+        col_w  = [USABLE_W * r for r in ratios]
+        total = sum(vals_r) or 1
+        rows = [[Paragraph(h, s_th_r if i > 0 else s_th)
                  for i, h in enumerate(["Région", "AUM Financé", "Part"])]]
-        total = sum(r["aum"] for r in regions) or 1
         for r in regions:
             pct = r["aum"] / total * 100
             rows.append([
                 Paragraph(r["region"], s_td),
-                Paragraph(fmt(r["aum"]), s_td_r),
+                Paragraph(_fmt_aum(r["aum"]), s_td_r),
                 Paragraph("{:.1f} %".format(pct), s_td_r),
             ])
         tbl = Table(rows, colWidths=col_w, repeatRows=1)
         tbl.setStyle(TableStyle([
-            ("BACKGROUND", (0,0),(-1,0), MARINE),
-            ("LINEBELOW",  (0,0),(-1,0), 1.2, CIEL),
+            ("BACKGROUND",     (0,0),(-1,0), MARINE),
+            ("LINEBELOW",      (0,0),(-1,0), 1.4, CIEL),
             ("ROWBACKGROUNDS", (0,1),(-1,-1), [LIGHT, BLANC]),
-            ("VALIGN",     (0,0),(-1,-1), "MIDDLE"),
-            ("TOPPADDING", (0,0),(-1,-1), 4),
-            ("BOTTOMPADDING", (0,0),(-1,-1), 4),
-            ("LEFTPADDING",   (0,0),(-1,-1), 6),
-            ("RIGHTPADDING",  (0,0),(-1,-1), 6),
+            ("VALIGN",         (0,0),(-1,-1), "MIDDLE"),
+            ("TOPPADDING",     (0,0),(-1,-1), 5),
+            ("BOTTOMPADDING",  (0,0),(-1,-1), 5),
+            ("LEFTPADDING",    (0,0),(-1,-1), 6),
+            ("RIGHTPADDING",   (0,0),(-1,-1), 6),
         ]))
         story.append(tbl)
+    else:
+        story.append(Paragraph("Aucune donnée régionale.", s_body))
 
-    story.append(Spacer(1, 22))
+    story.append(Spacer(1, 16))
     story.append(Paragraph(
         "<i>Document strictement confidentiel · usage interne exclusif. "
-        "Reproduction et diffusion externe interdites.</i>",
-        ParagraphStyle("disc", fontName="Helvetica-Oblique", fontSize=7,
-                       textColor=GREY, alignment=TA_CENTER)))
+        "Reproduction et diffusion externe interdites. Les performances passées "
+        "ne préjugent pas des performances futures.</i>", s_disc))
 
-    doc.build(story)
+    doc.build(story, onFirstPage=header_footer, onLaterPages=header_footer)
     return buf.getvalue()
 
 
-def _build_pptx_report() -> bytes:
+def _build_pptx_report(anon: bool = False) -> bytes:
     """Generate a 3-slide executive PPTX (Cover, KPIs, Top Deals)."""
     from pptx import Presentation
     from pptx.util import Inches, Pt
@@ -1332,7 +1597,7 @@ def _build_pptx_report() -> bytes:
     s1 = prs.slides.add_slide(blank)
     rect(s1, 0, 0, 13.33, 2.6, MARINE)
     rect(s1, 0, 2.6, 13.33, 0.06, CIEL)
-    text(s1, "MERIDIAN CAPITAL — EXECUTIVE REPORT",
+    text(s1, "MERIDIAN CAPITAL — EXECUTIVE REPORT" + ("  ·  MODE ANONYME" if anon else ""),
          0.5, 0.4, 12.0, 0.4, 11, color=CIEL)
     text(s1, "Pipeline & Performance",
          0.5, 0.85, 12.0, 0.9, 32, bold=True, color=BLANC)
@@ -1364,6 +1629,8 @@ def _build_pptx_report() -> bytes:
          color=rgb("#7ab8d8"), align=PP_ALIGN.RIGHT)
 
     deals = [d for d in api_deals() if d["statut"] == "Funded"][:10]
+    if anon:
+        deals = [dict(d, client=_anonymize_label(d.get("client"), d.get("client_id", 0))) for d in deals]
     headers = ["#", "Client", "Fonds", "Pays", "Commercial", "AUM Financ\u00e9"]
     col_w = [0.55, 3.6, 2.1, 1.7, 2.0, 2.0]
     col_x = [0.5]
@@ -1431,24 +1698,26 @@ def _build_pptx_report() -> bytes:
 
 
 @app.get("/api/export/pdf")
-def api_export_pdf():
-    data = _build_pdf_report()
+def api_export_pdf(anon: int = 0):
+    data = _build_pdf_report(anon=bool(anon))
+    suffix = "_anon" if anon else ""
     return Response(
         content=data,
         media_type="application/pdf",
         headers={"Content-Disposition":
-                 "attachment; filename=meridian_executive_{}.pdf".format(date.today().isoformat())},
+                 "attachment; filename=meridian_executive{}_{}.pdf".format(suffix, date.today().isoformat())},
     )
 
 
 @app.get("/api/export/pptx")
-def api_export_pptx():
-    data = _build_pptx_report()
+def api_export_pptx(anon: int = 0):
+    data = _build_pptx_report(anon=bool(anon))
+    suffix = "_anon" if anon else ""
     return Response(
         content=data,
         media_type="application/vnd.openxmlformats-officedocument.presentationml.presentation",
         headers={"Content-Disposition":
-                 "attachment; filename=meridian_executive_{}.pptx".format(date.today().isoformat())},
+                 "attachment; filename=meridian_executive{}_{}.pptx".format(suffix, date.today().isoformat())},
     )
 
 

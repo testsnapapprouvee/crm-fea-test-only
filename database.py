@@ -1269,12 +1269,23 @@ def get_client_network(client_id):
     all_entity_ids = [root_id] + [s["id"] for s in subsidiaries]
     placeholders = ",".join("?" * len(all_entity_ids))
     c.execute(
-        "SELECT DISTINCT p.fonds, p.client_id, p.statut FROM pipeline p"
+        "SELECT p.fonds, p.client_id, p.statut, p.funded_aum,"
+        "       p.revised_aum, p.target_aum_initial, c.nom_client"
+        " FROM pipeline p"
+        " JOIN clients c ON c.id = p.client_id"
         " WHERE p.client_id IN ({}) AND p.statut IN"
         " ('Funded','Prospect','Initial Pitch','Due Diligence','Soft Commit')"
-        " ORDER BY p.fonds".format(placeholders),
+        " ORDER BY p.statut DESC, p.fonds".format(placeholders),
         all_entity_ids)
-    fund_links = [dict(r) for r in c.fetchall()]
+    fund_links = []
+    for r in c.fetchall():
+        d = dict(r)
+        if d["statut"] == "Funded":
+            d["aum"] = float(d.get("funded_aum") or 0)
+        else:
+            rev = float(d.get("revised_aum") or 0)
+            d["aum"] = rev if rev > 0 else float(d.get("target_aum_initial") or 0)
+        fund_links.append(d)
 
     conn.close()
     return {
