@@ -1099,6 +1099,359 @@ def api_export_excel():
     )
 
 
+def _build_pdf_report() -> bytes:
+    """Generate an executive PDF report (KPIs, top deals, sales team, regions)."""
+    from reportlab.lib.pagesizes import A4
+    from reportlab.lib.units import cm
+    from reportlab.lib.styles import ParagraphStyle
+    from reportlab.lib.colors import HexColor
+    from reportlab.lib.enums import TA_LEFT, TA_RIGHT, TA_CENTER
+    from reportlab.platypus import (
+        SimpleDocTemplate, Paragraph, Spacer, Table, TableStyle, PageBreak,
+    )
+
+    MARINE = HexColor("#001c4b")
+    CIEL   = HexColor("#019ee1")
+    GREY   = HexColor("#6B7280")
+    LIGHT  = HexColor("#F3F4F6")
+    GREEN  = HexColor("#059669")
+    BLANC  = HexColor("#FFFFFF")
+
+    s_h1   = ParagraphStyle("h1",   fontName="Helvetica-Bold", fontSize=22, textColor=BLANC, leading=26)
+    s_h2   = ParagraphStyle("h2",   fontName="Helvetica-Bold", fontSize=14, textColor=MARINE, spaceBefore=12, spaceAfter=8)
+    s_meta = ParagraphStyle("meta", fontName="Helvetica",      fontSize=9,  textColor=HexColor("#7ab8d8"), leading=12)
+    s_body = ParagraphStyle("body", fontName="Helvetica",      fontSize=9,  textColor=HexColor("#374151"), leading=12)
+    s_kpi_lbl = ParagraphStyle("kpi_lbl", fontName="Helvetica",      fontSize=8,  textColor=HexColor("#7ab8d8"), alignment=TA_CENTER)
+    s_kpi_val = ParagraphStyle("kpi_val", fontName="Helvetica-Bold", fontSize=16, textColor=BLANC,            alignment=TA_CENTER)
+    s_th      = ParagraphStyle("th",      fontName="Helvetica-Bold", fontSize=8,  textColor=BLANC, alignment=TA_LEFT)
+    s_th_r    = ParagraphStyle("th_r",    fontName="Helvetica-Bold", fontSize=8,  textColor=BLANC, alignment=TA_RIGHT)
+    s_td      = ParagraphStyle("td",      fontName="Helvetica",      fontSize=8.5, textColor=MARINE, alignment=TA_LEFT)
+    s_td_r    = ParagraphStyle("td_r",    fontName="Helvetica",      fontSize=8.5, textColor=MARINE, alignment=TA_RIGHT)
+
+    def fmt(v):
+        v = float(v or 0)
+        if v >= 1e9:  return "{:.2f} Md€".format(v/1e9)
+        if v >= 1e6:  return "{:.1f} M€".format(v/1e6)
+        if v >= 1e3:  return "{:.0f} k€".format(v/1e3)
+        return "{:.0f} €".format(v)
+
+    buf = io.BytesIO()
+    doc = SimpleDocTemplate(buf, pagesize=A4,
+                            leftMargin=2*cm, rightMargin=2*cm,
+                            topMargin=1.6*cm, bottomMargin=1.4*cm,
+                            title="Meridian Capital — Executive Report",
+                            author="Meridian Capital Partners")
+    story = []
+
+    # ── COVER ─────────────────────────────────────────────────
+    cover_text = ("<font color='#7ab8d8' size='8'>CONFIDENTIEL · USAGE INTERNE</font><br/><br/>"
+                  + "<b>Meridian Capital</b><br/>"
+                  + "<font size='14'>Executive Report</font><br/>"
+                  + "<font color='#7ab8d8' size='9'>" + date.today().strftime("%d %B %Y").upper() + "</font>")
+    cover = Table([[Paragraph(cover_text, s_h1)]], colWidths=[doc.width])
+    cover.setStyle(TableStyle([
+        ("BACKGROUND",    (0,0),(-1,-1), MARINE),
+        ("TOPPADDING",    (0,0),(-1,-1), 36),
+        ("BOTTOMPADDING", (0,0),(-1,-1), 36),
+        ("LEFTPADDING",   (0,0),(-1,-1), 22),
+    ]))
+    story.append(cover)
+    story.append(Spacer(1, 14))
+
+    # ── KPI ROW ─────────────────────────────────────────────────
+    k = api_kpis()
+    kpis = [
+        ("AUM Financé Total", fmt(k["total_funded"])),
+        ("Pipeline Actif",    fmt(k["pipeline_actif"])),
+        ("Pipeline Pondéré",  fmt(k["weighted_pipeline"])),
+        ("Conversion",        "{:.1f} %".format(k["taux_conversion"])),
+    ]
+    kpi_data = [[Paragraph(lbl, s_kpi_lbl) for lbl, _ in kpis],
+                [Paragraph(val, s_kpi_val) for _, val in kpis]]
+    kpi_tbl = Table(kpi_data, colWidths=[doc.width/4]*4, rowHeights=[14, 26])
+    kpi_tbl.setStyle(TableStyle([
+        ("BACKGROUND",    (0,0),(-1,-1), MARINE),
+        ("LINEAFTER",     (0,0),(2,-1),  0.4, CIEL),
+        ("TOPPADDING",    (0,0),(-1,-1), 7),
+        ("BOTTOMPADDING", (0,0),(-1,-1), 7),
+    ]))
+    story.append(kpi_tbl)
+    story.append(Spacer(1, 14))
+
+    # ── TOP DEALS ─────────────────────────────────────────────────
+    story.append(Paragraph("Top Deals — Funded AUM", s_h2))
+    deals = api_deals()
+    funded = [d for d in deals if d["statut"] == "Funded"][:10]
+    if funded:
+        ratios = [0.05, 0.32, 0.20, 0.17, 0.13, 0.13]
+        col_w  = [doc.width * r for r in ratios]
+        rows = [[Paragraph(h, s_th_r if i==0 or i==5 else s_th)
+                 for i, h in enumerate(["#", "Client", "Fonds", "Pays", "Commercial", "AUM Financé"])]]
+        for i, d in enumerate(funded, 1):
+            rows.append([
+                Paragraph(str(i), s_td_r),
+                Paragraph((d["client"] or "")[:40], s_td),
+                Paragraph((d["fonds"] or "")[:24], s_td),
+                Paragraph((d.get("country") or d.get("region") or "—")[:18], s_td),
+                Paragraph((d.get("sales_owner") or "—")[:20], s_td),
+                Paragraph(fmt(d["funded_aum"]), s_td_r),
+            ])
+        tbl = Table(rows, colWidths=col_w, repeatRows=1)
+        tbl.setStyle(TableStyle([
+            ("BACKGROUND", (0,0),(-1,0), MARINE),
+            ("LINEBELOW",  (0,0),(-1,0), 1.2, CIEL),
+            ("ROWBACKGROUNDS", (0,1),(-1,-1), [LIGHT, BLANC]),
+            ("VALIGN",     (0,0),(-1,-1), "MIDDLE"),
+            ("TOPPADDING", (0,0),(-1,-1), 4),
+            ("BOTTOMPADDING", (0,0),(-1,-1), 4),
+            ("LEFTPADDING",   (0,0),(-1,-1), 6),
+            ("RIGHTPADDING",  (0,0),(-1,-1), 6),
+        ]))
+        story.append(tbl)
+    else:
+        story.append(Paragraph("Aucun deal funded enregistré.", s_body))
+    story.append(Spacer(1, 14))
+
+    # ── SALES TEAM ─────────────────────────────────────────────────
+    story.append(Paragraph("Performance commerciale", s_h2))
+    sales = api_sales()
+    if sales:
+        ratios = [0.30, 0.18, 0.20, 0.17, 0.15]
+        col_w  = [doc.width * r for r in ratios]
+        rows = [[Paragraph(h, s_th_r if i in (1,2,4) else s_th)
+                 for i, h in enumerate(["Commercial", "AUM Financé", "Pipeline Actif", "Marché", "Conversion"])]]
+        for s in sales:
+            rows.append([
+                Paragraph(s["nom"][:32], s_td),
+                Paragraph(fmt(s["funded_aum"]), s_td_r),
+                Paragraph(fmt(s["pipeline_aum"]), s_td_r),
+                Paragraph(s.get("marche", "")[:18], s_td),
+                Paragraph("{} %".format(s["conversion"]), s_td_r),
+            ])
+        tbl = Table(rows, colWidths=col_w, repeatRows=1)
+        tbl.setStyle(TableStyle([
+            ("BACKGROUND", (0,0),(-1,0), MARINE),
+            ("LINEBELOW",  (0,0),(-1,0), 1.2, CIEL),
+            ("ROWBACKGROUNDS", (0,1),(-1,-1), [LIGHT, BLANC]),
+            ("VALIGN",     (0,0),(-1,-1), "MIDDLE"),
+            ("TOPPADDING", (0,0),(-1,-1), 4),
+            ("BOTTOMPADDING", (0,0),(-1,-1), 4),
+            ("LEFTPADDING",   (0,0),(-1,-1), 6),
+            ("RIGHTPADDING",  (0,0),(-1,-1), 6),
+        ]))
+        story.append(tbl)
+    else:
+        story.append(Paragraph("Équipe commerciale non renseignée.", s_body))
+    story.append(Spacer(1, 14))
+
+    # ── REGIONS ─────────────────────────────────────────────────
+    story.append(Paragraph("AUM Financé par région", s_h2))
+    regions = api_regions()
+    if regions:
+        ratios = [0.50, 0.30, 0.20]
+        col_w  = [doc.width * r for r in ratios]
+        rows = [[Paragraph(h, s_th_r if i>0 else s_th)
+                 for i, h in enumerate(["Région", "AUM Financé", "Part"])]]
+        total = sum(r["aum"] for r in regions) or 1
+        for r in regions:
+            pct = r["aum"] / total * 100
+            rows.append([
+                Paragraph(r["region"], s_td),
+                Paragraph(fmt(r["aum"]), s_td_r),
+                Paragraph("{:.1f} %".format(pct), s_td_r),
+            ])
+        tbl = Table(rows, colWidths=col_w, repeatRows=1)
+        tbl.setStyle(TableStyle([
+            ("BACKGROUND", (0,0),(-1,0), MARINE),
+            ("LINEBELOW",  (0,0),(-1,0), 1.2, CIEL),
+            ("ROWBACKGROUNDS", (0,1),(-1,-1), [LIGHT, BLANC]),
+            ("VALIGN",     (0,0),(-1,-1), "MIDDLE"),
+            ("TOPPADDING", (0,0),(-1,-1), 4),
+            ("BOTTOMPADDING", (0,0),(-1,-1), 4),
+            ("LEFTPADDING",   (0,0),(-1,-1), 6),
+            ("RIGHTPADDING",  (0,0),(-1,-1), 6),
+        ]))
+        story.append(tbl)
+
+    story.append(Spacer(1, 22))
+    story.append(Paragraph(
+        "<i>Document strictement confidentiel · usage interne exclusif. "
+        "Reproduction et diffusion externe interdites.</i>",
+        ParagraphStyle("disc", fontName="Helvetica-Oblique", fontSize=7,
+                       textColor=GREY, alignment=TA_CENTER)))
+
+    doc.build(story)
+    return buf.getvalue()
+
+
+def _build_pptx_report() -> bytes:
+    """Generate a 3-slide executive PPTX (Cover, KPIs, Top Deals)."""
+    from pptx import Presentation
+    from pptx.util import Inches, Pt
+    from pptx.dml.color import RGBColor
+    from pptx.enum.text import PP_ALIGN
+
+    def rgb(hexs):
+        h = hexs.lstrip("#")
+        return RGBColor(int(h[0:2],16), int(h[2:4],16), int(h[4:6],16))
+
+    MARINE = rgb("#001c4b")
+    CIEL   = rgb("#019ee1")
+    BLANC  = rgb("#ffffff")
+    LIGHT  = rgb("#f4f6fa")
+    GREY   = rgb("#6B7280")
+
+    prs = Presentation()
+    prs.slide_width  = Inches(13.33)
+    prs.slide_height = Inches(7.5)
+    blank = prs.slide_layouts[6]
+
+    def rect(slide, x, y, w, h, color):
+        sh = slide.shapes.add_shape(1, Inches(x), Inches(y), Inches(w), Inches(h))
+        sh.fill.solid(); sh.fill.fore_color.rgb = color
+        sh.line.fill.background()
+        return sh
+
+    def text(slide, txt, x, y, w, h, fs, bold=False, color=None, align=PP_ALIGN.LEFT):
+        tb = slide.shapes.add_textbox(Inches(x), Inches(y), Inches(w), Inches(h))
+        tf = tb.text_frame; tf.word_wrap = True
+        p = tf.paragraphs[0]; p.alignment = align
+        r = p.add_run(); r.text = str(txt)
+        r.font.size = Pt(fs); r.font.bold = bold
+        if color: r.font.color.rgb = color
+        return tb
+
+    def fmt(v):
+        v = float(v or 0)
+        if v >= 1e9:  return "{:.2f} Md\u20ac".format(v/1e9)
+        if v >= 1e6:  return "{:.1f} M\u20ac".format(v/1e6)
+        if v >= 1e3:  return "{:.0f} k\u20ac".format(v/1e3)
+        return "{:.0f} \u20ac".format(v)
+
+    # ── SLIDE 1 — COVER + KPIs ─────────────────────────────────────────────
+    s1 = prs.slides.add_slide(blank)
+    rect(s1, 0, 0, 13.33, 2.6, MARINE)
+    rect(s1, 0, 2.6, 13.33, 0.06, CIEL)
+    text(s1, "MERIDIAN CAPITAL — EXECUTIVE REPORT",
+         0.5, 0.4, 12.0, 0.4, 11, color=CIEL)
+    text(s1, "Pipeline & Performance",
+         0.5, 0.85, 12.0, 0.9, 32, bold=True, color=BLANC)
+    text(s1, date.today().strftime("%d %B %Y").upper(),
+         0.5, 1.85, 6.0, 0.4, 11, color=rgb("#7ab8d8"))
+
+    k = api_kpis()
+    kpis = [
+        ("AUM Financ\u00e9 Total", fmt(k["total_funded"]),    CIEL),
+        ("Pipeline Actif",         fmt(k["pipeline_actif"]),   rgb("#1a5e8a")),
+        ("Pipeline Pond\u00e9r\u00e9", fmt(k["weighted_pipeline"]), rgb("#f07d00")),
+        ("Conversion",             "{:.1f} %".format(k["taux_conversion"]), rgb("#22a062")),
+    ]
+    for i, (lbl, val, accent) in enumerate(kpis):
+        x = 0.5 + i * 3.15
+        rect(s1, x, 3.0, 2.95, 1.7, MARINE)
+        rect(s1, x, 3.0, 2.95, 0.07, accent)
+        text(s1, lbl, x+0.15, 3.15, 2.7, 0.4,  9, color=rgb("#7ab8d8"))
+        text(s1, val, x+0.15, 3.55, 2.7, 1.0, 22, bold=True, color=BLANC)
+
+    text(s1, "Document confidentiel · usage interne exclusif",
+         0.5, 7.05, 12.5, 0.3, 8, color=GREY, align=PP_ALIGN.CENTER)
+
+    # ── SLIDE 2 — TOP DEALS ─────────────────────────────────────────────
+    s2 = prs.slides.add_slide(blank)
+    rect(s2, 0, 0, 13.33, 0.7, MARINE)
+    text(s2, "Top Deals — AUM Financ\u00e9", 0.5, 0.18, 11.0, 0.4, 14, bold=True, color=BLANC)
+    text(s2, date.today().strftime("%d/%m/%Y"), 11.0, 0.18, 2.0, 0.4, 11,
+         color=rgb("#7ab8d8"), align=PP_ALIGN.RIGHT)
+
+    deals = [d for d in api_deals() if d["statut"] == "Funded"][:10]
+    headers = ["#", "Client", "Fonds", "Pays", "Commercial", "AUM Financ\u00e9"]
+    col_w = [0.55, 3.6, 2.1, 1.7, 2.0, 2.0]
+    col_x = [0.5]
+    for w in col_w[:-1]:
+        col_x.append(col_x[-1] + w)
+
+    hy = 1.0
+    for hi, (h, x, w) in enumerate(zip(headers, col_x, col_w)):
+        rect(s2, x, hy, w, 0.45, MARINE)
+        text(s2, h, x+0.06, hy+0.07, w-0.12, 0.32, 9, bold=True, color=BLANC)
+
+    if deals:
+        for ri, d in enumerate(deals):
+            ry = hy + 0.45 + ri * 0.5
+            bg = LIGHT if ri % 2 == 0 else BLANC
+            row = [
+                str(ri + 1),
+                (d.get("client") or "")[:32],
+                (d.get("fonds") or "")[:22],
+                (d.get("country") or d.get("region") or "—")[:16],
+                (d.get("sales_owner") or "—")[:20],
+                fmt(d.get("funded_aum", 0)),
+            ]
+            for vi, (val, x, w) in enumerate(zip(row, col_x, col_w)):
+                rect(s2, x, ry, w, 0.46, bg)
+                clr = CIEL if vi == 5 else MARINE
+                fw  = True  if vi == 5 else False
+                text(s2, val, x+0.06, ry+0.10, w-0.12, 0.32, 9, bold=fw, color=clr)
+    else:
+        text(s2, "Aucun deal Funded enregistr\u00e9.",
+             0.5, 1.7, 12.0, 0.4, 12, color=GREY)
+
+    # ── SLIDE 3 — SALES PERFORMANCE ─────────────────────────────────────────────
+    s3 = prs.slides.add_slide(blank)
+    rect(s3, 0, 0, 13.33, 0.7, MARINE)
+    text(s3, "Performance commerciale", 0.5, 0.18, 12.0, 0.4, 14, bold=True, color=BLANC)
+
+    sales = api_sales()
+    if sales:
+        for i, s in enumerate(sales[:6]):
+            col = i % 3
+            row = i // 3
+            x = 0.5 + col * 4.25
+            y = 1.2 + row * 2.8
+            rect(s3, x, y, 4.0, 2.4, LIGHT)
+            rect(s3, x, y, 4.0, 0.08, CIEL)
+            text(s3, s["nom"], x+0.2, y+0.15, 3.6, 0.4, 14, bold=True, color=MARINE)
+            text(s3, s.get("marche", ""), x+0.2, y+0.55, 3.6, 0.3, 9, color=GREY)
+            text(s3, "AUM Financ\u00e9", x+0.2, y+0.95, 1.7, 0.25, 8, color=GREY)
+            text(s3, fmt(s["funded_aum"]), x+0.2, y+1.20, 1.7, 0.4, 14, bold=True, color=MARINE)
+            text(s3, "Pipeline", x+2.05, y+0.95, 1.7, 0.25, 8, color=GREY)
+            text(s3, fmt(s["pipeline_aum"]), x+2.05, y+1.20, 1.7, 0.4, 14, bold=True, color=CIEL)
+            text(s3, "Conversion : {} %".format(s["conversion"]),
+                 x+0.2, y+1.85, 3.6, 0.3, 9, color=MARINE)
+    else:
+        text(s3, "\u00c9quipe commerciale non renseign\u00e9e.",
+             0.5, 1.5, 12.0, 0.4, 12, color=GREY)
+
+    text(s3, "Document confidentiel · usage interne exclusif",
+         0.5, 7.05, 12.5, 0.3, 8, color=GREY, align=PP_ALIGN.CENTER)
+
+    out = io.BytesIO()
+    prs.save(out)
+    return out.getvalue()
+
+
+@app.get("/api/export/pdf")
+def api_export_pdf():
+    data = _build_pdf_report()
+    return Response(
+        content=data,
+        media_type="application/pdf",
+        headers={"Content-Disposition":
+                 "attachment; filename=meridian_executive_{}.pdf".format(date.today().isoformat())},
+    )
+
+
+@app.get("/api/export/pptx")
+def api_export_pptx():
+    data = _build_pptx_report()
+    return Response(
+        content=data,
+        media_type="application/vnd.openxmlformats-officedocument.presentationml.presentation",
+        headers={"Content-Disposition":
+                 "attachment; filename=meridian_executive_{}.pptx".format(date.today().isoformat())},
+    )
+
+
 @app.post("/api/admin/reset")
 def api_admin_reset():
     db.reset_database()

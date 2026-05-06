@@ -276,8 +276,14 @@ body{background:#F0F2F5;}
 .map-stat-val{font-size:18px;font-weight:800;color:#001c4b;letter-spacing:-.6px;}
 .map-stat-sub{font-size:10.5px;color:#6B7280;font-weight:500;margin-top:1px;}
 /* ── NETWORK GRAPH — pro ── */
-.network-canvas-pro{position:relative;width:100%;height:340px;background:radial-gradient(circle at 50% 50%,#fff 0%,#F0F4FA 70%,#E5EDF7 100%);border-radius:14px;border:0.5px solid rgba(0,28,75,0.1);overflow:hidden;}
+.network-canvas-pro{position:relative;width:100%;height:480px;background:radial-gradient(circle at 50% 50%,#fff 0%,#F0F4FA 70%,#E5EDF7 100%);border-radius:14px;border:0.5px solid rgba(0,28,75,0.1);overflow:hidden;cursor:grab;}
+.network-canvas-pro.dragging{cursor:grabbing;}
 .network-canvas-pro::before{content:'';position:absolute;inset:0;background-image:radial-gradient(circle,rgba(0,28,75,0.04) 1px,transparent 1.5px);background-size:30px 30px;pointer-events:none;}
+.network-inner{position:absolute;inset:0;transform-origin:50% 50%;transform:translate(0,0) scale(1);transition:transform .05s linear;will-change:transform;}
+.network-zoom-bar{position:absolute;top:12px;right:12px;display:flex;flex-direction:column;gap:4px;background:rgba(255,255,255,0.85);backdrop-filter:blur(6px);padding:5px;border-radius:10px;border:0.5px solid rgba(0,0,0,.05);z-index:30;}
+.network-zoom-btn{width:28px;height:28px;border:none;border-radius:7px;background:transparent;cursor:pointer;font-size:14px;font-weight:800;color:#001c4b;display:flex;align-items:center;justify-content:center;transition:background .12s;}
+.network-zoom-btn:hover{background:#EEF4FB;}
+.network-zoom-btn.reset{font-size:11px;}
 .net-node{position:absolute;border-radius:50%;display:flex;align-items:center;justify-content:center;text-align:center;font-weight:700;line-height:1.15;cursor:default;transition:transform .25s ease,box-shadow .25s ease,filter .25s ease;}
 .net-node:hover{transform:scale(1.12);z-index:20;filter:brightness(1.05);}
 .net-node.center{width:96px;height:96px;background:radial-gradient(circle at 30% 30%,#0F3A7A 0%,#001c4b 70%);color:#fff;font-size:10.5px;box-shadow:0 8px 28px rgba(0,28,75,0.45),inset 0 0 0 3px rgba(255,255,255,0.18);border:none;}
@@ -313,9 +319,14 @@ body{background:#F0F2F5;}
     <div class="hdr-title">Bonjour, Sophie 👋</div>
     <div class="hdr-date" id="today-date"></div>
   </div>
-  <div style="display:flex;gap:8px;align-items:center;">
+  <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;">
+    <div class="btn-group" id="export-group">
+      <button class="btn-tab" data-action="export-pdf"   title="Télécharger le rapport PDF">📄 PDF</button>
+      <button class="btn-tab" data-action="export-pptx"  title="Télécharger le rapport PowerPoint">📊 PPTX</button>
+      <button class="btn-tab" data-action="export-excel" title="Télécharger le backup Excel">📥 Excel</button>
+      <button class="btn-tab" data-action="export-mail"  title="Envoyer le rapport par email">✉️ Email</button>
+    </div>
     <button class="btn btn-ghost" data-action="seed-demo" title="Charger des données de démonstration">🌱 Demo</button>
-    <button class="btn btn-ghost" data-action="export-excel" title="Exporter Excel">📥 Excel</button>
     <button class="btn btn-ghost" data-action="reset-db" title="Vider la base">🗑️ Reset</button>
     <div class="live-badge"><div class="dot"></div><span id="live-badge-text">Live · Connexion…</span></div>
   </div>
@@ -516,7 +527,10 @@ body{background:#F0F2F5;}
     <!-- Colonne gauche : liste clients -->
     <div class="crm-list">
       <div class="crm-list-header">
-        <div class="sec-title" style="margin-bottom:0;">Clients <span class="sec-sub" id="crm-count">— actifs</span></div>
+        <div style="display:flex;align-items:center;justify-content:space-between;gap:8px;">
+          <div class="sec-title" style="margin-bottom:0;">Clients <span class="sec-sub" id="crm-count">— actifs</span></div>
+          <button class="btn btn-primary" data-action="new-client" title="Créer un nouveau client" style="padding:6px 12px;font-size:11.5px;">+ Nouveau</button>
+        </div>
         <input class="crm-list-search" type="text" placeholder="Rechercher un client…" id="crm-search">
       </div>
       <div id="crm-client-list"></div>
@@ -530,11 +544,14 @@ body{background:#F0F2F5;}
           <div class="crm-360-badges" id="c360-badges"></div>
         </div>
         <div style="text-align:right;flex-shrink:0;display:flex;flex-direction:column;align-items:flex-end;gap:6px;">
-          <div>
-            <div style="font-size:10px;text-transform:uppercase;letter-spacing:.6px;color:#9CA3AF;font-weight:500;margin-bottom:4px;">Score Relation</div>
+          <div title="Score de Santé Client : agrège AUM, deals actifs, activités récentes et statut KYC.&#10;Calcul : 30% AUM total + 25% nb deals actifs + 25% activités/mois + 20% KYC validé">
+            <div style="font-size:10px;text-transform:uppercase;letter-spacing:.6px;color:#9CA3AF;font-weight:500;margin-bottom:4px;display:flex;align-items:center;gap:4px;justify-content:flex-end;">
+              Score Santé <span style="cursor:help;font-size:11px;">ⓘ</span>
+            </div>
             <div style="font-size:26px;font-weight:800;color:#001c4b;letter-spacing:-1px;" id="c360-score">—<span style="font-size:13px;color:#9CA3AF;font-weight:400;">/100</span></div>
+            <div id="c360-score-detail" style="font-size:9.5px;color:#9CA3AF;margin-top:3px;font-weight:500;">—</div>
           </div>
-          <div style="display:flex;gap:6px;">
+          <div style="display:flex;gap:6px;flex-wrap:wrap;">
             <button class="btn btn-ghost" data-action="edit-client" title="Modifier le client">✎ Modifier</button>
             <button class="btn btn-ghost" data-action="delete-client" title="Supprimer le client" style="color:#DC2626;border-color:#FECACA;">🗑 Supprimer</button>
             <button class="btn btn-primary" data-action="new-deal-for-client" title="Ajouter un deal">+ Deal</button>
@@ -1021,9 +1038,22 @@ async function load360(clientId) {
     document.getElementById('c360-meta').textContent = flagFor(data.country, data.region) + ' '
       + (data.country || data.region || '—') + ' · ' + (data.type_client||'—')
       + (data.primary_contact ? ' · Contact: ' + data.primary_contact : '');
-    const score = Math.round(50 + (data.aum_total || 0) / 1e7);
+    // Transparent Health Score formula (0-100)
+    // 30% AUM (capped at 200M), 25% active deals, 25% activities, 20% KYC
+    const aumScore   = Math.min((data.aum_total || 0) / 200e6, 1) * 30;
+    const dealsScore = Math.min((data.nb_active_deals || 0) / 5, 1) * 25;
+    const actScore   = Math.min((data.nb_activities || 0) / 10, 1) * 25;
+    const kycScore   = data.kyc_status === 'Validé' ? 20 : (data.kyc_status === 'En cours' ? 10 : 0);
+    const score = Math.round(aumScore + dealsScore + actScore + kycScore);
+    const scoreFinal = Math.max(0, Math.min(100, score));
+    const scoreColor = scoreFinal >= 70 ? '#059669' : (scoreFinal >= 40 ? '#F59E0B' : '#DC2626');
     document.getElementById('c360-score').innerHTML =
-      Math.min(99, score) + '<span style="font-size:13px;color:#9CA3AF;font-weight:400;">/100</span>';
+      '<span style="color:'+scoreColor+';">'+scoreFinal+'</span><span style="font-size:13px;color:#9CA3AF;font-weight:400;">/100</span>';
+    const detailEl = document.getElementById('c360-score-detail');
+    if (detailEl) {
+      detailEl.innerHTML = 'AUM: '+Math.round(aumScore)+' · Deals: '+Math.round(dealsScore)
+                         + ' · Act: '+Math.round(actScore)+' · KYC: '+kycScore;
+    }
     // Badges
     const cls = STATUT_BADGE_CLS[data.dominant_statut] || 'tag';
     document.getElementById('c360-badges').innerHTML =
@@ -1190,20 +1220,80 @@ function renderNetwork(network) {
       + '</div>';
   });
 
-  // Premium legend
-  nodes += '<div class="net-legend-pro">'
+  // Premium legend (outside the inner so it stays at fixed position when zooming)
+  const legend = '<div class="net-legend-pro">'
     + '<span><span class="dot parent"></span>Groupe</span>'
     + '<span><span class="dot sub"></span>Filiale</span>'
     + '<span><span class="dot fund"></span>Fonds</span>'
     + '</div>';
 
-  canvas.innerHTML = svg + nodes;
+  // Zoom controls
+  const zoomBar = '<div class="network-zoom-bar">'
+    + '<button class="network-zoom-btn" id="net-zoom-in"  title="Zoom +">＋</button>'
+    + '<button class="network-zoom-btn" id="net-zoom-out" title="Zoom −">−</button>'
+    + '<button class="network-zoom-btn reset" id="net-zoom-reset" title="Recentrer">⌂</button>'
+    + '</div>';
+
+  canvas.innerHTML = '<div class="network-inner" id="net-inner">' + svg + nodes + '</div>'
+                   + legend + zoomBar;
+
+  // Wire zoom/pan
+  initNetworkZoom();
+
   const subEl = document.getElementById('c360-network-sub');
   if (subEl) {
     subEl.textContent = 'Intelligence réseau · ' + subs.length + ' filiale(s) · '
       + funds.length + ' lien(s) fonds · '
-      + funds.filter(f => f.statut === 'Funded').length + ' actif(s)';
+      + funds.filter(f => f.statut === 'Funded').length + ' actif(s) · scroll pour zoomer · drag pour déplacer';
   }
+}
+
+let NET_ZOOM = 1.0, NET_X = 0, NET_Y = 0;
+function initNetworkZoom() {
+  const canvas = document.getElementById('network-canvas');
+  const inner  = document.getElementById('net-inner');
+  if (!canvas || !inner) return;
+  NET_ZOOM = 1.0; NET_X = 0; NET_Y = 0;
+  applyNetTransform();
+
+  const apply = () => applyNetTransform();
+  const setZoom = (z) => { NET_ZOOM = Math.max(0.5, Math.min(3, z)); apply(); };
+
+  document.getElementById('net-zoom-in').onclick    = () => setZoom(NET_ZOOM * 1.25);
+  document.getElementById('net-zoom-out').onclick   = () => setZoom(NET_ZOOM / 1.25);
+  document.getElementById('net-zoom-reset').onclick = () => { NET_ZOOM = 1; NET_X = 0; NET_Y = 0; apply(); };
+
+  // Wheel zoom
+  canvas.onwheel = (e) => {
+    e.preventDefault();
+    const delta = -e.deltaY;
+    setZoom(NET_ZOOM * (delta > 0 ? 1.12 : 1 / 1.12));
+  };
+
+  // Drag to pan
+  let dragging = false, startX = 0, startY = 0, origX = 0, origY = 0;
+  canvas.onmousedown = (e) => {
+    if (e.target.closest('.network-zoom-bar')) return;
+    dragging = true;
+    startX = e.clientX; startY = e.clientY;
+    origX  = NET_X;     origY  = NET_Y;
+    canvas.classList.add('dragging');
+  };
+  document.onmousemove = (e) => {
+    if (!dragging) return;
+    NET_X = origX + (e.clientX - startX);
+    NET_Y = origY + (e.clientY - startY);
+    apply();
+  };
+  document.onmouseup = () => {
+    if (!dragging) return;
+    dragging = false;
+    canvas.classList.remove('dragging');
+  };
+}
+function applyNetTransform() {
+  const inner = document.getElementById('net-inner');
+  if (inner) inner.style.transform = 'translate('+NET_X+'px,'+NET_Y+'px) scale('+NET_ZOOM+')';
 }
 
 function truncate(s, n) {
@@ -1373,8 +1463,12 @@ function renderChoropleth(payload) {
     dragmode:      false,
   };
   Plotly.newPlot('choropleth-map', [trace], layout, {
-    displayModeBar: false, responsive: true,
-    scrollZoom: false, doubleClick: false,
+    displayModeBar:    'hover',
+    displaylogo:       false,
+    modeBarButtonsToRemove: ['lasso2d', 'select2d', 'toggleSpikelines', 'autoScale2d'],
+    responsive:        true,
+    scrollZoom:        true,
+    doubleClick:       'reset',
   });
 }
 
@@ -2121,6 +2215,41 @@ async function adminReset() {
 
 function adminExportExcel() {
   window.location.href = '/api/export/excel';
+  toast('Téléchargement Excel…', 'success');
+}
+
+function adminExportPdf() {
+  window.location.href = '/api/export/pdf';
+  toast('Téléchargement PDF…', 'success');
+}
+
+function adminExportPptx() {
+  window.location.href = '/api/export/pptx';
+  toast('Téléchargement PowerPoint…', 'success');
+}
+
+async function adminExportMail() {
+  // Prepare a mailto: with the report summary in the body
+  try {
+    const k = await API('/api/kpis');
+    const subject = encodeURIComponent('Meridian Capital — Executive Report ' + new Date().toLocaleDateString('fr-FR'));
+    const body = encodeURIComponent(
+      'Bonjour,\n\nVoici la synthèse Meridian Capital du jour :\n\n' +
+      '• AUM Financé Total : '   + fmtM(k.total_funded)      + '\n' +
+      '• Pipeline Actif : '       + fmtM(k.pipeline_actif)    + '\n' +
+      '• Pipeline Pondéré : '     + fmtM(k.weighted_pipeline) + '\n' +
+      '• Taux de Conversion : '   + (k.taux_conversion||0).toFixed(1) + ' %\n' +
+      '• Deals actifs : '         + (k.nb_deals_actifs||0)    + '\n' +
+      '• Deals funded : '         + (k.nb_funded||0)          + '\n\n' +
+      'Pour le rapport détaillé, joindre le PDF téléchargé via le bouton "📄 PDF".\n\n' +
+      'Bien cordialement,\n— Meridian Capital CRM');
+    // Open mail client + auto-download the PDF for attachment
+    window.open('mailto:?subject=' + subject + '&body=' + body, '_blank');
+    setTimeout(() => { window.location.href = '/api/export/pdf'; }, 600);
+    toast('Email + PDF préparés', 'success');
+  } catch (e) {
+    toast('Erreur: ' + e.message, 'error');
+  }
 }
 
 /* ── Hook all data-action triggers ── */
@@ -2135,6 +2264,9 @@ document.addEventListener('click', e => {
   if (action === 'seed-demo')     adminSeedDemo();
   if (action === 'reset-db')      adminReset();
   if (action === 'export-excel')  adminExportExcel();
+  if (action === 'export-pdf')    adminExportPdf();
+  if (action === 'export-pptx')   adminExportPptx();
+  if (action === 'export-mail')   adminExportMail();
   if (action === 'edit-deal')     {
     const id = parseInt(t.dataset.id);
     fetch('/api/deals/'+id).then(r => r.json()).then(d => openDealModal(d));
